@@ -1,0 +1,32 @@
+# Installed via apt on Ubuntu 24.04:
+#   sudo apt install python3-pyqt6 python3-pyqt6.qtmultimedia python3-numpy python3-scipy \
+#                     python3-pyqtgraph python3-soapysdr python3-pyaudio
+#
+# Listed here for reference / pip-based environments:
+PyQt6>=6.6
+numpy>=1.26
+scipy>=1.11
+pyqtgraph>=0.13
+# SoapySDR and PyAudio have no reliable prebuilt wheels on most platforms;
+# install the system packages above instead of pip installing these two.
+#
+# python3-pyqt6.qtmultimedia (QtMultimedia bindings, used by the Odtwarzacz
+# tab's audio player) is a separate apt package on Ubuntu even though it's
+# bundled in the pip PyQt6 wheel.
+#
+# --- Transkrypcja (zakładka Odtwarzacz) -------------------------------------
+# faster-whisper (i jego zależności: ctranslate2, av, tokenizers...) NIE jest
+# instalowany do systemowego Pythona - Ubuntu 24.04 blokuje to (PEP 668), a
+# poza tym to sporo wagi (modele ASR), więc trzyma się to w osobnym venv:
+#
+#   python3 -m venv --system-site-packages .venv
+#   .venv/bin/pip install faster-whisper
+#   # opcjonalnie, jeśli chcesz transkrypcję na GPU (NVIDIA/CUDA):
+#   .venv/bin/pip install nvidia-cublas-cu12 nvidia-cudnn-cu12
+#
+# --system-site-packages sprawia, że venv nadal widzi systemowe PyQt6/numpy,
+# więc reszta programu działa tak samo. main.py sam przełącza się w ten venv
+# przy starcie (jeśli istnieje), więc uruchamianie "python3 main.py" się nie
+# zmienia. Modele Whisper (duże, ~1.5 GB + ~0.8 GB) pobierają się same z
+# Hugging Face przy pierwszej transkrypcji i lądują w ~/.cache/huggingface.
+faster-whisper>=1.2

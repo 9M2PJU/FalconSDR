@@ -1,0 +1,14 @@
+# Python virtual environment
+.venv/
+venv/
+
+# Python bytecode
+__pycache__/
+*.pyc
+*.pyo
+
+# Claude Code local (per-machine) permission settings - not project config
+.claude/settings.local.json
+
+# OS cruft
+.DS_Store
