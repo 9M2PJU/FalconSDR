@@ -21,6 +21,7 @@ is cheap enough that even a handful running at once is a non-issue.
 """
 from __future__ import annotations
 
+import os
 import threading
 import time
 
@@ -38,6 +39,16 @@ from .sdr_backend import SoapyBackend, create_backend
 AUDIO_RATE = 12500
 CHUNK_SECONDS = 0.03
 MAX_VFO_CHANNELS = 20_000
+# Reuses SMARTSCAN_DEBUG_LIVE_AUDIO (see live-audio debugging history) to
+# also gate a once-a-second scanner-loop timing summary: how many SCANNING
+# ticks in the last second took longer than CHUNK_SECONDS to process (demod
+# + noise reduction, per active slot), the worst one, and the live-audio
+# ring buffer's current fill level (see AudioOutput.buffered_seconds) - a
+# genuine CPU-throughput deficit (ticks consistently over budget) looks
+# different from real-time thread-priority starvation (which SCHED_FIFO,
+# see _maybe_boost_priority, would have already fixed) and needs a
+# different fix (less/faster work per tick, not a scheduling nudge).
+_DEBUG_TIMING = os.environ.get("SMARTSCAN_DEBUG_LIVE_AUDIO") == "1"
 # Reconnect attempts after the SDR drops out (flaky USB dongles, cable
 # issues, etc.) retry at a constant fast interval - never longer than 2s -
 # so a user can physically unplug/replug the dongle a few times in a row
@@ -166,6 +177,61 @@ def _wide_anchor_windows(freqs: list[int], band: VfoRangeConfig, sample_rate: fl
     return [left] if left.freqs == right.freqs else [left, right]
 
 
+class _SpectrumWorker:
+    """Runs spectrum_snapshot() (an FFT over the *whole* captured IQ block -
+    tens of thousands of samples, a much bigger FFT than anything in the
+    demod/noise-reduction path, which only ever sees the much shorter
+    per-channel *audio* output) on its own thread, decoupled from the
+    scanner thread the same way AudioOutput decouples PortAudio's writes
+    (see its docstring) - live audio has a real-time deadline and a slow
+    spectrum frame must never be allowed to delay it. This purely feeds the
+    GUI's spectrum widget from the raw IQ - it never touches demodulated
+    audio or the recorder, so recording is completely unaffected by this.
+
+    Only ever keeps the *latest* submitted job: if the worker is still busy
+    when a newer one arrives, the older one is simply dropped instead of
+    queueing up and falling behind - fine for a refresh-rate visual display
+    (a skipped frame is imperceptible), never fine for audio.
+    """
+
+    def __init__(self, signals: "ScannerSignals"):
+        self._signals = signals
+        self._lock = threading.Lock()
+        self._pending: tuple | None = None
+        self._wake = threading.Event()
+        self._stop_evt = threading.Event()
+        self._thread = threading.Thread(target=self._run, daemon=True)
+        self._thread.start()
+
+    def submit(self, iq: np.ndarray, sample_rate: float, center_hz: float, trigger_dbfs: float) -> None:
+        with self._lock:
+            self._pending = (iq, sample_rate, center_hz, trigger_dbfs)
+        self._wake.set()
+
+    def stop(self) -> None:
+        self._stop_evt.set()
+        self._wake.set()
+        self._thread.join(timeout=1.0)
+
+    def _run(self) -> None:
+        while True:
+            self._wake.wait()
+            self._wake.clear()
+            if self._stop_evt.is_set():
+                return
+            with self._lock:
+                job = self._pending
+                self._pending = None
+            if job is None:
+                continue
+            iq, sample_rate, center_hz, trigger_dbfs = job
+            try:
+                freqs, db = spectrum_snapshot(iq, sample_rate, center_hz)
+                self._signals.spectrum_ready.emit(freqs, db, trigger_dbfs)
+            except Exception:
+                pass
+
+
 class _Slot:
     """One in-progress transmission being demodulated/recorded. Unlike the
     scheduling data above (shared, rebuilt wholesale by _rebuild_windows),
@@ -223,6 +289,7 @@ class ScannerEngine(threading.Thread):
 
         self._backend = None
         self._audio_out: AudioOutput | None = None
+        self._spectrum_worker: _SpectrumWorker | None = None
 
         # Guards the scheduling state below, which _rebuild_windows() replaces
         # wholesale (from the GUI thread) while _next_window() reads/advances
@@ -248,6 +315,12 @@ class ScannerEngine(threading.Thread):
         self._applied_gain_mode = ""
         self._applied_gain_db = None
         self._had_real_hardware = False
+
+        # SMARTSCAN_DEBUG_LIVE_AUDIO-gated timing stats - see _DEBUG_TIMING.
+        self._tick_n = 0
+        self._tick_over_budget = 0
+        self._tick_max_s = 0.0
+        self._tick_report_at = 0.0
 
     # -- public control (safe to call from the GUI thread) -----------
     def request_stop(self) -> None:
@@ -291,7 +364,31 @@ class ScannerEngine(threading.Thread):
         self._rebuild_windows()
 
     # -- thread body ---------------------------------------------------
+    def _maybe_boost_priority(self) -> None:
+        """Best-effort: ask the OS to schedule this thread with real-time
+        priority (SCHED_FIFO), the same technique real-time audio servers
+        (JACK, PipeWire's own RT thread) use, so it gets CPU time promptly
+        and predictably instead of waiting its turn behind whatever else the
+        desktop happens to be doing right now - directly attacking the
+        "momentarily too slow to keep up with real time" root cause behind
+        live-audio underruns (see audio_output.py). Linux-only, and needs
+        either root or a system-granted rtprio allowance (commonly already
+        set up for the "audio" group on desktop distros via
+        /etc/security/limits.d - PipeWire itself relies on the same thing).
+        Silently does nothing if neither is available: this is purely a
+        "nice to have if the system allows it" improvement, deliberately
+        never a hard requirement - scanning and recording work identically
+        either way, only live-audio smoothness benefits."""
+        if not hasattr(os, "sched_setscheduler"):
+            return  # not Linux
+        try:
+            tid = threading.get_native_id()
+            os.sched_setscheduler(tid, os.SCHED_FIFO, os.sched_param(10))
+        except (PermissionError, OSError):
+            pass
+
     def run(self) -> None:
+        self._maybe_boost_priority()
         self._setup_static()
         connected = self._open_backend_with_retry(allow_simulated_fallback=True)
         self._had_real_hardware = connected and self._backend.label != "simulated"
@@ -326,6 +423,7 @@ class ScannerEngine(threading.Thread):
         self._audio_out = AudioOutput(AUDIO_RATE, dev.audio_output_device)
         if not self._audio_out.available:
             self.signals.log.emit("Brak wyjscia audio (PyAudio) - monitorowanie na zywo wylaczone.")
+        self._spectrum_worker = _SpectrumWorker(self.signals)
         self._rebuild_windows()
 
     def _open_backend(self, allow_simulated_fallback: bool) -> None:
@@ -373,6 +471,8 @@ class ScannerEngine(threading.Thread):
             self._close_slot(freq_hz)
         if self._audio_out is not None:
             self._audio_out.close()
+        if self._spectrum_worker is not None:
+            self._spectrum_worker.stop()
         if self._backend is not None:
             self._backend.close()
 
@@ -572,9 +672,11 @@ class ScannerEngine(threading.Thread):
             return ScannerState.SIGNAL_DETECTED
         return ScannerState.LINGER
 
-    def _emit_spectrum(self, iq, sample_rate: float, center_hz: float) -> None:
-        freqs, db = spectrum_snapshot(iq, sample_rate, center_hz)
-        self.signals.spectrum_ready.emit(freqs, db, self.config.trigger_level_dbfs)
+    def _submit_spectrum(self, iq: np.ndarray, sample_rate: float, center_hz: float) -> None:
+        """Hands the raw IQ block to _SpectrumWorker's own thread - never
+        computes the FFT here, on the same thread that also has to keep
+        live audio flowing in real time (see _SpectrumWorker's docstring)."""
+        self._spectrum_worker.submit(iq, sample_rate, center_hz, self.config.trigger_level_dbfs)
 
     def _emit_freqs(self) -> None:
         """Tells the GUI what to show in the frequency display: every
@@ -628,6 +730,7 @@ class ScannerEngine(threading.Thread):
 
             elif state == ScannerState.SCANNING:
                 iq = self._backend.read(chunk)
+                tick_start = time.monotonic() if _DEBUG_TIMING else 0.0
                 window = self._cur_window
 
                 # 1. Advance whatever's already active (demod/play/record,
@@ -653,7 +756,7 @@ class ScannerEngine(threading.Thread):
                     primary_level if primary_level is not None
                     else (best_level if best_level is not None else -120.0)
                 )
-                self._emit_spectrum(iq, sample_rate, window.center_hz)
+                self._submit_spectrum(iq, sample_rate, window.center_hz)
                 self._emit_state(self._display_state())
 
                 if self._skip_evt.is_set() or self._skip_lockout_evt.is_set():
@@ -675,10 +778,41 @@ class ScannerEngine(threading.Thread):
                     state = ScannerState.CALCULATE_NEXT_FREQ
                     self._emit_state(state)
 
+                if _DEBUG_TIMING:
+                    self._record_tick_timing(time.monotonic() - tick_start)
+
         # Stop requested mid-transmission: make sure any open segment(s) are closed.
         for freq_hz in list(self._slots.keys()):
             self._close_slot(freq_hz)
         self._emit_state(ScannerState.IDLE)
+
+    def _record_tick_timing(self, elapsed: float) -> None:
+        """SMARTSCAN_DEBUG_LIVE_AUDIO-gated: once a second, prints how many
+        SCANNING ticks took longer than CHUNK_SECONDS to process (i.e. the
+        real work - demod, noise reduction, per active slot - didn't fit in
+        the time its own chunk represents, a genuine throughput deficit),
+        the worst one, and the live-audio ring buffer's current fill level.
+        A fill level that's climbing tick over tick (not just hovering near
+        the ~0.2s priming cushion) confirms production is outrunning
+        real-time playback rather than the reverse (underrunning)."""
+        self._tick_n += 1
+        if elapsed > CHUNK_SECONDS:
+            self._tick_over_budget += 1
+        self._tick_max_s = max(self._tick_max_s, elapsed)
+        now = time.monotonic()
+        if now - self._tick_report_at < 1.0:
+            return
+        buffered_ms = self._audio_out.buffered_seconds * 1000 if self._audio_out else 0.0
+        print(
+            f"[scanner-timing {time.strftime('%H:%M:%S')}] ticks={self._tick_n} "
+            f"over_budget={self._tick_over_budget} max_tick={self._tick_max_s * 1000:.1f}ms "
+            f"budget={CHUNK_SECONDS * 1000:.0f}ms active_slots={len(self._slots)} "
+            f"audio_buffered={buffered_ms:.0f}ms",
+            flush=True,
+        )
+        self._tick_n = self._tick_over_budget = 0
+        self._tick_max_s = 0.0
+        self._tick_report_at = now
 
     # -- slot management -----------------------------------------------
     def _service_active_slots(self, iq, sample_rate: float, window: ScanWindow) -> float | None:

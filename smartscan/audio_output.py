@@ -50,20 +50,61 @@ same audio played back from a recording, all fixed here:
    audio as context on *both* sides once it's actually played.
 
 3. The scanner thread doesn't just produce audio - every chunk it also
-   demodulates, optionally runs spectral-gate noise reduction, and does a
-   full FFT for the live spectrum view (see ScannerEngine._emit_spectrum),
-   all *before* handing audio to this class. If any of that work is
-   momentarily slower than the chunk's real-time duration (GIL contention,
-   a big FFT at a high capture rate, OS scheduling jitter, ...), calling
-   PortAudio's blocking stream.write() straight from that same thread means
-   PortAudio's own buffer can starve and underrun right along with it -
-   an audible crackle/glitch that has nothing to do with the *content* of
-   the audio (a recording is never subject to a real-time deadline, so it
-   never shows this). Fix: don't call the blocking write() from the busy
-   scanner thread at all. Push resampled audio into a small ring buffer
-   instead (cheap, non-blocking) and let PortAudio pull from it via its own
-   callback, on its own dedicated thread, whenever *it* needs more - fully
-   decoupled from whatever the scanner thread happens to be busy doing.
+   demodulates (and, for however many channels are simultaneously active -
+   see _Slot in scanner_engine.py - does that once per channel), optionally
+   runs spectral-gate noise reduction, and used to also do a full FFT over
+   the raw IQ for the live spectrum view every single tick; that FFT is now
+   off this thread entirely (see _SpectrumWorker in scanner_engine.py), but
+   the rest still isn't, and never fully can be - producing the audio *is*
+   the demod step, it can't be deferred without deferring the audio itself.
+   If any of that momentarily takes longer than the chunk's real-time
+   duration (GIL contention, several channels active at once, OS scheduling
+   jitter, ...), calling PortAudio's blocking stream.write() straight from
+   that same thread means PortAudio's own buffer can starve and underrun
+   right along with it - an audible crackle/glitch that has nothing to do
+   with the *content* of the audio (a recording is never subject to a
+   real-time deadline, so it never shows this). Fix, in two parts:
+   a) don't call the blocking write() from the busy scanner thread at all -
+      push resampled audio into a small ring buffer instead (cheap,
+      non-blocking) and let PortAudio pull from it via its own callback, on
+      its own dedicated thread, whenever *it* needs more - fully decoupled
+      from whatever the scanner thread happens to be busy doing;
+   b) that alone still means a *momentary* production hiccup reaches the
+      speaker as a gap the instant the ring buffer empties out. So the
+      callback also holds real playback back until the buffer has built up
+      a small cushion (_PRIME_SECONDS) before actually starting/resuming -
+      a brief hiccup then eats into that cushion instead of immediately
+      being audible, at the cost of that same small, fixed amount of extra
+      latency whenever playback starts or has to recover from a real
+      underrun. Nothing about this changes what's written to a recording -
+      the recorder (see scanner_engine.py's _play_and_record_slot) writes
+      independently of this class entirely.
+
+4. Even with all of the above, a long listening session would still slowly
+   degrade - fine at first, progressively glitchier as it went on. Captured-
+   and-analyzed live audio (see _CAPTURE_PATH) showed why: the ring buffer's
+   occupancy wasn't just noisy, it was *trending down* over many seconds
+   after every top-up. That's the signature of a genuine, persistent rate
+   mismatch, not jitter - the SDR's sample clock and the sound card's own
+   hardware playback clock are two independent real oscillators that are
+   never *exactly* identical, even both being nominally "correct" (the same
+   reason GStreamer's own audiobasesink logged "correct clock skew" back
+   when live audio still went through it). resample_poly's ratio is exact
+   sample-count math - if production is producing samples fractionally
+   slower, in real time, than its nominal rate assumes, the resampled
+   output represents fractionally less real time than the sound card (which
+   *is* precisely clocked) consumes it in, forever, until corrected. A
+   bigger cushion (point 3b) only delays hitting bottom, it can't prevent
+   it. Fix: a small proportional controller (_correct_drift) compares the
+   ring buffer's level against its target (_prime_len) on every write() and
+   nudges this chunk's sample count by a handful of samples via linear
+   interpolation (_retime) - stretching it fractionally if the buffer's
+   running low, compressing it if it's running high - correcting only a
+   tiny fraction of the error per call so the correction itself is
+   inaudible, converging gradually instead of ever needing one jarring
+   jump. Purely a live-monitoring output-stage nudge - it runs on the
+   already-resampled audio right before it reaches the ring buffer, nothing
+   upstream of this (including what the recorder writes) is touched by it.
 
 The output stream is always opened with 2 channels: mono audio (AM/NFM/WFM
 without stereo) is simply duplicated to L=R, and true stereo audio (WFM with
@@ -73,7 +114,10 @@ Everything below operates on (n, 2) float32 arrays uniformly.
 """
 from __future__ import annotations
 
+import os
 import threading
+import time
+from pathlib import Path
 
 import numpy as np
 from scipy.signal import resample_poly
@@ -83,6 +127,30 @@ try:
     HAVE_PYAUDIO = True
 except ImportError:
     HAVE_PYAUDIO = False
+
+# Same flag as the rest of the live-audio debugging effort (see
+# scanner_engine.py's _DEBUG_TIMING) - when set, also captures every sample
+# actually handed to PortAudio (silence included) to ~/smartscanatc_live_capture.wav
+# on close(), so "what does live monitoring actually sound like" can be
+# inspected/compared against a normal recording of the same transmission
+# after the fact, instead of relying on it being caught by ear in the
+# moment. Purely diagnostic - delete the file when done with it.
+#
+# Pre-allocated (see AudioOutput._capture), not a growing list appended to
+# every callback - a first version did that, and a several-minutes-long
+# capture session turned out to measurably slow the callback down more and
+# more as the list grew (visible as the *captured audio itself* getting
+# glitchier over the course of a long session, independent of - and on top
+# of - whatever the real underlying issue was, actively corrupting exactly
+# the "does it get worse over time" measurement this exists to make).
+_DEBUG = os.environ.get("SMARTSCAN_DEBUG_LIVE_AUDIO") == "1"
+_CAPTURE_PATH = Path.home() / "smartscanatc_live_capture.wav"
+_CAPTURE_MAX_SECONDS = 300.0
+
+
+def _dbg(msg: str) -> None:
+    if _DEBUG:
+        print(f"[audio-output {time.strftime('%H:%M:%S')}] {msg}", flush=True)
 
 # Upper bound on how much resampled audio can pile up in the ring buffer
 # before write() starts dropping the oldest of it - guards against unbounded
@@ -98,6 +166,62 @@ _MAX_BUFFER_SECONDS = 2.0
 # ground for speech-rate audio at typical 44.1/48 kHz output rates.
 _FRAMES_PER_BUFFER = 1024
 
+# How much of a cushion the ring buffer builds up before the callback starts
+# actually playing from it (on session start, and again any time it's
+# genuinely run dry) - see point 3b in the module docstring. 0.2s wasn't
+# enough in practice - captured-and-analyzed live audio (see _CAPTURE_PATH)
+# showed the buffer level slowly bleeding back down from the cushion over a
+# few seconds after every (re-)prime, occasionally reaching zero for a
+# single callback (~20-40ms, audible as a small periodic "hiccup") well
+# before the next real underrun would have re-armed priming. 0.5s gave
+# roughly 4x fewer of those in testing - not zero (see _REPRIME_STREAK's
+# docstring: some of this is a structural production/consumption cadence
+# mismatch that a bigger cushion alone doesn't fully erase, just delays),
+# but a real, measured improvement for a modest extra startup delay.
+_PRIME_SECONDS = 0.5
+
+# How many *consecutive* empty callbacks it takes before re-priming kicks in
+# again after session start. write() (~30ms cadence, paced by the scanner's
+# own chunk size) and the callback (~_FRAMES_PER_BUFFER/output_rate cadence,
+# paced by the audio device's own clock) drain at different, independently-
+# scheduled rates - even when production is genuinely keeping up with real
+# time on average, the buffer can quite normally graze empty for a single
+# callback purely from that timing mismatch, with no real underrun at all.
+# Re-priming (a full _PRIME_SECONDS of enforced silence) on every single one
+# of those normal, harmless grazes was turning brief, barely-there gaps into
+# a real ~200ms silence every time - actively *causing* the periodic
+# choppiness this was supposed to prevent. Requiring several in a row before
+# treating it as a real stall filters that out while still catching genuine
+# sustained underruns.
+_REPRIME_STREAK = 4
+
+# Proportional gain for the drift corrector (see point 4 in the module
+# docstring): fraction of the current buffer-vs-target error (in samples)
+# corrected per write() call. Deliberately small - this trades speed of
+# convergence for making each individual correction inaudible; the ring
+# buffer's cushion (_PRIME_SECONDS) is what actually absorbs the error while
+# this gradually works it back down to zero.
+#
+# Proportional-only isn't actually enough against a *persistent* clock-rate
+# mismatch though: textbook control theory (verified numerically before
+# this shipped) says a P-only controller facing a constant-rate disturbance
+# settles at a permanent offset below/above target instead of ever reaching
+# it - simulating a real, sustained clock mismatch showed the buffer
+# stabilizing at under half its target level rather than actually recovering
+# it. _DRIFT_INTEGRAL_GAIN adds the integral term that's specifically for
+# eliminating exactly that steady-state error - much smaller and clamped
+# (_DRIFT_INTEGRAL_CLAMP) since it accumulates *across* calls instead of
+# reacting only to the current one, and an unclamped integral term can "wind
+# up" during a long startup transient or silence and overshoot once real
+# audio resumes.
+_DRIFT_GAIN = 0.002
+_DRIFT_INTEGRAL_GAIN = 0.00002
+_DRIFT_INTEGRAL_CLAMP = 200.0
+# Never adjust a single chunk's length by more than this fraction of itself
+# in one call, however large the error - keeps every individual correction
+# small even right after a startup/re-prime when the error is at its peak.
+_MAX_DRIFT_ADJUST_FRACTION = 0.25
+
 
 def _to_stereo(audio: np.ndarray) -> np.ndarray:
     """Normalizes demodulator output to an (n, 2) float32 array: mono (n,)
@@ -105,6 +229,22 @@ def _to_stereo(audio: np.ndarray) -> np.ndarray:
     if audio.ndim == 1:
         return np.repeat(audio[:, None], 2, axis=1)
     return audio
+
+
+def _retime(audio: np.ndarray, target_len: int) -> np.ndarray:
+    """Linearly resamples ``audio`` (already at the device's output rate)
+    from its current length to ``target_len`` - used only for the drift
+    corrector's tiny (a handful of samples out of a chunk of hundreds)
+    nudges, so the interpolation error is inaudible. Not used for the real
+    input-rate -> output-rate conversion - that's resample_poly, in
+    AudioOutput._resample_streaming, chosen there specifically for quality."""
+    m = audio.shape[0]
+    if target_len == m or m < 2 or target_len < 2:
+        return audio
+    src_idx = np.linspace(0, m - 1, target_len)
+    idx0 = np.clip(src_idx.astype(np.int64), 0, m - 2)
+    frac = (src_idx - idx0)[:, None]
+    return (audio[idx0] * (1 - frac) + audio[idx0 + 1] * frac).astype(np.float32)
 
 
 class AudioOutput:
@@ -126,6 +266,23 @@ class AudioOutput:
         # see point 3 in the module docstring.
         self._buffer_lock = threading.Lock()
         self._buffer = np.zeros((0, 2), dtype=np.float32)
+        # Fractional carry for the drift corrector (see point 4 and
+        # _correct_drift) - the per-call correction is usually well under
+        # one whole sample, this is what accumulates it until it's actually
+        # due.
+        self._drift_debt = 0.0
+        self._drift_integral = 0.0  # slow-moving bias - see _DRIFT_INTEGRAL_GAIN
+        # True whenever the callback should hold off on real playback until
+        # the buffer has built back up to _prime_len - see point 3b above.
+        # Starts True so the very first playback of a session also gets the
+        # cushion, not just recoveries from a later underrun.
+        self._priming = True
+        self._prime_len = 0
+        self._empty_streak = 0
+        # Pre-allocated fixed-size buffer, not a growing list - see the
+        # _DEBUG constant's docstring for why that matters here specifically.
+        self._capture: np.ndarray | None = None
+        self._capture_pos = 0
         if not HAVE_PYAUDIO:
             return
         try:
@@ -139,7 +296,10 @@ class AudioOutput:
                 kwargs["output_device_index"] = device_index
             self._stream = self._pa.open(**kwargs)
             self.output_rate = output_rate
+            if _DEBUG:
+                self._capture = np.zeros((int(output_rate * _CAPTURE_MAX_SECONDS), 2), dtype=np.float32)
             self._max_buffer_len = int(output_rate * _MAX_BUFFER_SECONDS)
+            self._prime_len = int(output_rate * _PRIME_SECONDS)
             if output_rate != sample_rate:
                 g = int(np.gcd(int(output_rate), int(sample_rate)))
                 self._resample_up = output_rate // g
@@ -164,21 +324,67 @@ class AudioOutput:
     def available(self) -> bool:
         return self._stream is not None
 
+    @property
+    def buffered_seconds(self) -> float:
+        """How much audio is currently queued, waiting to be played -
+        diagnostic only (see SMARTSCAN_DEBUG_LIVE_AUDIO in scanner_engine.py).
+        Hovering near _PRIME_SECONDS is healthy. A value that keeps *growing*
+        tick after tick means production is outrunning real-time playback -
+        the opposite of an underrun, but just as audible: rising delay, then
+        a jump once _MAX_BUFFER_SECONDS forces a skip."""
+        if self.output_rate <= 0:
+            return 0.0
+        with self._buffer_lock:
+            n = self._buffer.shape[0]
+        return n / self.output_rate
+
     def _pa_callback(self, in_data, frame_count, time_info, status):
         """Runs on PortAudio's own thread, on demand - never on the scanner
-        thread, and never blocked by it. Pads with silence on underrun
-        (only possible if the scanner is genuinely producing audio slower
-        than real time, e.g. a CPU-starved machine, not from per-chunk
-        jitter) rather than glitching."""
+        thread, and never blocked by it. Silently primes (see _PRIME_SECONDS)
+        before playing anything on session start and after a *sustained*
+        underrun (_REPRIME_STREAK consecutive empty callbacks - see there for
+        why one single empty callback deliberately does NOT re-arm this), and
+        pads with silence if it's caught up short even so (only possible if
+        the scanner is genuinely producing audio slower than real time for
+        longer than the cushion covers) rather than glitching."""
         with self._buffer_lock:
             avail = self._buffer.shape[0]
+            if avail == 0:
+                self._empty_streak += 1
+                if not self._priming and self._empty_streak >= _REPRIME_STREAK:
+                    self._priming = True  # sustained dry spell - rebuild the cushion before resuming
+                    if _DEBUG:
+                        _dbg(f"re-priming after {self._empty_streak} consecutive empty callbacks")
+            else:
+                self._empty_streak = 0
+            if self._priming:
+                if avail < self._prime_len:
+                    out = np.zeros((frame_count, 2), dtype=np.float32)
+                    self._capture_write(out)
+                    return (out.tobytes(), pyaudio.paContinue)
+                self._priming = False
             if avail >= frame_count:
                 out = self._buffer[:frame_count]
                 self._buffer = self._buffer[frame_count:]
             else:
                 out = np.concatenate([self._buffer, np.zeros((frame_count - avail, 2), dtype=np.float32)])
                 self._buffer = np.zeros((0, 2), dtype=np.float32)
+            self._capture_write(out)
         return (np.ascontiguousarray(out).tobytes(), pyaudio.paContinue)
+
+    def _capture_write(self, out: np.ndarray) -> None:
+        """O(1)-ish slice-assign into the pre-allocated capture buffer - see
+        the _DEBUG constant's docstring for why this can't be a growing
+        list. Silently stops (not wraps) once _CAPTURE_MAX_SECONDS is used
+        up, rather than overwriting the start of a session."""
+        if self._capture is None:
+            return
+        n = out.shape[0]
+        end = min(self._capture_pos + n, self._capture.shape[0])
+        take = end - self._capture_pos
+        if take > 0:
+            self._capture[self._capture_pos:end] = out[:take]
+            self._capture_pos = end
 
     def write(self, audio: np.ndarray) -> None:
         """Resamples (if needed) and hands audio to the ring buffer for
@@ -193,12 +399,33 @@ class AudioOutput:
                 audio = self._resample_streaming(audio)
                 if audio.shape[0] == 0:
                     return
+            audio = self._correct_drift(audio)
             with self._buffer_lock:
                 self._buffer = np.concatenate([self._buffer, audio])
                 if self._buffer.shape[0] > self._max_buffer_len:
                     self._buffer = self._buffer[-self._max_buffer_len:]
         except Exception:
             pass
+
+    def _correct_drift(self, audio: np.ndarray) -> np.ndarray:
+        """Nudges this chunk's sample count by a tiny, gradually-converging
+        amount to correct the slow buffer-level drift from SDR/sound-card
+        clock mismatch - see point 4 in the module docstring."""
+        if audio.shape[0] < 8 or self._prime_len <= 0:
+            return audio
+        with self._buffer_lock:
+            current = self._buffer.shape[0]
+        error = self._prime_len - current  # + = buffer running low, needs MORE samples
+        self._drift_integral += error * _DRIFT_INTEGRAL_GAIN
+        self._drift_integral = max(-_DRIFT_INTEGRAL_CLAMP, min(_DRIFT_INTEGRAL_CLAMP, self._drift_integral))
+        self._drift_debt += error * _DRIFT_GAIN + self._drift_integral
+        n_correct = int(self._drift_debt)
+        if n_correct == 0:
+            return audio
+        self._drift_debt -= n_correct
+        limit = max(1, int(audio.shape[0] * _MAX_DRIFT_ADJUST_FRACTION))
+        n_correct = max(-limit, min(limit, n_correct))
+        return _retime(audio, audio.shape[0] + n_correct)
 
     def _resample_streaming(self, audio: np.ndarray) -> np.ndarray:
         """Resamples ``audio`` (n, 2) to the device's native rate without a
@@ -238,6 +465,27 @@ class AudioOutput:
                 self._pa.terminate()
             except Exception:
                 pass
+        self._dump_capture()
+
+    def _dump_capture(self) -> None:
+        if self._capture is None or self._capture_pos == 0:
+            return
+        try:
+            import wave
+            audio = self._capture[:self._capture_pos]
+            pcm16 = (np.clip(audio, -1.0, 1.0) * 32767.0).astype("<i2")
+            with wave.open(str(_CAPTURE_PATH), "wb") as wf:
+                wf.setnchannels(2)
+                wf.setsampwidth(2)
+                wf.setframerate(self.output_rate)
+                wf.writeframes(pcm16.tobytes())
+            _dbg(f"wrote {audio.shape[0] / self.output_rate:.1f}s of exactly what was sent to "
+                 f"PortAudio (silence included) to {_CAPTURE_PATH}")
+        except Exception as exc:
+            _dbg(f"failed to write live-audio capture: {exc}")
+        finally:
+            self._capture = None
+            self._capture_pos = 0
 
     @staticmethod
     def list_output_devices() -> list[tuple[int, str]]:
