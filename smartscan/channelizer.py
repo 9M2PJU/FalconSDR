@@ -112,9 +112,63 @@ def channel_powers_dbfs(
     return result
 
 
+# How far past a lane's own true edge extend_boundary_window() is willing to
+# probe, as a fraction of the sample rate - a "peek at the neighbouring
+# territory", not a full extra sweep even if plan_windows() left a lot of
+# slack unused (e.g. a narrow custom range with a lot of room left in its
+# one window).
+_MAX_EXTEND_FRACTION = 0.15
+
+
+def extend_boundary_window(
+    window: ScanWindow, sample_rate_hz: float, step_hz: float, direction: str,
+) -> list[int]:
+    """Extra probe frequencies to opportunistically watch just past a lane's
+    own true edge - below the lowest window's lowest channel, or above the
+    highest window's highest channel (``direction`` is "below"/"above").
+    Detection only: the caller decides whether/how to fold these into the
+    window's own ``freqs`` (see ScannerEngine._rebuild_windows), but nothing
+    here changes the window's center_hz, so this never needs an extra retune
+    and never exceeds what the hardware already captures around that center
+    - it only uses whatever capture room plan_windows() left unused inside
+    USABLE_FRACTION (the same margin plan_windows() itself budgets against),
+    capped by _MAX_EXTEND_FRACTION so a narrow, mostly-empty window doesn't
+    balloon into re-sweeping most of the rest of the capture.
+    """
+    if not window.freqs or step_hz <= 0:
+        return []
+    usable_bw = sample_rate_hz * USABLE_FRACTION
+    lo, hi = min(window.freqs), max(window.freqs)
+    slack = usable_bw - (hi - lo + step_hz)
+    extend_by = max(0.0, min(slack, sample_rate_hz * _MAX_EXTEND_FRACTION))
+    n_extra = int(extend_by // step_hz)
+    if n_extra <= 0:
+        return []
+    edge = lo if direction == "below" else hi
+    sign = -1 if direction == "below" else 1
+    return [int(edge + sign * step_hz * i) for i in range(1, n_extra + 1)]
+
+
 def spectrum_snapshot(iq: np.ndarray, sample_rate: float, center_hz: float, num_points: int = 512) -> tuple[np.ndarray, np.ndarray]:
-    """Downsampled dBFS-ish spectrum of a captured block, for the GUI's
+    """Downsampled dBFS spectrum of a captured block, for the GUI's
     mini-spectrum display. Returns (freqs_hz, magnitude_db).
+
+    Each display point sums (not averages) the PSD of the ~n/num_points raw
+    FFT bins it represents - the same "integrate power over a bandwidth"
+    convention channel_powers_dbfs() uses when summing bins across one
+    channel's own bandwidth for the trigger/level-meter reading. Averaging
+    (the old behaviour) instead reports power *density* per single narrow
+    bin, which reads dramatically lower for the same real signal purely
+    because it isn't integrated over any real channel's bandwidth - measured
+    at over 20 dB lower for a typical ~140-bins-per-point display at 2.4 MHz,
+    which is exactly why a signal sitting well above trigger_level_dbfs used
+    to visually barely clear the noise floor on this plot: the trace and the
+    trigger line were drawn on the same axis but weren't actually measuring
+    comparable quantities. Still not a bin-for-bin match to any specific
+    channel's own bandwidth (display buckets are a fixed ~n/num_points wide,
+    a real channel's bw varies 8.33/12.5 kHz by band/Memory List setting),
+    but it's now the right physical quantity and in the right ballpark
+    instead of off by a bin-count-dependent, always-understating constant.
     """
     if iq.size == 0:
         return np.zeros(num_points), np.full(num_points, -120.0)
@@ -127,7 +181,7 @@ def spectrum_snapshot(iq: np.ndarray, sample_rate: float, center_hz: float, num_
 
     if n > num_points:
         edge = n - (n % num_points)
-        psd = psd[:edge].reshape(num_points, -1).mean(axis=1)
+        psd = psd[:edge].reshape(num_points, -1).sum(axis=1)
         freqs = freqs[:edge].reshape(num_points, -1).mean(axis=1)
     db = 10.0 * np.log10(np.clip(psd, 1e-12, None))
     return freqs, db

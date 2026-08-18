@@ -410,6 +410,18 @@ class ScannerPanel(QGroupBox):
         self.spectrum_view = SpectrumView()
         root.addWidget(self.spectrum_view, 1)
 
+        # Real, *measured* time between two consecutive visits to the same
+        # capture window (see ScannerEngine._window_last_visit /
+        # cycle_time_changed) - deliberately not a theoretical estimate
+        # (num_windows * (tuning+dwell)): weighted lanes and the default
+        # lane get visited at very different real rates, so a single
+        # formula would be misleading. Subtle by design - this is a tuning
+        # aid, not something that needs to grab attention.
+        self.cycle_time_label = QLabel("")
+        self.cycle_time_label.setStyleSheet("font-size: 11px; color: #6b7078;")
+        self.cycle_time_label.setAlignment(Qt.AlignmentFlag.AlignRight)
+        root.addWidget(self.cycle_time_label)
+
         status_row = QHBoxLayout()
         status_col = QVBoxLayout()
         name_row = QHBoxLayout()
@@ -578,9 +590,9 @@ class ScannerPanel(QGroupBox):
         preset_row.addWidget(add_custom_btn)
         memory_list_btn = QPushButton("Lista pamieci (kanaly)")
         memory_list_btn.setToolTip(
-            "Przewin do zakladki Kanaly (Memory List) ponizej, gdzie mozna\n"
-            "zarzadzac pojedynczymi czestotliwosciami/folderami. Sa one zawsze\n"
-            "skanowane razem z pasmami powyzej, w jednej sesji."
+            "Przelacz na zakladke Kanaly, gdzie mozna zarzadzac pojedynczymi\n"
+            "czestotliwosciami/folderami. Sa one zawsze skanowane razem z\n"
+            "pasmami powyzej, w jednej sesji."
         )
         memory_list_btn.clicked.connect(self.memory_list_requested.emit)
         preset_row.addWidget(memory_list_btn)
@@ -738,6 +750,8 @@ class ScannerPanel(QGroupBox):
         self.skip_blacklist_btn.setEnabled(running)
         self.device_combo.setEnabled(not running)
         self.bandwidth_spin.setEnabled(not running)
+        if not running:
+            self.cycle_time_label.setText("")
 
     def _on_mute_toggled(self, checked: bool) -> None:
         self.mute_btn.setText("WYCISZONE" if checked else "WYCISZ")
@@ -808,6 +822,11 @@ class ScannerPanel(QGroupBox):
 
     def update_spectrum(self, freqs_hz, db, trigger_dbfs: float) -> None:
         self.spectrum_view.update_spectrum(freqs_hz, db, trigger_dbfs)
+
+    def update_cycle_time(self, seconds: float) -> None:
+        """Real, measured interval since this same capture window was last
+        tuned to - see ScannerSignals.cycle_time_changed."""
+        self.cycle_time_label.setText(f"Powrót do tego okna: {seconds:.2f}s temu")
 
     def update_gain_range(self, lo: float, hi: float) -> None:
         self.gain_slider.set_range(lo, hi)

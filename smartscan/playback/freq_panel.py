@@ -9,10 +9,16 @@ from PyQt6.QtWidgets import QComboBox, QLineEdit, QListWidget, QListWidgetItem, 
 from smartscan.playback.stats import FrequencyStat, frequency_stats
 
 ALL_ITEM_FREQ = None
+# Sentinel distinguishing "show favorites only" from a real freq_khz (always
+# a large positive int) or ALL_ITEM_FREQ (None) - emitted through the same
+# frequencySelected signal so the sidebar stays a single-selection list
+# (picking "Ulubione" naturally deselects whatever frequency was chosen, and
+# vice versa, for free, via QListWidget's own single-selection behaviour).
+FAVORITES_ITEM = "__favorites__"
 
 
 class FrequencyPanel(QWidget):
-    frequencySelected = pyqtSignal(object)  # int (kHz) albo None = wszystkie
+    frequencySelected = pyqtSignal(object)  # int (kHz), None = wszystkie, albo FAVORITES_ITEM
 
     def __init__(self, parent=None):
         super().__init__(parent)
@@ -56,6 +62,11 @@ class FrequencyPanel(QWidget):
         all_item.setData(Qt.ItemDataRole.UserRole, ALL_ITEM_FREQ)
         self.list_widget.addItem(all_item)
 
+        fav_count = sum(1 for r in self._recordings if r.is_favorite)
+        fav_item = QListWidgetItem(f"★ Ulubione  ({fav_count})")
+        fav_item.setData(Qt.ItemDataRole.UserRole, FAVORITES_ITEM)
+        self.list_widget.addItem(fav_item)
+
         stats: List[FrequencyStat] = frequency_stats(self._recordings)
         mode = self.sort_combo.currentIndex()
         if mode == 1:
@@ -64,14 +75,14 @@ class FrequencyPanel(QWidget):
             stats.sort(key=lambda s: s.avg_quality, reverse=True)
         # mode == 0 -> już posortowane wg liczby (frequency_stats default)
 
-        selected_row = 0
-        for i, st in enumerate(stats, start=1):
+        selected_row = 1 if previous == FAVORITES_ITEM else 0
+        for i, st in enumerate(stats, start=2):
             name = self._freq_names.get(st.freq_khz)
             label = f"{name}  ({st.label})" if name else st.label
             item = QListWidgetItem(f"{label}   ({st.count}, śr. jakość {st.avg_quality:.0f})")
             item.setData(Qt.ItemDataRole.UserRole, st.freq_khz)
             self.list_widget.addItem(item)
-            if previous is not None and st.freq_khz == previous:
+            if previous is not None and previous != FAVORITES_ITEM and st.freq_khz == previous:
                 selected_row = i
 
         self.list_widget.blockSignals(False)
@@ -82,8 +93,9 @@ class FrequencyPanel(QWidget):
         needle = text.strip().lower()
         for i in range(self.list_widget.count()):
             item = self.list_widget.item(i)
-            is_all = item.data(Qt.ItemDataRole.UserRole) is ALL_ITEM_FREQ
-            item.setHidden(bool(needle) and not is_all and needle not in item.text().lower())
+            data = item.data(Qt.ItemDataRole.UserRole)
+            pinned = data is ALL_ITEM_FREQ or data == FAVORITES_ITEM
+            item.setHidden(bool(needle) and not pinned and needle not in item.text().lower())
 
     def current_frequency(self) -> Optional[int]:
         item = self.list_widget.currentItem()

@@ -30,7 +30,6 @@ from PyQt6.QtWidgets import (
     QSlider,
     QSplitter,
     QTableView,
-    QTabWidget,
     QVBoxLayout,
     QWidget,
 )
@@ -40,7 +39,8 @@ from ...models import Channel, Modulation
 from ...playback.audio_analysis import analyze_wav
 from ...playback.audio_player import AudioPlayer
 from ...playback.config import POLAND_TZ, UTC_TZ
-from ...playback.freq_panel import FrequencyPanel
+from ...playback.favorites_store import FavoritesStore
+from ...playback.freq_panel import ALL_ITEM_FREQ, FAVORITES_ITEM, FrequencyPanel
 from ...playback.models import Recording, TranscriptionResult
 from ...playback.models_qt import COL_DATE, COL_QUALITY, RecordingsFilterProxy, RecordingsTableModel
 from ...playback.organizer import parse_filename
@@ -151,6 +151,7 @@ class PlaybackPanel(QWidget):
         self._known_folders: List[str] = []
 
         self._transcription_cache = TranscriptionCache()
+        self._favorites_store = FavoritesStore()
         self._transcription_worker: Optional[TranscriptionWorker] = None
         self._force_transcribe_worker: Optional[TranscriptionWorker] = None
 
@@ -176,12 +177,12 @@ class PlaybackPanel(QWidget):
 
         outer.addWidget(self._build_toolbar())
 
-        self.sub_tabs = QTabWidget()
-        outer.addWidget(self.sub_tabs, stretch=1)
-
-        self.sub_tabs.addTab(self._build_browser_tab(), "Przeglądarka")
+        outer.addWidget(self._build_browser_tab(), stretch=1)
+        # Statystyki zyje jako wlasna gorna zakladka (patrz MainWindow), ale
+        # nadal jest zbudowana i aktualizowana tutaj razem z reszta stanu
+        # biblioteki - MainWindow tylko wyciaga ten widget i umieszcza go
+        # gdzie indziej, zadne inne okablowanie sie nie zmienia.
         self.stats_tab = StatsTab()
-        self.sub_tabs.addTab(self.stats_tab, "Statystyki")
 
         outer.addWidget(self._build_transcript_panel())
         outer.addWidget(self._build_player_bar())
@@ -317,6 +318,11 @@ class PlaybackPanel(QWidget):
         self.save_freq_btn.setEnabled(False)
         header_row.addWidget(self.save_freq_btn)
 
+        self.favorite_btn = QPushButton("☆ Dodaj do ulubionych")
+        self.favorite_btn.setToolTip("Oznacz to nagranie jako ulubione (widoczne potem pod „★ Ulubione” w panelu częstotliwości po lewej)")
+        self.favorite_btn.setEnabled(False)
+        header_row.addWidget(self.favorite_btn)
+
         self.transcribe_now_btn = QPushButton("Transkrybuj ponownie")
         self.transcribe_now_btn.setToolTip("Wymuś ponowną transkrypcję zaznaczonego nagrania (pomija cache)")
         self.transcribe_now_btn.setEnabled(False)
@@ -390,7 +396,7 @@ class PlaybackPanel(QWidget):
             lambda: self.table_view.sortByColumn(COL_QUALITY, Qt.SortOrder.DescendingOrder)
         )
 
-        self.freq_panel.frequencySelected.connect(self.proxy.set_frequency_filter)
+        self.freq_panel.frequencySelected.connect(self._on_freq_panel_selection)
         self.stats_tab.frequencySelected.connect(self._jump_to_frequency)
 
         self.transcription_checkbox.setChecked(self.config.transcription.enabled)
@@ -400,6 +406,7 @@ class PlaybackPanel(QWidget):
         self.fr24_btn.clicked.connect(self._open_fr24_playback)
         self.adsbx_btn.clicked.connect(self._open_adsbexchange_playback)
         self.save_freq_btn.clicked.connect(self._save_frequency)
+        self.favorite_btn.clicked.connect(self._toggle_favorite)
 
         self.table_view.clicked.connect(self._play_proxy_index)
         self.table_view.navigated.connect(lambda: self._play_proxy_index(self.table_view.currentIndex()))
@@ -419,7 +426,6 @@ class PlaybackPanel(QWidget):
         self.position_slider.sliderMoved.connect(self.player.seek)
 
     def _focus_search(self) -> None:
-        self.sub_tabs.setCurrentIndex(0)
         self.search_edit.setFocus()
         self.search_edit.selectAll()
 
@@ -514,6 +520,7 @@ class PlaybackPanel(QWidget):
             freq_khz=parsed.freq_khz,
         )
         rec.transcript = self._transcription_cache.get(rec.cache_key())
+        rec.is_favorite = self._favorites_store.is_favorite(rec.cache_key())
 
         quality_cache = QualityCache()
         key = rec.cache_key()
@@ -567,7 +574,10 @@ class PlaybackPanel(QWidget):
             self.proxy.set_date_range(start, start + timedelta(days=1))
 
     def _jump_to_frequency(self, freq_khz: int) -> None:
-        self.sub_tabs.setCurrentIndex(0)
+        """Wolane z StatsTab.frequencySelected (dwuklik w wiersz) - filtruje
+        Przegladarke do tej czestotliwosci. MainWindow, osobno podpiete pod
+        ten sam sygnal, przelacza na gorna zakladke Odtwarzacz, zeby to
+        bylo w ogole widoczne (Statystyki to teraz osobna zakladka)."""
         for row in range(self.freq_panel.list_widget.count()):
             item = self.freq_panel.list_widget.item(row)
             if item.data(Qt.ItemDataRole.UserRole) == freq_khz:
@@ -576,11 +586,34 @@ class PlaybackPanel(QWidget):
 
     # ----------------------------------------------------------- transkrypcja
     def _hydrate_transcripts(self, recordings: List[Recording]) -> None:
-        """Odtwarza wyniki transkrypcji z trwałego cache na świeżo sparsowanej
-        liście nagrań (scan_recordings za każdym odświeżeniem tworzy nowe
-        obiekty Recording, więc bez tego liczylibyśmy wszystko od nowa)."""
+        """Odtwarza wyniki transkrypcji i status ulubionego z trwałego cache
+        na świeżo sparsowanej liście nagrań (scan_recordings za każdym
+        odświeżeniem tworzy nowe obiekty Recording, więc bez tego liczylibyśmy
+        wszystko od nowa / gubilibyśmy gwiazdki)."""
         for rec in recordings:
             rec.transcript = self._transcription_cache.get(rec.cache_key())
+            rec.is_favorite = self._favorites_store.is_favorite(rec.cache_key())
+
+    def _on_freq_panel_selection(self, value) -> None:
+        if value == FAVORITES_ITEM:
+            self.proxy.set_frequency_filter(ALL_ITEM_FREQ)
+            self.proxy.set_favorites_only(True)
+        else:
+            self.proxy.set_favorites_only(False)
+            self.proxy.set_frequency_filter(value)
+
+    def _toggle_favorite(self) -> None:
+        rec = self._selected_recording
+        if rec is None:
+            return
+        rec.is_favorite = not rec.is_favorite
+        self._favorites_store.set_favorite(rec.cache_key(), rec.is_favorite)
+        self._set_favorite_btn_state(rec.is_favorite)
+        self.proxy.refresh()
+        self.freq_panel.set_recordings(self._recordings)  # refresh the "★ Ulubione (N)" count
+
+    def _set_favorite_btn_state(self, is_favorite: bool) -> None:
+        self.favorite_btn.setText("★ W ulubionych" if is_favorite else "☆ Dodaj do ulubionych")
 
     def _maybe_start_transcription(self, include_errors: bool = True) -> None:
         if not self.config.transcription.enabled:
@@ -648,6 +681,8 @@ class PlaybackPanel(QWidget):
         self.fr24_btn.setEnabled(True)
         self.adsbx_btn.setEnabled(True)
         self.save_freq_btn.setEnabled(True)
+        self.favorite_btn.setEnabled(True)
+        self._set_favorite_btn_state(rec.is_favorite)
         freq_bit = self._freq_display(rec.freq_khz)
         status = rec.transcript_status
         if status == "pending":
@@ -735,6 +770,7 @@ class PlaybackPanel(QWidget):
                 continue
             quality_cache.remove(cache_key)
             self._transcription_cache.remove(cache_key)
+            self._favorites_store.remove(cache_key)
             self.table_model.remove_recording(rec.path)
             deleted_paths.append(rec.path)
         quality_cache.save()
@@ -757,6 +793,7 @@ class PlaybackPanel(QWidget):
                 self.fr24_btn.setEnabled(False)
                 self.adsbx_btn.setEnabled(False)
                 self.save_freq_btn.setEnabled(False)
+                self.favorite_btn.setEnabled(False)
 
             if len(deleted_paths) == 1:
                 self.status_message.emit(f"Usunięto: {deleted_paths[0].name}", 4000)
@@ -857,6 +894,7 @@ class PlaybackPanel(QWidget):
         self._freq_names = {round(c.freq_hz / 1000): c.name for c in channels if c.name}
         self.table_model.set_freq_names(self._freq_names)
         self.freq_panel.set_freq_names(self._freq_names)
+        self.stats_tab.set_freq_names(self._freq_names)
         if self._selected_recording is not None:
             self._update_transcript_panel(self._selected_recording)
         current_path = self.player.qt_player.source().toLocalFile()

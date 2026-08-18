@@ -22,6 +22,7 @@ UTC_TZ = ZoneInfo("UTC")
 APP_DATA_DIR = Path.home() / ".local" / "share" / "atc_browser"
 QUALITY_CACHE_FILE = APP_DATA_DIR / "quality_cache.json"
 TRANSCRIPTION_CACHE_FILE = APP_DATA_DIR / "transcription_cache.json"
+FAVORITES_FILE = APP_DATA_DIR / "favorites.json"
 
 # Nazwa podfolderu z datą: format YYYY-MM-DD
 DATE_DIR_FORMAT = "%Y-%m-%d"

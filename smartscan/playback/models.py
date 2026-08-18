@@ -39,6 +39,7 @@ class Recording:
     freq_khz: int
     quality: Optional[QualityMetrics] = None
     transcript: Optional[TranscriptionResult] = None
+    is_favorite: bool = False
 
     @property
     def transcript_text(self) -> str:

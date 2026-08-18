@@ -251,9 +251,17 @@ class RecordingsFilterProxy(QSortFilterProxyModel):
         self._date_to: Optional[datetime] = None
         self._min_quality: float = 0.0
         self._search_text: str = ""
+        self._favorites_only: bool = False
 
     def source(self) -> RecordingsTableModel:
         return self.sourceModel()  # type: ignore[return-value]
+
+    def refresh(self) -> None:
+        """Re-evaluates every row's filterAcceptsRow() without any filter
+        criteria actually changing - for when a row's own data changed in a
+        way that could flip its accept/reject result (e.g. is_favorite
+        toggled) instead of a filter setting."""
+        self.invalidateRowsFilter()
 
     def set_frequency_filter(self, freq_khz: Optional[int]) -> None:
         self._freq_khz = freq_khz
@@ -272,10 +280,17 @@ class RecordingsFilterProxy(QSortFilterProxyModel):
         self._search_text = text.strip().lower()
         self.invalidateRowsFilter()
 
+    def set_favorites_only(self, favorites_only: bool) -> None:
+        self._favorites_only = favorites_only
+        self.invalidateRowsFilter()
+
     def filterAcceptsRow(self, source_row: int, source_parent: QModelIndex) -> bool:
         rec = self.source().recording_at(source_row)
 
         if self._freq_khz is not None and rec.freq_khz != self._freq_khz:
+            return False
+
+        if self._favorites_only and not rec.is_favorite:
             return False
 
         if self._min_quality > 0.0:

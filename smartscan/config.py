@@ -43,7 +43,7 @@ class VfoRangeConfig:
 @dataclass
 class TimingConfig:
     tuning_time_ms: int = 60
-    scanning_dwell_ms: int = 80
+    scanning_dwell_ms: int = 45
     linger_time_ms: int = 1500
 
 
@@ -61,6 +61,22 @@ class LocationConfig:
     # w zakładce Odtwarzacz (przybliżona lokalizacja odbiornika).
     home_lat: float = 52.123
     home_lon: float = 21.012
+
+
+@dataclass
+class RecencyBoostConfig:
+    """After a transmission ends *naturally* (linger expires, not a manual
+    Skip) its window gets temporarily revisited more often than the normal
+    weighted rotation would give it - a follow-up transmission on the same
+    frequency often lands within the next several/dozens of seconds (typical
+    ATC back-and-forth). Unlike just raising linger_time_ms, this never
+    blocks the scanner from noticing the conversation move to a *different*
+    frequency in the meantime - it keeps circling the rest of the schedule
+    as normal, just with this one window's turn coming up more often for a
+    while (see ScannerEngine._due_recency_boost_locked)."""
+    enabled: bool = True
+    duration_s: float = 90.0   # how long after the transmission ends to keep boosting
+    interval_s: float = 8.0    # how often (real seconds) to sneak in an extra visit during the boost
 
 
 @dataclass
@@ -100,6 +116,7 @@ class AppConfig:
     )
     timing: TimingConfig = field(default_factory=TimingConfig)
     recording: RecordingConfig = field(default_factory=RecordingConfig)
+    recency_boost: RecencyBoostConfig = field(default_factory=RecencyBoostConfig)
     noise_reduction: NoiseReductionConfig = field(default_factory=NoiseReductionConfig)
     transcription: TranscriptionConfig = field(default_factory=TranscriptionConfig)
     location: LocationConfig = field(default_factory=LocationConfig)
@@ -144,6 +161,7 @@ class AppConfig:
             bands=bands,
             timing=TimingConfig(**raw.get("timing", {})),
             recording=RecordingConfig(**recording_raw),
+            recency_boost=RecencyBoostConfig(**raw.get("recency_boost", {})),
             noise_reduction=NoiseReductionConfig(**raw.get("noise_reduction", {})),
             transcription=TranscriptionConfig(**raw.get("transcription", {})),
             location=LocationConfig(**raw.get("location", {})),

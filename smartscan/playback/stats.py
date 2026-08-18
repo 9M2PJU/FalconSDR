@@ -55,6 +55,17 @@ def counts_per_hour(recordings: List[Recording], use_utc: bool = False) -> List[
     return [(h, counter.get(h, 0)) for h in range(24)]
 
 
+_WEEKDAY_LABELS = ["Pon", "Wt", "Śr", "Czw", "Pt", "Sob", "Nd"]
+
+
+def counts_per_weekday(recordings: List[Recording], use_utc: bool = False) -> List[tuple[str, int]]:
+    """Mon..Sun, always in that order and always all 7 present (0 where
+    nothing was heard) - for spotting e.g. "this one's only active on
+    weekdays" at a glance, same idea as counts_per_hour."""
+    counter: Counter[int] = Counter((r.dt_utc if use_utc else r.dt_local).weekday() for r in recordings)
+    return [(_WEEKDAY_LABELS[d], counter.get(d, 0)) for d in range(7)]
+
+
 @dataclass
 class Summary:
     total_count: int

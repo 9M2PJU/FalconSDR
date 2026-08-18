@@ -8,6 +8,8 @@ from abc import ABC, abstractmethod
 
 import numpy as np
 
+from .io_diag_log import SdrIoDiagLogger
+
 try:
     import SoapySDR
     from SoapySDR import SOAPY_SDR_CF32, SOAPY_SDR_RX
@@ -77,7 +79,11 @@ class SoapyBackend(SdrBackend):
         self.set_gain(gain_mode, gain_db)
         self.stream = self.device.setupStream(SOAPY_SDR_RX, SOAPY_SDR_CF32)
         self.device.activateStream(self.stream)
+        # Grown on demand in read() to always fit a whole requested chunk in
+        # one readStream() call - see read()'s docstring for why a
+        # too-small fixed size here quietly doubles per-tick read latency.
         self._buf = np.empty(65536, dtype=np.complex64)
+        self._io_diag = SdrIoDiagLogger()
 
     def _disable_bias_tee(self) -> None:
         for key in _BIAS_TEE_ARG_KEYS:
@@ -108,15 +114,46 @@ class SoapyBackend(SdrBackend):
         self.device.setGain(SOAPY_SDR_RX, 0, gain_db)
 
     def read(self, num_samples: int) -> np.ndarray:
+        """Found via real-session SMARTSCAN_DEBUG_LIVE_AUDIO logging: the
+        scratch buffer used to matter more than it looks like it should.
+        readStream() can only ever hand back up to len(self._buf) samples
+        per call, so if a caller's whole chunk (num_samples - e.g. 72000 for
+        the default 2.4 MHz/30ms config) doesn't fit in one buffer, this
+        loop has to make a *second* readStream() call just to mop up the
+        remainder - and that second call pays its own full per-call
+        overhead (USB round-trip, driver-side buffering granularity) on top
+        of the first, roughly doubling this method's real wall-clock time
+        even though there's no genuinely new work to justify it (measured:
+        median ~54ms per read() against a 30ms budget, with a fixed 65536
+        buffer against a 72000-sample chunk - 2 calls every single tick).
+        Growing the buffer to fit num_samples up front lets a normal chunk
+        complete in a single readStream() call instead.
+        """
+        if num_samples > self._buf.size:
+            self._buf = np.empty(num_samples, dtype=np.complex64)
         out = np.empty(num_samples, dtype=np.complex64)
         got = 0
-        deadline = time.monotonic() + 1.0
+        calls = 0
+        read_start = time.monotonic()
+        deadline = read_start + 1.0
         while got < num_samples and time.monotonic() < deadline:
             chunk = min(num_samples - got, self._buf.size)
             sr = self.device.readStream(self.stream, [self._buf[:chunk]], chunk, timeoutUs=200_000)
+            calls += 1
             if sr.ret > 0:
                 out[got:got + sr.ret] = self._buf[:sr.ret]
                 got += sr.ret
+            elif sr.ret < 0:
+                # Negative return = an error code (SOAPY_SDR_OVERFLOW and
+                # friends) - see io_diag_log.py's module docstring for why
+                # this specifically matters: splicing what we read *after*
+                # this onto what's already in `out` risks joining two
+                # non-time-contiguous blocks, which can look like a real
+                # broadband signal to the FFT. Logged, not otherwise
+                # handled yet - this is here to first measure whether/how
+                # often it actually happens before changing behaviour.
+                self._io_diag.record_error(sr.ret, calls, got, num_samples)
+        self._io_diag.record_read(time.monotonic() - read_start, calls)
         if got < num_samples:
             # A live device fills the whole chunk well within this window
             # (chunk is ~30ms of real time at the configured sample rate) -

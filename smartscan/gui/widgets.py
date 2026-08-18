@@ -1,6 +1,7 @@
 """Small reusable custom-painted widgets for the SmartScanATC GUI."""
 from __future__ import annotations
 
+import numpy as np
 from PyQt6.QtCore import Qt, QRectF, pyqtSignal
 from PyQt6.QtGui import QColor, QLinearGradient, QPainter, QPen
 from PyQt6.QtWidgets import (
@@ -169,6 +170,9 @@ class SliderSpin(QWidget):
         self.spin.setEnabled(enabled)
 
 
+_TRIGGER_HEADROOM_DB = 15.0  # clear space always kept above the trigger line - see update_spectrum()
+
+
 class SpectrumView(QWidget):
     """Live mini-spectrum of the currently captured window, with a red line
     marking the trigger/squelch threshold so it's obvious why the scanner
@@ -215,6 +219,21 @@ class SpectrumView(QWidget):
             return
         self._curve.setData(freqs_hz / 1e6, db)
         self._trigger_line.setValue(trigger_dbfs)
+        # Autorange alone tends to hug the trigger line right against the
+        # top edge whenever nothing currently on screen is above it (the
+        # common case) - there's nowhere to actually *see* a signal once it
+        # does cross the trigger, it just gets clipped at the very top.
+        # Explicitly keep _TRIGGER_HEADROOM_DB of clear space above the
+        # trigger line at all times (autorange still takes over and grows
+        # further if a real signal peak needs more room than that).
+        if db.size:
+            data_min = float(np.min(db))
+            data_max = float(np.max(db))
+        else:
+            data_min = data_max = trigger_dbfs
+        y_min = min(data_min, trigger_dbfs) - 3.0
+        y_max = max(data_max, trigger_dbfs + _TRIGGER_HEADROOM_DB)
+        self._plot.setYRange(y_min, y_max, padding=0.02)
 
 
 class RecIndicator(QWidget):

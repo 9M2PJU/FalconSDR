@@ -14,6 +14,7 @@ from ..models import Channel
 from ..scanner_engine import ScannerEngine
 from .panels.frequency_manager import FrequencyManager
 from .panels.playback_panel import PlaybackPanel
+from .panels.recency_boost_panel import RecencyBoostPanel
 from .panels.recording_panel import RecordingPanel
 from .panels.scanner_panel import ScannerPanel
 
@@ -33,33 +34,20 @@ class MainWindow(QMainWindow):
         self.channel_folders: list[str] = list(self.config.channel_folders)
         self.engine: ScannerEngine | None = None
 
-        # Nasluch dziala jak strona do przewijania (jedno QScrollArea ponizej
-        # obejmuje cala zakladke), a nie jak zestaw splitterow do przeciagania
-        # - kazda sekcja dostaje tyle miejsca ile faktycznie potrzebuje
-        # (Lista pamieci potrafi byc spora po rozwinieciu), zamiast musiec byc
-        # sciskana zeby zrobic miejsce sasiadowi. Pierwsze sekcje (urzadzenie,
-        # pasma, widmo, przyciski Start/Stop) zostaja w miare widoczne od razu;
-        # od Listy pamieci w dol przewija sie w miare potrzeby.
+        # Nasluch dziala jak strona do przewijania (QScrollArea obejmuje
+        # zakladke) zamiast zestawu splitterow do przeciagania - sekcja
+        # dostaje tyle miejsca ile faktycznie potrzebuje. Bez tego, skaner
+        # (widmo + miernik + lista pasm + przyciski) potrafi wymusic
+        # minimalny rozmiar okna wiekszy niz dostepna wysokosc na mniejszym
+        # (np. drugim) monitorze, przez co okno nie moze sie realnie
+        # zmaksymalizowac (isMaximized() zwraca True, a okno i tak zostaje
+        # za duze).
         listen_tab = QWidget()
         layout = QVBoxLayout(listen_tab)
 
         self.scanner_panel = ScannerPanel(self.config, self.channels)
-        self.freq_manager = FrequencyManager(
-            self.channels, self.blacklist, self.config.default_blacklist_margin_hz, self.channel_folders,
-        )
-        self.freq_manager.setMinimumHeight(420)
-        self.recording_panel = RecordingPanel(self.config.recording)
-
         layout.addWidget(self.scanner_panel)
-        layout.addWidget(self.freq_manager)
-        layout.addWidget(self.recording_panel)
 
-        # The stacked panels' combined minimum height (spectrum view, level
-        # meter, band list, recording controls, ...) comfortably fits a tall
-        # primary monitor but can exceed a shorter secondary one - without a
-        # scroll area, that forces the whole window's minimum size beyond the
-        # smaller screen's available height, so it can't actually maximize
-        # (isMaximized() reports True but the window stays oversized).
         self.listen_scroll = QScrollArea()
         self.listen_scroll.setWidgetResizable(True)
         self.listen_scroll.setWidget(listen_tab)
@@ -68,9 +56,30 @@ class MainWindow(QMainWindow):
         self.playback_panel.set_known_frequencies(self.channels)
         self.playback_panel.set_known_folders(self.channel_folders)
 
+        # Kanaly (Lista pamieci + Czarna lista) - juz sam w sobie QTabWidget
+        # z dwiema wlasnymi podzakladkami, wiec staje sie wlasna gorna
+        # zakladka bez dodatkowego opakowania.
+        self.freq_manager = FrequencyManager(
+            self.channels, self.blacklist, self.config.default_blacklist_margin_hz, self.channel_folders,
+        )
+
+        # Opcje - na razie tylko Nagrywanie, ale to osobna zakladka wlasnie
+        # po to, zeby bylo gdzie dokladac kolejne ustawienia bez zapychania
+        # zakladki Skaner.
+        options_tab = QWidget()
+        options_layout = QVBoxLayout(options_tab)
+        self.recording_panel = RecordingPanel(self.config.recording)
+        options_layout.addWidget(self.recording_panel)
+        self.recency_boost_panel = RecencyBoostPanel(self.config.recency_boost)
+        options_layout.addWidget(self.recency_boost_panel)
+        options_layout.addStretch(1)
+
         self.tabs = QTabWidget()
         self.tabs.addTab(self.listen_scroll, "Nasłuch")
         self.tabs.addTab(self.playback_panel, "Odtwarzacz")
+        self.tabs.addTab(self.freq_manager, "Kanały")
+        self.tabs.addTab(self.playback_panel.stats_tab, "Statystyki")
+        self.tabs.addTab(options_tab, "Opcje")
         self.setCentralWidget(self.tabs)
 
         self.statusBar().showMessage("Gotowy.")
@@ -85,11 +94,13 @@ class MainWindow(QMainWindow):
         self.scanner_panel.memory_list_requested.connect(self._reveal_memory_list)
         self.scanner_panel.channel_weight_changed.connect(self._on_channel_weight_changed)
         self.recording_panel.settings_changed.connect(self._save_config)
+        self.recency_boost_panel.settings_changed.connect(self._save_config)
         self.freq_manager.channels_changed.connect(self._on_channels_changed)
         self.freq_manager.blacklist_changed.connect(self._on_blacklist_changed)
         self.freq_manager.folders_changed.connect(self._on_folders_changed)
         self.playback_panel.status_message.connect(self.statusBar().showMessage)
         self.playback_panel.channel_saved.connect(self._on_channel_saved)
+        self.playback_panel.stats_tab.frequencySelected.connect(self._on_stats_freq_selected)
 
     # -- persistence -----------------------------------------------------
     def _save_config(self) -> None:
@@ -129,12 +140,19 @@ class MainWindow(QMainWindow):
         self._save_config()
         self.playback_panel.set_known_folders(folders)
 
+    def _on_stats_freq_selected(self, freq_khz: int) -> None:
+        """Statystyki jest teraz osobna gorna zakladka, wiec podwojne
+        kliknieciem czestotliwosci w tabeli statystyk (PlaybackPanel juz sam
+        przefiltrowal Odtwarzacz do tej czestotliwosci) trzeba jeszcze
+        recznie przelaczyc widoczna zakladke na Odtwarzacz, zeby wynik w
+        ogole bylo widac."""
+        self.tabs.setCurrentWidget(self.playback_panel)
+
     def _reveal_memory_list(self) -> None:
-        """"Lista pamieci" w zakladce Skaner: przewija zakladke Nasluch do
-        panelu Kanaly i ustawia tam fokus na wyszukiwarce."""
-        self.tabs.setCurrentIndex(0)
+        """"Lista pamieci" w zakladce Skaner: przelacza na zakladke Kanaly
+        (podzakladka Lista pamieci) i ustawia tam fokus na wyszukiwarce."""
+        self.tabs.setCurrentWidget(self.freq_manager)
         self.freq_manager.reveal_channels()
-        self.listen_scroll.ensureWidgetVisible(self.freq_manager)
 
     def _on_channel_saved(self, channel: Channel) -> None:
         """"Zapisz czestotliwosc" w zakladce Odtwarzacz: dopisuje nowy kanal
@@ -177,6 +195,7 @@ class MainWindow(QMainWindow):
         s.recording_finished.connect(self.playback_panel.ingest_finished_recording)
         s.blacklisted.connect(self._on_auto_lockout)
         s.spectrum_ready.connect(self.scanner_panel.update_spectrum)
+        s.cycle_time_changed.connect(self.scanner_panel.update_cycle_time)
         s.gain_range_changed.connect(self.scanner_panel.update_gain_range)
         s.log.connect(self.statusBar().showMessage)
         s.finished.connect(self._on_engine_finished)
