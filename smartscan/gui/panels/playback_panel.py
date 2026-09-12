@@ -676,7 +676,7 @@ class PlaybackPanel(QWidget):
         self.table_model.append_recording(rec)
         self._schedule_stats_refresh()
 
-        self._maybe_start_transcription()
+        self._maybe_transcribe_new(rec)
 
     # ------------------------------------------------------------- filtrowanie
     def _on_utc_toggled(self, checked: bool) -> None:
@@ -765,13 +765,46 @@ class PlaybackPanel(QWidget):
         self.favorite_btn.setText("★ W ulubionych" if is_favorite else "☆ Dodaj do ulubionych")
 
     def _maybe_start_transcription(self, include_errors: bool = True) -> None:
+        """Full catch-up pass: (re)scans *every* recording currently in the
+        library against the transcription cache to build its "needs
+        transcribing" queue - see TranscriptionWorker.run(). Right for a
+        rare, whole-archive event (startup/manual refresh, or catching up on
+        whatever arrived while a previous batch was busy - see
+        _on_transcription_batch_finished), but each such scan costs one
+        stat() + cache lookup per recording *ever accumulated* - see
+        _maybe_transcribe_new() for the single-new-recording fast path that
+        avoids paying this on every transmission end."""
         if not self.config.transcription.enabled:
             self.transcription_progress_label.setText("wyłączona")
             return
+        self._launch_transcription_worker(list(self._recordings), include_errors=include_errors)
+
+    def _maybe_transcribe_new(self, rec: Recording) -> None:
+        """Queues just this one freshly-finished recording (called from
+        ingest_finished_recording()), instead of _maybe_start_transcription()'s
+        whole-library rescan.
+
+        That rescan's cost (one stat() + cache lookup per recording in
+        self._recordings - see TranscriptionWorker.run()'s ``todo`` list
+        comprehension) was being paid again in full on *every single*
+        transmission end, the overwhelmingly common case here (worker idle,
+        one new file to check) - scaling with the entire archive's size
+        forever, worse the longer/more the program has already been used,
+        purely to conclude "only the one new file needs it". If a worker is
+        already busy, this new recording is simply left for
+        _on_transcription_batch_finished's own catch-up rescan instead of
+        being queued twice - by then at most a handful of arrivals piled up
+        while busy, not a per-file cost.
+        """
+        if not self.config.transcription.enabled:
+            return
+        self._launch_transcription_worker([rec])
+
+    def _launch_transcription_worker(self, recordings: List[Recording], include_errors: bool = True) -> None:
         if self._transcription_worker is not None and self._transcription_worker.isRunning():
             return
         self._transcription_worker = TranscriptionWorker(
-            list(self._recordings), self.config.transcription, self._transcription_cache,
+            recordings, self.config.transcription, self._transcription_cache,
             include_errors=include_errors, parent=self,
         )
         self._transcription_worker.progress.connect(self._on_transcription_progress)

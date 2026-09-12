@@ -11,6 +11,7 @@ window is watched simultaneously.
 from __future__ import annotations
 
 from dataclasses import dataclass
+from functools import lru_cache
 from typing import TYPE_CHECKING
 
 import numpy as np
@@ -70,14 +71,82 @@ def plan_windows(freqs: list[int], sample_rate_hz: float, channel_bw_hz: float) 
     return windows
 
 
-def channel_powers_dbfs(
-    iq: np.ndarray, sample_rate: float, center_hz: float, freqs: list[int],
+@lru_cache(maxsize=8)
+def _hann_window(n: int) -> np.ndarray:
+    """np.hanning(n) is a pure function of n (a few thousand cosine
+    evaluations) but was being recomputed from scratch on every single
+    channel_powers_dbfs()/spectrum_snapshot() call - up to 3x per SCANNING
+    tick (active slots + new-detection candidates + the spectrum-display
+    worker thread's own copy) even though n is really just the configured
+    chunk size and essentially constant for a whole session. Cached here
+    (bounded size - a session realistically only ever uses a handful of
+    distinct n's, e.g. if the sample rate is changed live) since the
+    returned array is only ever read (multiplied elementwise into a new
+    array), never mutated in place by any caller.
+    """
+    return np.hanning(n)
+
+
+@lru_cache(maxsize=8)
+def _hann_window_power(n: int) -> float:
+    return float(np.sum(_hann_window(n) ** 2))
+
+
+@lru_cache(maxsize=8)
+def _bin_freqs(n: int, sample_rate: float) -> np.ndarray:
+    """FFT bin center frequencies (Hz, relative to whatever center_hz the
+    capture was tuned to) for an n-sample block at ``sample_rate`` - also a
+    pure function of its (small, effectively-constant) inputs, also only
+    ever read via np.searchsorted by every caller. See _hann_window()."""
+    return np.fft.fftshift(np.fft.fftfreq(n, d=1.0 / sample_rate))
+
+
+def spectrum_cumsum(iq: np.ndarray, sample_rate: float) -> tuple[np.ndarray, np.ndarray] | None:
+    """The expensive, shared half of channel_powers_dbfs(): windowed FFT ->
+    power spectral density -> running cumulative sum, plus the bin
+    frequency axis - everything channel_powers_from_spectrum() needs to
+    read off any number of channels' power via searchsorted + cumulative-
+    sum-difference without redoing the FFT. Returns None for an empty
+    capture (mirrors channel_powers_dbfs()'s own iq.size == 0 guard).
+
+    Split out from channel_powers_dbfs() so a single SCANNING tick that
+    needs channel powers for two different frequency lists against the
+    *same* captured block - already-active slots (_service_active_slots)
+    and other, not-yet-active candidates in the same window
+    (ScannerEngine._main_loop) - pays for exactly one FFT of the whole
+    capture, not one per list. Before this split, both call sites called
+    channel_powers_dbfs() independently, each recomputing this entire
+    block (including its own np.hanning() window) from scratch - on a
+    capture with both something already active *and* other channels still
+    worth checking (the common case whenever a window has more than one
+    watched frequency), that's a full duplicate np.fft.fft() over tens of
+    thousands of samples every single ~30ms tick, for as long as anything
+    stays active - the single most expensive avoidable cost in that loop.
+
+    Returns (bin_freqs, cumsum) - cumsum has one extra leading 0.0
+    (cumsum[0] == 0.0) so channel_powers_from_spectrum() can read any bin
+    range's summed power as cumsum[hi] - cumsum[lo] for any
+    0 <= lo <= hi <= len(bin_freqs).
+    """
+    if iq.size == 0:
+        return None
+    n = iq.size
+    window = _hann_window(n)
+    win_power = _hann_window_power(n)
+    spectrum = np.fft.fftshift(np.fft.fft(iq * window))
+    psd = (np.abs(spectrum) ** 2) / (win_power * n)
+    bin_freqs = _bin_freqs(n, sample_rate)
+    cumsum = np.concatenate(([0.0], np.cumsum(psd)))
+    return bin_freqs, cumsum
+
+
+def channel_powers_from_spectrum(
+    spectrum: tuple[np.ndarray, np.ndarray] | None, center_hz: float, freqs: list[int],
     channel_bw_hz: float | dict[int, float],
 ) -> dict[int, float]:
-    """One FFT for the whole captured block, then sum power in the bins
-    belonging to each requested channel. Much cheaper than demodulating
-    (or even just down-converting) every channel individually just to
-    check its level.
+    """The cheap, per-channel half of channel_powers_dbfs() - see
+    spectrum_cumsum() for the shared FFT/PSD/cumsum step this consumes
+    (``spectrum``, or None for an empty capture - see its own docstring).
 
     ``channel_bw_hz`` is either one bandwidth shared by every channel, or a
     per-frequency dict (band-swept channels and Memory List channels can use
@@ -113,14 +182,9 @@ def channel_powers_dbfs(
     directly decides which channels the scanner treats as "active" (and
     therefore what gets recorded).
     """
-    if iq.size == 0 or not freqs:
+    if spectrum is None or not freqs:
         return {f: -120.0 for f in freqs}
-    n = iq.size
-    window = np.hanning(n)
-    win_power = float(np.sum(window ** 2))
-    spectrum = np.fft.fftshift(np.fft.fft(iq * window))
-    psd = (np.abs(spectrum) ** 2) / (win_power * n)
-    bin_freqs = np.fft.fftshift(np.fft.fftfreq(n, d=1.0 / sample_rate))
+    bin_freqs, cumsum = spectrum
 
     freqs_arr = np.asarray(freqs, dtype=np.float64)
     offsets = freqs_arr - center_hz
@@ -132,10 +196,32 @@ def channel_powers_dbfs(
     lo = np.searchsorted(bin_freqs, offsets - half_bw, side="left")
     hi = np.searchsorted(bin_freqs, offsets + half_bw, side="right")
 
-    cumsum = np.concatenate(([0.0], np.cumsum(psd)))
     power = np.maximum(cumsum[hi] - cumsum[lo], 1e-12)
     db = 10.0 * np.log10(power)
     return dict(zip(freqs, db.tolist()))
+
+
+def channel_powers_dbfs(
+    iq: np.ndarray, sample_rate: float, center_hz: float, freqs: list[int],
+    channel_bw_hz: float | dict[int, float],
+) -> dict[int, float]:
+    """One FFT for the whole captured block, then sum power in the bins
+    belonging to each requested channel. Much cheaper than demodulating
+    (or even just down-converting) every channel individually just to
+    check its level.
+
+    Convenience wrapper combining spectrum_cumsum() + channel_powers_from_spectrum()
+    for callers that only need one channel list from this capture (e.g. the
+    periodic background-floor snapshot in ScannerEngine._maybe_log_floor).
+    A caller that needs *more than one* frequency list from the very same
+    (iq, sample_rate) - see ScannerEngine._main_loop - should call
+    spectrum_cumsum() once and pass its result to channel_powers_from_spectrum()
+    for each list instead, to avoid paying for the FFT more than once.
+    """
+    if iq.size == 0 or not freqs:
+        return {f: -120.0 for f in freqs}
+    spectrum = spectrum_cumsum(iq, sample_rate)
+    return channel_powers_from_spectrum(spectrum, center_hz, freqs, channel_bw_hz)
 
 
 # How far past a lane's own true edge extend_boundary_window() is willing to
@@ -199,11 +285,11 @@ def spectrum_snapshot(iq: np.ndarray, sample_rate: float, center_hz: float, num_
     if iq.size == 0:
         return np.zeros(num_points), np.full(num_points, -120.0)
     n = iq.size
-    window = np.hanning(n)
-    win_power = float(np.sum(window ** 2))
+    window = _hann_window(n)
+    win_power = _hann_window_power(n)
     spectrum = np.fft.fftshift(np.fft.fft(iq * window))
     psd = (np.abs(spectrum) ** 2) / (win_power * n)
-    freqs = np.fft.fftshift(np.fft.fftfreq(n, d=1.0 / sample_rate)) + center_hz
+    freqs = _bin_freqs(n, sample_rate) + center_hz
 
     if n > num_points:
         edge = n - (n % num_points)

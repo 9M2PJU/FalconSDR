@@ -34,7 +34,8 @@ from .audio_output import AudioOutput
 from .calibration_log import CalibrationLogger
 from .edge_compensation import EdgeCompensation
 from .channelizer import (
-    USABLE_FRACTION, ScanWindow, channel_powers_dbfs, extend_boundary_window, plan_windows, spectrum_snapshot,
+    USABLE_FRACTION, ScanWindow, channel_powers_dbfs, channel_powers_from_spectrum, extend_boundary_window,
+    plan_windows, spectrum_cumsum, spectrum_snapshot,
 )
 from .config import AppConfig, CONFIG_DIR, VfoRangeConfig
 from .dsp import Demodulator, NoiseReducer
@@ -355,6 +356,10 @@ class ScannerEngine(threading.Thread):
         self.config = config
         self.channels = channels
         self.blacklist = blacklist
+        # Vectorized mirror of self.blacklist - see _rebuild_blacklist_arrays().
+        self._bl_freqs = np.empty(0, dtype=np.float64)
+        self._bl_margins = np.empty(0, dtype=np.float64)
+        self._rebuild_blacklist_arrays()
 
         self._stop_evt = threading.Event()
         self._skip_evt = threading.Event()          # "Skip" - move on now, frequency stays scannable
@@ -434,6 +439,9 @@ class ScannerEngine(threading.Thread):
         self._read_over_budget = 0
         self._read_max_s = 0.0
 
+        # Last state actually handed to signals.state_changed - see _emit_state().
+        self._last_emitted_state: ScannerState | None = None
+
     # -- public control (safe to call from the GUI thread) -----------
     def request_stop(self) -> None:
         self._stop_evt.set()
@@ -467,6 +475,47 @@ class ScannerEngine(threading.Thread):
 
     def update_blacklist(self, blacklist: list[BlacklistEntry]) -> None:
         self.blacklist = blacklist
+        self._rebuild_blacklist_arrays()
+
+    def _rebuild_blacklist_arrays(self) -> None:
+        """Vectorized mirror of self.blacklist, rebuilt only here and in
+        __init__ - i.e. only when the blacklist itself actually changes,
+        never per-tick. See _blacklist_mask() for why this exists: checking
+        every candidate frequency against every BlacklistEntry with a
+        Python-level any()-over-a-generator call (one Python function call +
+        one dataclass attribute access per comparison) is fine for the
+        occasional single-frequency check (_next_window(), which short-
+        circuits on the first non-blacklisted frequency anyway - most
+        windows have far more clean channels than blacklisted ones) but was
+        being paid in full, with no short-circuit, for *every* frequency in
+        the window on *every* SCANNING tick (~30ms) via the candidate_freqs
+        list comprehension in _main_loop() - O(freqs x blacklist) Python-
+        level work, repeatedly, for as long as a window has any non-active
+        channel left to check (i.e. most of the time). A blacklist can grow
+        to dozens/hundreds of entries over a long session (every "Skip +
+        Blacklist" adds one), so that cost only ever grows the longer the
+        program keeps running - exactly backwards from "shouldn't slow down
+        the longer it runs". Doing the same comparisons as one vectorized
+        numpy broadcast instead keeps the same O(freqs x blacklist) count of
+        individual comparisons but runs them at C speed with no per-
+        comparison Python call/attribute-access overhead.
+        """
+        if self.blacklist:
+            self._bl_freqs = np.array([e.freq_hz for e in self.blacklist], dtype=np.float64)
+            self._bl_margins = np.array([e.margin_hz for e in self.blacklist], dtype=np.float64)
+        else:
+            self._bl_freqs = np.empty(0, dtype=np.float64)
+            self._bl_margins = np.empty(0, dtype=np.float64)
+
+    def _blacklist_mask(self, freqs: list[int]) -> np.ndarray:
+        """Vectorized equivalent of [self._is_blacklisted(f) for f in freqs] -
+        see _rebuild_blacklist_arrays() for why this exists alongside (not
+        instead of) _is_blacklisted(), which remains the right tool for a
+        single-frequency, short-circuiting check."""
+        if not freqs or self._bl_freqs.size == 0:
+            return np.zeros(len(freqs), dtype=bool)
+        arr = np.asarray(freqs, dtype=np.float64)[:, None]
+        return np.any(np.abs(arr - self._bl_freqs[None, :]) <= self._bl_margins[None, :], axis=1)
 
     def request_rebuild(self) -> None:
         """Called from the GUI after any change that affects what gets
@@ -945,6 +994,19 @@ class ScannerEngine(threading.Thread):
         return self._default_lane.advance()
 
     def _emit_state(self, state: ScannerState) -> None:
+        """Deduplicated: the SCANNING-tick caller (_main_loop) re-derives and
+        re-emits this every ~30ms regardless of whether it actually changed
+        (_display_state() only changes when a slot opens/closes/lingers),
+        so without this a queued cross-thread Qt signal was being posted to
+        the GUI thread - and a QLabel.setStyleSheet() re-polish paid there,
+        noticeably pricier than a plain setText() - roughly 30x more often
+        than the displayed value could possibly change. Safe: the only
+        consumer (ScannerPanel.update_state, wired in MainWindow) just
+        displays the current state, nothing here relies on a steady stream
+        of identical events as a heartbeat."""
+        if state == self._last_emitted_state:
+            return
+        self._last_emitted_state = state
         self.signals.state_changed.emit(state.value)
 
     def _display_state(self) -> ScannerState:
@@ -1048,23 +1110,34 @@ class ScannerEngine(threading.Thread):
                 tick_start = time.monotonic() if _DEBUG_TIMING else 0.0
                 window = self._cur_window
 
+                # One FFT/PSD/cumsum for the whole captured block, shared by
+                # both steps below (already-active slots + new-detection
+                # candidates) instead of each independently recomputing its
+                # own - see channelizer.spectrum_cumsum()'s docstring.
+                spectrum = spectrum_cumsum(iq, sample_rate)
+
                 # 1. Advance whatever's already active (demod/play/record,
                 # decide continue/linger/close) - see _service_active_slots.
-                primary_level = self._service_active_slots(iq, sample_rate, window)
+                primary_level = self._service_active_slots(iq, spectrum, sample_rate, window)
                 any_active = bool(self._slots)
 
                 # 2. Look for new activity - either the very first detection
                 # in this window, or an *additional* channel while something
                 # else is already active. No cap on how many can open.
+                # Vectorized blacklist check (see _blacklist_mask) - a plain
+                # per-frequency any()-over-blacklist call here would re-scan
+                # the whole blacklist for every one of window.freqs, every
+                # tick, with no short-circuit (list comprehensions can't).
+                not_blacklisted = ~self._blacklist_mask(window.freqs)
                 candidate_freqs = [
-                    f for f in window.freqs
-                    if not self._is_blacklisted(f) and f not in self._slots
+                    f for f, ok in zip(window.freqs, not_blacklisted)
+                    if ok and f not in self._slots
                 ]
                 raw_powers: dict[int, float] = {}
                 best_freq = best_level = None
                 if candidate_freqs:
-                    raw_powers = channel_powers_dbfs(
-                        iq, sample_rate, window.center_hz, candidate_freqs, self._channel_bw_map,
+                    raw_powers = channel_powers_from_spectrum(
+                        spectrum, window.center_hz, candidate_freqs, self._channel_bw_map,
                     )
                     # Corrected only for picking/triggering - see
                     # _apply_edge_compensation. raw_powers (uncorrected)
@@ -1251,14 +1324,17 @@ class ScannerEngine(threading.Thread):
         )
 
     # -- slot management -----------------------------------------------
-    def _service_active_slots(self, iq, sample_rate: float, window: ScanWindow) -> float | None:
+    def _service_active_slots(self, iq, spectrum, sample_rate: float, window: ScanWindow) -> float | None:
         """Advances every currently-open slot by one IQ block. Returns the
         primary slot's current level (for the level meter), or None if
-        nothing is active."""
+        nothing is active. ``spectrum`` is this tick's (bin_freqs, cumsum)
+        pair from channelizer.spectrum_cumsum(iq, sample_rate) - computed
+        once by the caller and reused here instead of each recomputing its
+        own FFT over the same iq (see _main_loop's SCANNING branch)."""
         if not self._slots:
             return None
         active_freqs = list(self._slots.keys())
-        raw_powers = channel_powers_dbfs(iq, sample_rate, window.center_hz, active_freqs, self._channel_bw_map)
+        raw_powers = channel_powers_from_spectrum(spectrum, window.center_hz, active_freqs, self._channel_bw_map)
         trigger_dbfs = self._effective_trigger_dbfs(window)
         linger_time_ms = self._effective_linger_time_ms(window)
         primary_level = None

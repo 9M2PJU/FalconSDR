@@ -4,6 +4,7 @@ patrz transcription_engine.py - liczy się jakość, nie szybkość)."""
 from __future__ import annotations
 
 import logging
+import time
 from typing import List, Optional
 
 from PyQt6.QtCore import QThread, pyqtSignal
@@ -14,6 +15,24 @@ from smartscan.playback.transcription_cache import TranscriptionCache
 from smartscan.playback.transcription_engine import transcribe_recording
 
 logger = logging.getLogger(__name__)
+
+# TranscriptionCache.save() rewrites the *entire* cache file (json.dumps of
+# every recording ever transcribed - see transcription_cache.py) - fine as an
+# occasional cost, but run() used to call it after every single item, making
+# a batch of n newly-transcribed files against an archive of N accumulated
+# ones cost O(n*N) total disk I/O/serialization instead of O(n) - i.e. it got
+# slower (per new file) the longer/more the program had already been used,
+# exactly backwards from "shouldn't slow down the longer it runs". Throttling
+# to at most once per this many seconds (plus always once at the very end)
+# keeps the same practical durability - a crash mid-batch loses at most this
+# many seconds of already-transcribed work, same order of magnitude as
+# QualityCache's own debounced save in playback_panel.py - while making the
+# save frequency scale with wall-clock time instead of archive size. Whisper
+# transcription itself typically takes seconds per file anyway, so this
+# rarely changes save frequency for a single slow (GPU-bound or CPU-bound)
+# item - it only matters (positively) for a big backlog of quick/no-op items
+# (e.g. mostly-cached re-scans, or very short recordings).
+_SAVE_INTERVAL_S = 5.0
 
 
 class TranscriptionWorker(QThread):
@@ -78,13 +97,20 @@ class TranscriptionWorker(QThread):
             todo = [r for r in self._recordings if self._cached_result(r) is None]
         total = len(todo)
         self.progress.emit(0, total)
+        last_save = time.monotonic()
+        dirty = False
         for i, rec in enumerate(todo):
             if self._stop_requested:
                 break
             try:
                 result = transcribe_recording(rec, self._config, forced_language=self._forced_language)
                 self._cache.put(rec.cache_key(), result)
-                self._cache.save()
+                dirty = True
+                now = time.monotonic()
+                if now - last_save >= _SAVE_INTERVAL_S:
+                    self._cache.save()
+                    last_save = now
+                    dirty = False
                 self.item_done.emit(str(rec.path), result)
             except Exception:
                 # Zaobserwowane naprawdę (crash.log/journalctl): rec.path bywa
@@ -101,4 +127,9 @@ class TranscriptionWorker(QThread):
                 # nie może już zabijać reszty programu.
                 logger.exception("Transkrypcja: pominięto %s (błąd przetwarzania)", rec.path)
             self.progress.emit(i + 1, total)
+        if dirty:
+            # Whatever was put() since the last periodic save (including a
+            # stop mid-batch) must still land on disk - only the *frequency*
+            # of saves is throttled, nothing here is allowed to be lost.
+            self._cache.save()
         self.finished_batch.emit()
