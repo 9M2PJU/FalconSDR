@@ -10,7 +10,9 @@ from __future__ import annotations
 
 import ctypes
 import logging
+import os
 import threading
+import time
 from datetime import datetime, timezone
 from pathlib import Path
 from typing import Optional
@@ -80,52 +82,151 @@ _lock = threading.Lock()
 _generic_model = None
 _english_atc_model = None
 _active_config: Optional[TranscriptionConfig] = None
-# Set once an actual inference call (not just model construction) fails with
-# a CUDA error - see transcribe_recording(). WhisperModel(..., device="cuda")
-# can succeed even when the GPU can't actually run it (ctranslate2 allocates
-# lazily on first real use), so _load_model()'s own try/except doesn't catch
-# this - it only catches load-time failures. Sticky for the rest of the
-# process: a GPU that's out of memory or has an invalid device ordinal isn't
-# going to fix itself mid-session, and retrying it per-file was hammering
-# the GPU/CPU on every single transcription (visible as a wall of repeated
-# "CUDA failed"/"invalid device ordinal" tracebacks, one set per file, over
-# and over) badly enough to be a real resource-contention problem for
-# anything else running at the same time.
+# ``WhisperModel(..., device="cuda")`` może przejść poprawnie, a wyłożyć się
+# dopiero na pierwszej inferencji, ponieważ ctranslate2 część alokacji robi
+# leniwie. Nie przechodzimy jednak od razu na CPU: na kartach z ograniczonym
+# VRAM (np. 8 GB) ``int8_float16`` zwykle pozwala dalej używać GPU z małą
+# stratą jakości. CPU jest dopiero ostatnim fallbackiem - ale nie trwałym:
+# patrz _force_cpu_since/_GPU_RETRY_COOLDOWN_S, bo "trwały do końca sesji"
+# okazało się w praktyce oznaczać "prawie każda sesja", nie odosobniony
+# przypadek (dziennik z ostatnich 4 dni: 7 na 7 sesji skończyło na CPU,
+# zawsze na "CUDA failed with error out of memory") - GPU ma realnie
+# 6+ GB wolne w spoczynku, więc to bardziej chwilowy skok/fragmentacja
+# VRAM (np. po jednym wyjątkowo długim nagraniu) niż trwały brak zasobu,
+# i zwykle miałoby szansę wrócić do działania, gdyby dać mu tę szansę.
 _force_cpu = False
+_force_cpu_since: Optional[float] = None
+_gpu_compute_type: Optional[str] = None
+# Po tylu sekundach na CPU spróbuj GPU od nowa (samoograniczające się: jeśli
+# znowu się wyłoży, _force_cpu i _force_cpu_since po prostu ustawiają się na
+# nowo, przesuwając kolejną próbę o tyle samo w przyszłość - zero ryzyka
+# młócenia GPU co plik, jak przy oryginalnym, jeszcze bardziej upartym
+# podejściu, które to zastąpiło).
+_GPU_RETRY_COOLDOWN_S = 1800.0
+# Transkrypcja na CPU (kiedy do niej dojdzie) domyślnie próbuje zająć
+# WSZYSTKIE rdzenie - a to właśnie one są potrzebne w czasie rzeczywistym
+# wątkowi skanera/audio. Zaobserwowane naprawdę (patrz sesja, która to
+# dodała): zajęty procesor podnosi realny poziom szumu w nasłuchu (opóźnione
+# readStream() -> sklejane nieciągłe próbki -> szerokopasmowy artefakt w
+# FFT), co przy niskim trigger_level potrafi zalać wykrywanie fałszywkami -
+# a każda z nich trafia do tej samej kolejki transkrypcji, jeszcze bardziej
+# obciążając CPU. Zostawiamy realny margines rdzeni wolny zamiast pozwalać
+# Whisperowi zająć wszystko, żeby nie zamykać tego błędnego koła samemu.
+_CPU_RESERVED_CORES = 4
+
+
+# Domyślny punkt startowy dla "auto" na GPU. Był kiedyś "float16", ale
+# realne dzienniki (journalctl z tej karty, 8GB) pokazały, że to reliably
+# za ciasne: oba modele (large-v3 + medium ATC) w float16 to ~4.5GB samych
+# wag, i mimo że działa to przez pewien czas (zaobserwowane: np. 37 plików
+# bez problemu), prędzej czy później - dłuższe nagranie albo zwykła
+# fragmentacja alokatora CUDA po wielu wywołaniach z rzędu - i tak wyłoży
+# się na "CUDA failed with error out of memory", po czym i tak lądowaliśmy
+# w tym samym miejscu (int8_float16) tyle że po stracie czasu na próbę i
+# błąd. Zaczynanie od razu tutaj nie gwarantuje zera awarii (wystarczająco
+# długie nagranie może przeciążyć każdy wariant), ale realnie zostawia dużo
+# więcej marginesu, więc powinno je uczynić rzadkimi zamiast rutynowymi.
+_DEFAULT_AUTO_GPU_COMPUTE_TYPE = "int8_float16"
+
+
+def _gpu_compute_type_for(config: TranscriptionConfig) -> str:
+    """Zwraca aktualny wariant GPU dla tej sesji.
+
+    ``int8_float16`` trzyma wagi modelu jako int8, ale nadal wykonuje
+    obliczenia na GPU w float16. Jest więc właściwym planem B dla ``auto``,
+    zamiast porzucania GPU po pojedynczym błędzie alokacji.
+    """
+    if _gpu_compute_type is not None:
+        return _gpu_compute_type
+    return _DEFAULT_AUTO_GPU_COMPUTE_TYPE if config.compute_type == "auto" else config.compute_type
 
 
 def _is_cuda_error(exc: BaseException) -> bool:
-    return "cuda" in str(exc).lower()
+    message = str(exc).lower()
+    return any(token in message for token in ("cuda", "cudnn", "cublas"))
+
+
+def _set_force_cpu(value: bool) -> None:
+    """Ustawia _force_cpu razem z _force_cpu_since (do liczenia cooldownu
+    przed kolejną próbą GPU - patrz _maybe_retry_gpu_locked)."""
+    global _force_cpu, _force_cpu_since
+    _force_cpu = value
+    _force_cpu_since = time.monotonic() if value else None
+
+
+def _cpu_thread_count() -> int:
+    total = os.cpu_count() or 4
+    return max(1, total - _CPU_RESERVED_CORES)
 
 
 def _load_model(model_id: str, config: TranscriptionConfig):
+    global _gpu_compute_type
     from faster_whisper import WhisperModel
 
     device = "cpu" if _force_cpu else config.device
-    compute_type = config.compute_type
     if device in ("auto", "cuda"):
         _preload_cuda_libs()
         try:
             model = WhisperModel(
                 model_id, device="cuda",
-                compute_type="float16" if compute_type == "auto" else compute_type,
+                compute_type=_gpu_compute_type_for(config),
             )
-            logger.info("Model transkrypcji %s załadowany na GPU", model_id)
+            logger.info(
+                "Model transkrypcji %s załadowany na GPU (%s)",
+                model_id, _gpu_compute_type_for(config),
+            )
             return model
         except Exception as exc:  # noqa: BLE001 - dowolny powód (brak GPU, brak VRAM, brak libcublas...) -> CPU
+            # Model angielski jest ładowany po ogólnym; przy małej ilości
+            # VRAM jego załadowanie może być pierwszym miejscem, w którym
+            # ujawnia się brak pamięci. Zanim wybierzemy CPU, spróbujmy
+            # lżejszych wag na tej samej karcie.
+            if config.compute_type == "auto" and _gpu_compute_type_for(config) == "float16":
+                _gpu_compute_type = "int8_float16"
+                logger.warning(
+                    "Nie udało się załadować %s na GPU w float16 (%s); "
+                    "ponawiam na GPU w int8_float16.", model_id, exc,
+                )
+                return _load_model(model_id, config)
             if device == "cuda":
                 raise
-            logger.warning("Nie udało się załadować %s na GPU (%s), używam CPU", model_id, exc)
-    ct = compute_type if compute_type != "auto" else "int8"
-    model = WhisperModel(model_id, device="cpu", compute_type=ct)
-    logger.info("Model transkrypcji %s załadowany na CPU", model_id)
+            logger.warning(
+                "Nie udało się załadować %s na GPU także w %s (%s), "
+                "przechodzę na CPU (spróbuję znów GPU za ~%.0f min).",
+                model_id, _gpu_compute_type_for(config), exc, _GPU_RETRY_COOLDOWN_S / 60,
+            )
+            _set_force_cpu(True)
+    ct = config.compute_type if config.compute_type != "auto" else "int8"
+    cpu_threads = _cpu_thread_count()
+    model = WhisperModel(model_id, device="cpu", compute_type=ct, cpu_threads=cpu_threads)
+    logger.info("Model transkrypcji %s załadowany na CPU (cpu_threads=%d)", model_id, cpu_threads)
     return model
+
+
+def _maybe_retry_gpu_locked() -> None:
+    """Wołane z _get_models() pod _lock: jeśli jesteśmy na CPU wystarczająco
+    długo, daje GPU kolejną szansę zamiast trzymać się CPU do końca sesji -
+    patrz _force_cpu_since dlaczego "do końca sesji" był w praktyce zbyt
+    upartym założeniem. Samoograniczające się: nieudana próba i tak wraca
+    na CPU przez _load_model(), tylko z odświeżonym _force_cpu_since, więc
+    to nie staje się próbą co plik."""
+    global _generic_model, _english_atc_model, _active_config
+    if not _force_cpu or _force_cpu_since is None:
+        return
+    if time.monotonic() - _force_cpu_since < _GPU_RETRY_COOLDOWN_S:
+        return
+    logger.info("Transkrypcja: minął cooldown - próbuję ponownie GPU.")
+    _set_force_cpu(False)
+    _generic_model = None
+    _english_atc_model = None
+    _active_config = None
 
 
 def _get_models(config: TranscriptionConfig):
     """Leniwie ładuje oba modele (dzielone między kolejnymi wywołaniami z wątku roboczego)."""
     global _generic_model, _english_atc_model, _active_config
     with _lock:
+        _maybe_retry_gpu_locked()
         if _active_config != config or _generic_model is None:
             _generic_model = _load_model(config.generic_model, config)
             _english_atc_model = _load_model(config.english_atc_model, config)
@@ -168,12 +269,20 @@ def _classify_status(segments, lang_probability: float, duration_after_vad: floa
 
 
 def transcribe_recording(
-    rec: Recording, config: TranscriptionConfig, _retried: bool = False,
+    rec: Recording, config: TranscriptionConfig, _recovery_step: int = 0,
+    forced_language: Optional[str] = None,
 ) -> TranscriptionResult:
     """Transkrybuje pojedyncze nagranie. Nie rzuca wyjątków na zewnątrz - błędy
     (uszkodzony plik, brak modelu, wyczerpana pamięć GPU...) są łapane i
     zwracane jako status "error", żeby jedno złe nagranie nie zatrzymało całej
-    kolejki w tle."""
+    kolejki w tle.
+
+    ``forced_language`` (kod ISO, np. "pl"/"en") pomija całkowicie
+    detect_language()/_resolve_language() - używane wyłącznie z ręcznego
+    "Transkrybuj ponownie" z wybranym językiem w Odtwarzaczu (na słabym
+    audio detekcja bywa zawodna, patrz _resolve_language), nigdy z
+    automatycznej kolejki w tle (TranscriptionWorker jej nie ustawia), więc
+    to nie zmienia zachowania auto-transkrypcji w żaden sposób."""
     now = datetime.now(timezone.utc).isoformat()
 
     if rec.duration_sec and rec.duration_sec < config.min_duration_sec:
@@ -188,8 +297,11 @@ def transcribe_recording(
         generic_model, english_atc_model = _get_models(config)
         audio = decode_audio(str(rec.path))
 
-        raw_lang, raw_prob, all_probs = generic_model.detect_language(audio=audio, vad_filter=True)
-        lang, prob = _resolve_language(raw_lang, raw_prob, all_probs, config.candidate_languages)
+        if forced_language:
+            lang, prob = forced_language, 1.0
+        else:
+            raw_lang, raw_prob, all_probs = generic_model.detect_language(audio=audio, vad_filter=True)
+            lang, prob = _resolve_language(raw_lang, raw_prob, all_probs, config.candidate_languages)
 
         if lang == "en":
             model, engine_id = english_atc_model, config.english_atc_model
@@ -212,23 +324,40 @@ def transcribe_recording(
             status=status, engine=engine_id, transcribed_at=now,
         )
     except Exception as exc:
-        global _force_cpu, _generic_model, _english_atc_model, _active_config
-        if not _retried and not _force_cpu and _is_cuda_error(exc):
-            # The cached model(s) claimed to load fine on GPU but can't
-            # actually run - force every model to reload on CPU from here
-            # on, and give this one file a second, immediate chance on CPU
-            # instead of parking it as "error" (which would otherwise just
-            # get retried GPU-first again next batch - see _force_cpu above).
-            logger.warning(
-                "Transkrypcja: GPU nie dziala mimo poprawnego zaladowania modelu (%s) - "
-                "trwale przechodze na CPU do konca sesji.", exc,
-            )
-            with _lock:
-                _force_cpu = True
-                _generic_model = None
-                _english_atc_model = None
-                _active_config = None
-            return transcribe_recording(rec, config, _retried=True)
+        global _gpu_compute_type, _generic_model, _english_atc_model, _active_config
+        if not _force_cpu and _is_cuda_error(exc):
+            # Najpierw zresetuj oba modele i spróbuj lżejszych wag GPU.
+            # Reset jest konieczny: model float16 mógł zająć VRAM zanim
+            # błąd wyszedł przy właściwej inferencji.
+            if config.compute_type == "auto" and _gpu_compute_type_for(config) == "float16" and _recovery_step == 0:
+                logger.warning(
+                    "Transkrypcja: GPU nie wykonało inferencji w float16 (%s); "
+                    "ponawiam na GPU w int8_float16.", exc,
+                )
+                with _lock:
+                    _gpu_compute_type = "int8_float16"
+                    _generic_model = None
+                    _english_atc_model = None
+                    _active_config = None
+                return transcribe_recording(rec, config, _recovery_step=1, forced_language=forced_language)
+
+            # Dopiero druga awaria GPU (albo awaria wariantu wymuszonego
+            # przez użytkownika) daje CPU. Ten retry jest ograniczony, więc
+            # nie zalewamy logu kolejnymi próbami dla każdego pliku. Nie na
+            # zawsze - patrz _GPU_RETRY_COOLDOWN_S: to była poprzednia,
+            # zbyt uparta wersja tego komentarza.
+            if _recovery_step < 2:
+                logger.warning(
+                    "Transkrypcja: GPU nie dziala także po ponowieniu (%s) - "
+                    "przechodzę na CPU (spróbuję znów GPU za ~%.0f min).",
+                    exc, _GPU_RETRY_COOLDOWN_S / 60,
+                )
+                with _lock:
+                    _set_force_cpu(True)
+                    _generic_model = None
+                    _english_atc_model = None
+                    _active_config = None
+                return transcribe_recording(rec, config, _recovery_step=2, forced_language=forced_language)
         logger.exception("Transkrypcja nie powiodła się dla %s", rec.path)
         return TranscriptionResult(
             text="", language="", language_probability=0.0,

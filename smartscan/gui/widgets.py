@@ -3,7 +3,7 @@ from __future__ import annotations
 
 import numpy as np
 from PyQt6.QtCore import Qt, QRectF, pyqtSignal
-from PyQt6.QtGui import QColor, QLinearGradient, QPainter, QPen
+from PyQt6.QtGui import QColor, QFont, QFontDatabase, QLinearGradient, QPainter, QPen
 from PyQt6.QtWidgets import (
     QDoubleSpinBox,
     QHBoxLayout,
@@ -19,6 +19,69 @@ try:
     HAVE_PYQTGRAPH = True
 except ImportError:
     HAVE_PYQTGRAPH = False
+
+
+def _with_emoji_fallback(font: QFont) -> QFont | None:
+    """Returns a copy of `font` with Noto Color Emoji appended to its family
+    list (after whatever family it already has), or None if that font isn't
+    installed or is already present. Shared by apply_emoji_font() (one
+    widget) and install_app_emoji_fallback() (the whole app)."""
+    if "Noto Color Emoji" not in set(QFontDatabase.families()):
+        return None
+    out = QFont(font)
+    families = out.families() or [out.family()]
+    if "Noto Color Emoji" in families:
+        return None
+    out.setFamilies(families + ["Noto Color Emoji"])
+    return out
+
+
+def apply_emoji_font(widget: QWidget) -> None:
+    """Adds Noto Color Emoji as a font fallback on just this one widget -
+    for free-text fields where a user might actually type an emoji (e.g. a
+    channel name like "🚒 KRG 1"). Without this, such emoji render as blank
+    boxes even though the font is installed and FreeType can decode its
+    bitmaps (CBDT/CBLC, needs libpng - present).
+
+    Mostly redundant now that install_app_emoji_fallback() covers the whole
+    app (see main.py) - kept as defense in depth for any widget whose font
+    gets fully replaced after app startup (e.g. by a later setFont() call
+    that doesn't preserve the family list), since it costs nothing when the
+    family is already there.
+    """
+    updated = _with_emoji_fallback(widget.font())
+    if updated is not None:
+        widget.setFont(updated)
+
+
+def install_app_emoji_fallback(app) -> None:
+    """App-wide counterpart of apply_emoji_font(): appends Noto Color Emoji
+    to QApplication's default font, so typed emoji (channel names, etc.)
+    render in color everywhere instead of only in the handful of fields
+    apply_emoji_font() was applied to one by one.
+
+    Must run BEFORE app.setStyleSheet(DARK_STYLESHEET) - once a widget's
+    font, has been touched by that stylesheet, per-widget setFont() calls
+    become unreliable (Qt's QSS engine re-derives each widget's effective
+    font from QApplication.font() on every "polish", which can silently
+    drop a family list appended after the fact). Setting it on the
+    QApplication's own default font first means the stylesheet's font-size
+    rule cascades *from* a font that already carries the emoji fallback,
+    instead of fighting it.
+
+    This was tried once before as a plain app.setFont() call and reverted,
+    apparently having broken plain icon-glyph buttons elsewhere ("✕", "⚙")
+    - they came out looking like a single dot. That turned out to be a
+    false lead: those buttons were actually being clipped by a fixed 28px
+    width fighting the theme's own `QPushButton { padding: 6px 12px; }`
+    rule (confirmed via sizeHint() measurement - see scanner_panel.py's
+    _BandRow, now fixed there with a local per-button padding override),
+    unrelated to the font. With that real cause fixed independently of
+    which font ends up rendering the glyph, the app-wide fallback is safe.
+    """
+    updated = _with_emoji_fallback(app.font())
+    if updated is not None:
+        app.setFont(updated)
 
 
 class ClickToSeekSlider(QSlider):
@@ -96,6 +159,16 @@ class LevelMeter(QWidget):
         painter.drawRect(rect.adjusted(0, 0, -1, -1))
 
 
+# Shared between SliderSpin.set_accent() (Scanner tab's per-band "advanced"
+# edit mode) and SpectrumView's trigger-line color (see its update_spectrum())
+# so the same accent means the same thing in both places: "this reflects one
+# band's own override, not the global setting". Deliberately neither blue
+# (the sliders' normal look, inherited from the desktop theme) nor red (the
+# trigger line's normal color, and the app's general "stop/danger" accent
+# elsewhere) - amber reads as "customized", not as an alert.
+BAND_OVERRIDE_ACCENT = "#f5a623"
+
+
 class SliderSpin(QWidget):
     """A QSlider tied to a spin box, both updating live as you drag (no need
     to release or press Enter) - used for Trigger Level/Squelch, Gain, Tuning
@@ -169,8 +242,25 @@ class SliderSpin(QWidget):
         self.slider.setEnabled(enabled)
         self.spin.setEnabled(enabled)
 
+    def set_accent(self, color: str | None) -> None:
+        """Recolors just the slider (not the spin box) - used to mark "this
+        control is currently editing one band's own override, not the
+        global setting" (see ScannerPanel's advanced per-band edit mode and
+        BAND_OVERRIDE_ACCENT above). None restores the normal look."""
+        if color is None:
+            self.slider.setStyleSheet("")
+            return
+        self.slider.setStyleSheet(
+            "QSlider::groove:horizontal { height: 4px; background: #3a3d44; border-radius: 2px; }"
+            f"QSlider::sub-page:horizontal {{ background: {color}; border-radius: 2px; }}"
+            f"QSlider::handle:horizontal {{ background: {color}; width: 14px; "
+            "margin: -6px 0; border-radius: 7px; }"
+        )
+
 
 _TRIGGER_HEADROOM_DB = 15.0  # clear space always kept above the trigger line - see update_spectrum()
+_TRIGGER_COLOR_DEFAULT = "#ff3b30"
+_TRIGGER_COLOR_CUSTOM = BAND_OVERRIDE_ACCENT  # see update_spectrum()'s `custom` param
 
 
 class SpectrumView(QWidget):
@@ -203,7 +293,9 @@ class SpectrumView(QWidget):
             self._plot.getPlotItem().getViewBox().setMouseEnabled(x=False, y=False)
             self._plot.setMenuEnabled(False)
             self._curve = self._plot.plot(pen=pg.mkPen("#2ecc71", width=1.5))
-            self._trigger_line = pg.InfiniteLine(angle=0, pen=pg.mkPen("#ff3b30", width=1, style=Qt.PenStyle.DashLine))
+            self._trigger_line = pg.InfiniteLine(
+                angle=0, pen=pg.mkPen(_TRIGGER_COLOR_DEFAULT, width=1, style=Qt.PenStyle.DashLine)
+            )
             self._plot.addItem(self._trigger_line)
             layout.addWidget(self._plot)
         else:
@@ -214,11 +306,19 @@ class SpectrumView(QWidget):
     def available(self) -> bool:
         return self._plot is not None
 
-    def update_spectrum(self, freqs_hz, db, trigger_dbfs: float) -> None:
+    def update_spectrum(self, freqs_hz, db, trigger_dbfs: float, custom: bool = False) -> None:
+        """``custom`` marks that the currently-tuned window's band has its
+        own "advanced" trigger override (see ScannerEngine._effective_trigger_dbfs) -
+        the dashed line switches from the usual red to the same amber used
+        for that band's sliders while it's being edited (see SliderSpin.set_accent),
+        so the reason the line isn't where you'd expect from the global
+        Trigger Level slider is visually obvious instead of looking like a bug."""
         if not self.available:
             return
         self._curve.setData(freqs_hz / 1e6, db)
         self._trigger_line.setValue(trigger_dbfs)
+        color = _TRIGGER_COLOR_CUSTOM if custom else _TRIGGER_COLOR_DEFAULT
+        self._trigger_line.setPen(pg.mkPen(color, width=1, style=Qt.PenStyle.DashLine))
         # Autorange alone tends to hug the trigger line right against the
         # top edge whenever nothing currently on screen is above it (the
         # common case) - there's nowhere to actually *see* a signal once it

@@ -1,15 +1,16 @@
-"""Curated military/NATO aviation and fire-brigade frequencies for Poland with
-a realistic chance of catching real traffic (tankers, Baltic Air Policing/QRA,
-exercises near the eastern flank; PSP/OSP rescue-firefighting dispatch). All
-aviation voice channels use AM, same as civil aviation; fire-brigade channels
-use NFM.
+"""Curated military/NATO aviation, fire-brigade and emergency-services
+frequencies for Poland with a realistic chance of catching real traffic
+(tankers, Baltic Air Policing/QRA, exercises near the eastern flank; PSP/OSP
+rescue-firefighting dispatch; PRM ambulance dispatch). All aviation voice
+channels use AM, same as civil aviation; fire-brigade/PRM channels use NFM.
 
 Sources are public monitoring references (NATO Joint Civil/Military Frequency
 Agreement UHF band 225-400 MHz, published guard/common-use frequencies, Polish
-military airbase tower/approach frequencies, and the nationwide PSP "Kanal
+military airbase tower/approach frequencies, the nationwide PSP "Kanal
 Ratowniczo-Gasniczy" (KRG) channel plan plus the OSP siren-alerting frequency
-pair) as documented by hobbyist aviation/PMR-monitoring sites. Real-world
-usage shifts with exercises, re-assignments and PSP/OSP's ongoing migration to
+pair, and the 168.5-169.2 MHz band used by PRM/pogotowie ratunkowe dispatch)
+as documented by hobbyist aviation/PMR-monitoring sites. Real-world usage
+shifts with exercises, re-assignments and PSP/OSP's ongoing migration to
 digital DMR (many OSP units still run analog, but not all), so treat this as a
 good starting point, not a guarantee - add anything you personally confirm
 active via the Memory List tab.
@@ -127,6 +128,15 @@ BAND_PRESETS: list[BandPreset] = [
             "tez gotowe kanaly KRG w zakladce Kanaly (\"Wczytaj straz pozarna\")."
         ),
         start_hz=148_662_500, stop_hz=149_337_500, step_hz=12_500, modulation="NFM",
+    ),
+    BandPreset(
+        id="prm", label="Służby Ratunkowe / PRM (168.5-169.2 MHz)",
+        tooltip=(
+            "Państwowe Ratownictwo Medyczne (karetki / PRM), Pogotowie\n"
+            "Energetyczne i służby komunalne. Karetki i dyspozytorzy PRM\n"
+            "w wielu rejonach wciąż nadają tu w analogu."
+        ),
+        start_hz=168_500_000, stop_hz=169_200_000, step_hz=12_500, modulation="NFM",
     ),
 ]
 

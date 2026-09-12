@@ -16,7 +16,7 @@ from ...config import AppConfig, VfoRangeConfig
 from ...military_presets import BAND_PRESETS
 from ...models import Channel
 from ...sdr_backend import DEFAULT_GAIN_RANGE_DB, SoapyBackend
-from ..widgets import LevelMeter, SliderSpin, SpectrumView
+from ..widgets import BAND_OVERRIDE_ACCENT, LevelMeter, SliderSpin, SpectrumView, apply_emoji_font
 
 RESOURCES_DIR = Path(__file__).resolve().parent.parent / "resources"
 _FOLDER_ICON = QIcon(str(RESOURCES_DIR / "folder.svg"))
@@ -32,7 +32,8 @@ class _BandRow(QWidget):
     """
 
     def __init__(self, entry: VfoRangeConfig, on_change: Callable[[], None],
-                 on_remove: Callable[["_BandRow"], None], parent=None):
+                 on_remove: Callable[["_BandRow"], None],
+                 on_advanced: Callable[["_BandRow"], None], parent=None):
         super().__init__(parent)
         self.entry = entry
         self._on_change = on_change
@@ -50,6 +51,7 @@ class _BandRow(QWidget):
         self.label_edit = QLineEdit(entry.label)
         self.label_edit.setPlaceholderText("Nazwa")
         self.label_edit.setMaximumWidth(150)
+        apply_emoji_font(self.label_edit)
         self.label_edit.editingFinished.connect(self._on_label)
         lay.addWidget(self.label_edit)
 
@@ -116,8 +118,32 @@ class _BandRow(QWidget):
         self.weight_spin.valueChanged.connect(self._on_weight)
         lay.addWidget(self.weight_spin)
 
+        # Zebatka renderowala sie od zawsze poprawnie jako kolorowy glif
+        # (NotoColorEmoji faktycznie pokrywa U+2699 - sprawdzone wprost w
+        # foncie), problem byl gdzie indziej: globalny QPushButton { padding:
+        # 6px 12px; } z theme.py DARK_STYLESHEET razem z setFixedWidth(28)
+        # zostawia realnie ~2px na sam glif (zmierzone: QPushButton("✕").
+        # sizeHint() pod tym stylem to QSize(37, 32), czyli o 9px szersze niz
+        # przycisk) - stad wyglada jak kropka, niezaleznie od tego, jaki znak
+        # tam wstawimy. Lokalny override paddingu (ponizej) daje glifowi
+        # miejsce w tej samej szerokosci 28px zamiast zmieniac znak.
+        _ICON_BTN_STYLE = "QPushButton { padding: 2px; }"
+
+        self.advanced_btn = QPushButton("⚙")
+        self.advanced_btn.setFixedWidth(28)
+        self.advanced_btn.setStyleSheet(_ICON_BTN_STYLE)
+        self.advanced_btn.setCheckable(True)
+        self.advanced_btn.setToolTip(
+            "Zaawansowane - wlasny trigger level, tuning/linger time, gain i\n"
+            "redukcja szumow tylko dla tego pasma, niezalezne od reszty\n"
+            "skanowanych pasm/kanalow (patrz suwaki ponizej po kliknieciu)."
+        )
+        self.advanced_btn.clicked.connect(lambda: on_advanced(self))
+        lay.addWidget(self.advanced_btn)
+
         self.remove_btn = QPushButton("✕")
         self.remove_btn.setFixedWidth(28)
+        self.remove_btn.setStyleSheet(_ICON_BTN_STYLE)
         self.remove_btn.setToolTip("Usun to pasmo z listy.")
         self.remove_btn.clicked.connect(lambda: on_remove(self))
         lay.addWidget(self.remove_btn)
@@ -325,16 +351,33 @@ class ScannerPanel(QGroupBox):
     settings_changed = pyqtSignal()
     memory_list_requested = pyqtSignal()  # "Lista pamieci" shortcut - handled by MainWindow
     channel_weight_changed = pyqtSignal()  # a channel's weight was edited inline - MainWindow persists/rebuilds
+    # Emitted (VfoRangeConfig or None) when a band's "advanced" edit mode
+    # starts/stops - MainWindow forwards this straight to
+    # ScannerEngine.set_solo_band() so a running scan restricts itself to
+    # just that band while it's being tuned in isolation.
+    solo_band_changed = pyqtSignal(object)
 
     def __init__(self, config: AppConfig, channels: list[Channel] | None = None, parent=None):
         super().__init__("Skaner", parent)
         self.config = config
         self.channels: list[Channel] = channels or []
         self._loading = True
+        # "Advanced" per-band edit mode state (Scanner tab band list) - see
+        # _start_editing_band/_stop_editing_band.
+        self._editing_band: VfoRangeConfig | None = None
+        self._editing_row: "_BandRow | None" = None
+        self._band_rows: list["_BandRow"] = []
         self._build_ui()
         self._load_from_config()
         self.memory_list_row.set_channels(self.channels)
         self._loading = False
+
+    @property
+    def editing_band(self) -> VfoRangeConfig | None:
+        """Read by MainWindow._start_scanner() to pick up an edit already in
+        progress when Start is pressed (e.g. tuning a band's settings before
+        ever starting the scan for the first time this session)."""
+        return self._editing_band
 
     def set_channels(self, channels: list[Channel]) -> None:
         """Odswieza podglad Listy pamieci (nazwy/wagi) po zmianie kanalow z
@@ -403,6 +446,29 @@ class ScannerPanel(QGroupBox):
         timing_form.addRow("", self.wfm_stereo_check)
 
         root.addLayout(timing_form)
+
+        # Tylko widoczne w trakcie edycji "zaawansowanych" ustawien jednego
+        # pasma (patrz _BandRow.advanced_btn / _start_editing_band) - suwaki
+        # powyzej w tym trybie kontroluja to jedno pasmo (na amber, patrz
+        # BAND_OVERRIDE_ACCENT) zamiast globalnych ustawien.
+        band_edit_row = QHBoxLayout()
+        self.save_band_btn = QPushButton("Zapisz")
+        self.save_band_btn.setToolTip(
+            "Zapisuje biezace ustawienia (trigger/timing/gain/redukcja szumow)\n"
+            "jako wlasne dla edytowanego pasma i wraca do zwyklej edycji."
+        )
+        self.save_band_btn.clicked.connect(self._on_save_band_clicked)
+        self.reset_band_btn = QPushButton("Przywróć domyślne")
+        self.reset_band_btn.setToolTip(
+            "Usuwa wszystkie zaawansowane ustawienia tego pasma (wraca do\n"
+            "globalnych) i od razu zapisuje."
+        )
+        self.reset_band_btn.clicked.connect(self._on_reset_band_clicked)
+        band_edit_row.addWidget(self.save_band_btn)
+        band_edit_row.addWidget(self.reset_band_btn)
+        self.save_band_btn.setVisible(False)
+        self.reset_band_btn.setVisible(False)
+        root.addLayout(band_edit_row)
 
         self.level_meter = LevelMeter()
         root.addWidget(self.level_meter)
@@ -628,6 +694,20 @@ class ScannerPanel(QGroupBox):
 
     def _load_from_config(self) -> None:
         self.bandwidth_spin.setValue(self.config.device.sample_rate_hz / 1e6)
+        self._load_global_sliders()
+        self.wfm_stereo_check.setChecked(self.config.wfm_stereo_enabled)
+        target = (self.config.device.driver, self.config.device.device_args)
+        for i in range(self.device_combo.count()):
+            if self.device_combo.itemData(i) == target:
+                self.device_combo.setCurrentIndex(i)
+                break
+        self._rebuild_band_rows()
+
+    def _load_global_sliders(self) -> None:
+        """The Trigger/Tuning/Linger/Gain/Noise-reduction controls, set from
+        the global Scanner-tab config - shared by _load_from_config() and
+        _stop_editing_band() (which needs to put them back to this after
+        showing one band's own override values while editing it)."""
         self.tuning_slider.set_value(self.config.timing.tuning_time_ms)
         self.linger_slider.set_value(self.config.timing.linger_time_ms)
         self.trigger_slider.set_value(self.config.trigger_level_dbfs)
@@ -638,13 +718,6 @@ class ScannerPanel(QGroupBox):
         self.nr_check.setChecked(self.config.noise_reduction.enabled)
         self.nr_strength_slider.set_value(round(self.config.noise_reduction.strength * 100))
         self.nr_strength_slider.set_enabled_all(self.config.noise_reduction.enabled)
-        self.wfm_stereo_check.setChecked(self.config.wfm_stereo_enabled)
-        target = (self.config.device.driver, self.config.device.device_args)
-        for i in range(self.device_combo.count()):
-            if self.device_combo.itemData(i) == target:
-                self.device_combo.setCurrentIndex(i)
-                break
-        self._rebuild_band_rows()
 
     def _rebuild_band_rows(self) -> None:
         while self.bands_layout.count():
@@ -652,10 +725,29 @@ class ScannerPanel(QGroupBox):
             widget = item.widget()
             if widget is not None:
                 widget.deleteLater()
+        self._band_rows = []
         for entry in self.config.bands:
-            row = _BandRow(entry, on_change=self._on_band_changed, on_remove=self._on_band_removed)
+            row = _BandRow(
+                entry, on_change=self._on_band_changed, on_remove=self._on_band_removed,
+                on_advanced=self._on_advanced_clicked,
+            )
             self.bands_layout.addWidget(row)
+            self._band_rows.append(row)
         self.bands_layout.addStretch(1)
+        if self._editing_band is not None:
+            # Rows were just rebuilt from scratch - _editing_row (if any)
+            # points at a now-deleted widget, even though the underlying
+            # VfoRangeConfig (self._editing_band) is unaffected by a
+            # rebuild. Re-resolve by identity (not `in`/`==` -
+            # VfoRangeConfig's dataclass equality compares *values*, so two
+            # bands with identical settings would otherwise look
+            # interchangeable) to the fresh row for that same band, or - if
+            # it's simply gone (e.g. "Usun") - stop editing cleanly.
+            self._editing_row = next((r for r in self._band_rows if r.entry is self._editing_band), None)
+            if self._editing_row is None:
+                self._stop_editing_band()
+                return
+        self._update_advanced_buttons()
 
     def _on_band_changed(self) -> None:
         if self._loading:
@@ -665,6 +757,107 @@ class ScannerPanel(QGroupBox):
     def _on_band_removed(self, row: "_BandRow") -> None:
         self.config.bands = [b for b in self.config.bands if b is not row.entry]
         self._rebuild_band_rows()
+        self.settings_changed.emit()
+
+    # -- per-band "advanced" edit mode -----------------------------------
+    def _update_advanced_buttons(self) -> None:
+        for r in self._band_rows:
+            r.advanced_btn.setChecked(r is self._editing_row)
+
+    def _band_edit_sliders(self) -> tuple[SliderSpin, ...]:
+        return (self.trigger_slider, self.tuning_slider, self.linger_slider,
+                self.gain_slider, self.nr_strength_slider)
+
+    def _on_advanced_clicked(self, row: "_BandRow") -> None:
+        self._start_editing_band(row)
+
+    def _start_editing_band(self, row: "_BandRow") -> None:
+        if self._editing_row is row:
+            return
+        self._editing_row = row
+        self._editing_band = band = row.entry
+
+        self._loading = True
+        self.trigger_slider.set_value(
+            band.trigger_level_dbfs if band.trigger_level_dbfs is not None else self.config.trigger_level_dbfs
+        )
+        self.level_meter.set_trigger(self.trigger_slider.value())
+        self.tuning_slider.set_value(
+            band.tuning_time_ms if band.tuning_time_ms is not None else self.config.timing.tuning_time_ms
+        )
+        self.linger_slider.set_value(
+            band.linger_time_ms if band.linger_time_ms is not None else self.config.timing.linger_time_ms
+        )
+        gain_mode = band.gain_mode if band.gain_mode is not None else self.config.device.gain_mode
+        gain_db = band.gain_db if band.gain_db is not None else self.config.device.gain_db
+        self.agc_check.setChecked(gain_mode == "auto")
+        self.gain_slider.set_value(gain_db)
+        self.gain_slider.set_enabled_all(gain_mode != "auto")
+        nr_enabled = (
+            band.noise_reduction_enabled if band.noise_reduction_enabled is not None
+            else self.config.noise_reduction.enabled
+        )
+        nr_strength = (
+            band.noise_reduction_strength if band.noise_reduction_strength is not None
+            else self.config.noise_reduction.strength
+        )
+        self.nr_check.setChecked(nr_enabled)
+        self.nr_strength_slider.set_value(round(nr_strength * 100))
+        self.nr_strength_slider.set_enabled_all(nr_enabled)
+        self._loading = False
+
+        for w in self._band_edit_sliders():
+            w.set_accent(BAND_OVERRIDE_ACCENT)
+        self.save_band_btn.setVisible(True)
+        self.reset_band_btn.setVisible(True)
+        self._update_advanced_buttons()
+        self.solo_band_changed.emit(band)
+
+    def _stop_editing_band(self) -> None:
+        self._editing_row = None
+        self._editing_band = None
+
+        self._loading = True
+        self._load_global_sliders()
+        self._loading = False
+
+        for w in self._band_edit_sliders():
+            w.set_accent(None)
+        self.save_band_btn.setVisible(False)
+        self.reset_band_btn.setVisible(False)
+        self._update_advanced_buttons()
+        self.solo_band_changed.emit(None)
+
+    def _on_save_band_clicked(self) -> None:
+        band = self._editing_band
+        if band is None:
+            return
+        # Explicit, unconditional write (not just relying on whatever the
+        # per-tick slider handlers already wrote while dragging) - clicking
+        # Save always "pins" exactly what's currently shown, even if the
+        # user never actually moved anything after opening this band.
+        band.trigger_level_dbfs = self.trigger_slider.value()
+        band.tuning_time_ms = int(self.tuning_slider.value())
+        band.linger_time_ms = int(self.linger_slider.value())
+        band.gain_mode = "auto" if self.agc_check.isChecked() else "manual"
+        band.gain_db = self.gain_slider.value()
+        band.noise_reduction_enabled = self.nr_check.isChecked()
+        band.noise_reduction_strength = self.nr_strength_slider.value() / 100.0
+        self._stop_editing_band()
+        self.settings_changed.emit()
+
+    def _on_reset_band_clicked(self) -> None:
+        band = self._editing_band
+        if band is None:
+            return
+        band.trigger_level_dbfs = None
+        band.tuning_time_ms = None
+        band.linger_time_ms = None
+        band.gain_mode = None
+        band.gain_db = None
+        band.noise_reduction_enabled = None
+        band.noise_reduction_strength = None
+        self._stop_editing_band()
         self.settings_changed.emit()
 
     def _on_add_preset(self) -> None:
@@ -696,33 +889,49 @@ class ScannerPanel(QGroupBox):
         self.level_meter.set_trigger(value)
         if self._loading:
             return
-        self.config.trigger_level_dbfs = value
+        if self._editing_band is not None:
+            self._editing_band.trigger_level_dbfs = value
+        else:
+            self.config.trigger_level_dbfs = value
         self.settings_changed.emit()
 
     def _on_agc_toggled(self, checked: bool) -> None:
         self.gain_slider.set_enabled_all(not checked)
         if self._loading:
             return
-        self.config.device.gain_mode = "auto" if checked else "manual"
+        mode = "auto" if checked else "manual"
+        if self._editing_band is not None:
+            self._editing_band.gain_mode = mode
+        else:
+            self.config.device.gain_mode = mode
         self.settings_changed.emit()
 
     def _on_gain_changed(self, value: float) -> None:
         if self._loading:
             return
-        self.config.device.gain_db = value
+        if self._editing_band is not None:
+            self._editing_band.gain_db = value
+        else:
+            self.config.device.gain_db = value
         self.settings_changed.emit()
 
     def _on_nr_toggled(self, checked: bool) -> None:
         self.nr_strength_slider.set_enabled_all(checked)
         if self._loading:
             return
-        self.config.noise_reduction.enabled = checked
+        if self._editing_band is not None:
+            self._editing_band.noise_reduction_enabled = checked
+        else:
+            self.config.noise_reduction.enabled = checked
         self.settings_changed.emit()
 
     def _on_nr_strength_changed(self, value: float) -> None:
         if self._loading:
             return
-        self.config.noise_reduction.strength = value / 100.0
+        if self._editing_band is not None:
+            self._editing_band.noise_reduction_strength = value / 100.0
+        else:
+            self.config.noise_reduction.strength = value / 100.0
         self.settings_changed.emit()
 
     def _on_wfm_stereo_toggled(self, checked: bool) -> None:
@@ -735,8 +944,12 @@ class ScannerPanel(QGroupBox):
         if self._loading:
             return
         self.config.device.sample_rate_hz = self.bandwidth_spin.value() * 1e6
-        self.config.timing.tuning_time_ms = int(self.tuning_slider.value())
-        self.config.timing.linger_time_ms = int(self.linger_slider.value())
+        if self._editing_band is not None:
+            self._editing_band.tuning_time_ms = int(self.tuning_slider.value())
+            self._editing_band.linger_time_ms = int(self.linger_slider.value())
+        else:
+            self.config.timing.tuning_time_ms = int(self.tuning_slider.value())
+            self.config.timing.linger_time_ms = int(self.linger_slider.value())
         driver, args = self.device_combo.currentData() or ("auto", "")
         self.config.device.driver = driver
         self.config.device.device_args = args
@@ -820,8 +1033,8 @@ class ScannerPanel(QGroupBox):
         else:
             self.state_label.setStyleSheet("font-size: 14px; color: #9aa0a6;")
 
-    def update_spectrum(self, freqs_hz, db, trigger_dbfs: float) -> None:
-        self.spectrum_view.update_spectrum(freqs_hz, db, trigger_dbfs)
+    def update_spectrum(self, freqs_hz, db, trigger_dbfs: float, custom: bool = False) -> None:
+        self.spectrum_view.update_spectrum(freqs_hz, db, trigger_dbfs, custom)
 
     def update_cycle_time(self, seconds: float) -> None:
         """Real, measured interval since this same capture window was last

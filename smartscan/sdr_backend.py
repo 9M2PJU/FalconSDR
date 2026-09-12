@@ -5,9 +5,11 @@ from __future__ import annotations
 
 import time
 from abc import ABC, abstractmethod
+from pathlib import Path
 
 import numpy as np
 
+from .config import CONFIG_DIR
 from .io_diag_log import SdrIoDiagLogger
 
 try:
@@ -16,6 +18,29 @@ try:
     HAVE_SOAPY = True
 except ImportError:
     HAVE_SOAPY = False
+
+
+# Real crashes observed (journalctl, see the session that added this): the
+# whole process dies silently - no Python traceback, no Qt/Soapy error text
+# at all, just gone within a few seconds of the RTL-SDR device being
+# reopened - specifically clustered right after a previous SmartScanATC
+# process had *just* closed the very same USB device (evidenced repeatedly:
+# a scope's "Consumed Ns CPU time" stop line immediately followed, 2s later,
+# by a new process opening the same tuner and dying silently 2-9s after
+# that). Both this project's own SoapyBackend.close() and a normal app quit
+# already do a clean deactivateStream()/closeStream(), but the underlying
+# USB device (and whatever internal state librtlsdr/libusb still has on the
+# kernel/USB-controller side right after a release) isn't necessarily ready
+# for a fresh claim+stream-start instantly - reopening it within a couple of
+# seconds of the previous close appears able to crash natively (a segfault
+# in the C driver, unreachable from Python - nothing here could "catch" it
+# even in principle). LAST_CLOSE_FILE persists the close timestamp across
+# process restarts (a brand new process has no in-memory memory of when the
+# previous one closed the device) so __init__ can insert a short wait when
+# the previous close was suspiciously recent, without ever delaying a normal
+# "it's been a while" startup at all.
+LAST_CLOSE_FILE = CONFIG_DIR / "sdr_last_close.txt"
+_REOPEN_COOLDOWN_S = 3.0
 
 
 #: Generic RF gain range (dB) used for the GUI slider before a real device is
@@ -56,6 +81,7 @@ class SoapyBackend(SdrBackend):
     def __init__(self, driver: str, device_args: str, sample_rate: float, gain_mode: str, gain_db: float):
         if not HAVE_SOAPY:
             raise RuntimeError("Modul python3-soapysdr nie jest zainstalowany")
+        self._wait_for_reopen_cooldown()
         args = {"driver": driver} if driver and driver != "auto" else {}
         if device_args:
             for kv in device_args.split(","):
@@ -77,11 +103,41 @@ class SoapyBackend(SdrBackend):
         except Exception:
             pass
         self.set_gain(gain_mode, gain_db)
-        self.stream = self.device.setupStream(SOAPY_SDR_RX, SOAPY_SDR_CF32)
+        # SoapyRTLSDR exposes "bufflen"/"buffers" as *stream* args (found via
+        # `strings` on librtlsdrSupport.so - "Number of bytes per buffer",
+        # "Number of buffers in the ring") - not device args, and read()'s
+        # own scratch-buffer growth (below) turned out NOT to be the real
+        # constraint on how much readStream() hands back per call: real
+        # session data (sdr_io_diag.jsonl) showed the multi-call-per-read
+        # rate sitting at an unchanged ~55% for weeks straight, completely
+        # unmoved by that fix - consistent with the driver's own internal
+        # per-buffer chunking being the actual limit, not our buffer size.
+        # bufflen must be a multiple of 512 (per the driver's own arg
+        # description) and is in raw bytes (RTL-SDR's native 8-bit I/Q,
+        # 2 bytes/complex sample - *not* the 8 bytes/sample of the CF32 we
+        # actually read back) - sized here for ~100ms of margin at the
+        # configured sample rate, comfortably above a real ~30ms chunk.
+        raw_bufflen = (int(sample_rate * 0.1) * 2 // 512 + 1) * 512
+        try:
+            self.stream = self.device.setupStream(
+                SOAPY_SDR_RX, SOAPY_SDR_CF32, [0], {"bufflen": str(raw_bufflen)},
+            )
+        except Exception:
+            # Some driver/version might not accept this stream arg at all -
+            # fall back to the plain call rather than fail to open the
+            # device entirely over what's purely a latency tweak.
+            self.stream = self.device.setupStream(SOAPY_SDR_RX, SOAPY_SDR_CF32)
         self.device.activateStream(self.stream)
+        try:
+            self.stream_mtu = self.device.getStreamMTU(self.stream)
+        except Exception:
+            self.stream_mtu = None
         # Grown on demand in read() to always fit a whole requested chunk in
-        # one readStream() call - see read()'s docstring for why a
-        # too-small fixed size here quietly doubles per-tick read latency.
+        # one readStream() call - kept as defense in depth even though the
+        # bufflen stream arg above is the fix actually expected to matter
+        # (see this method's comment above) - a too-small scratch buffer
+        # here would still independently force a second call regardless of
+        # how much the driver itself can hand back in one go.
         self._buf = np.empty(65536, dtype=np.complex64)
         self._io_diag = SdrIoDiagLogger()
 
@@ -178,6 +234,30 @@ class SoapyBackend(SdrBackend):
             self.device.closeStream(self.stream)
         except Exception:
             pass
+        self._record_close_time()
+
+    @staticmethod
+    def _record_close_time() -> None:
+        """Persists "now" so the *next* SoapyBackend (possibly a brand new
+        process - see LAST_CLOSE_FILE's module-level comment) knows how
+        recently this exact device was released. Best-effort: a failure to
+        write this is never worth surfacing, it just means the next open
+        skips the cooldown wait instead of a crash risk being reduced."""
+        try:
+            CONFIG_DIR.mkdir(parents=True, exist_ok=True)
+            LAST_CLOSE_FILE.write_text(str(time.time()))
+        except OSError:
+            pass
+
+    @staticmethod
+    def _wait_for_reopen_cooldown() -> None:
+        try:
+            last_close = float(LAST_CLOSE_FILE.read_text().strip())
+        except (OSError, ValueError):
+            return  # brak pliku (pierwsze uruchomienie po restarcie itp.) - nic do czekania
+        remaining = _REOPEN_COOLDOWN_S - (time.time() - last_close)
+        if remaining > 0:
+            time.sleep(remaining)
 
     @staticmethod
     def enumerate_devices() -> list[dict]:

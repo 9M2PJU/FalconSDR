@@ -11,8 +11,12 @@ window is watched simultaneously.
 from __future__ import annotations
 
 from dataclasses import dataclass
+from typing import TYPE_CHECKING
 
 import numpy as np
+
+if TYPE_CHECKING:
+    from .config import VfoRangeConfig
 
 # Fraction of the raw sample rate considered clean enough to use: RTL-SDR
 # tuners roll off near the band edges and can show a DC/LO-leakage spur at
@@ -24,6 +28,15 @@ USABLE_FRACTION = 0.9
 class ScanWindow:
     center_hz: int
     freqs: list[int]
+    # Which configured band this window was built purely from, if any - None
+    # for windows from the pooled default lane spanning more than one band,
+    # from Memory List channels, or from weighted-channel "wide anchor"
+    # windows. Set by ScannerEngine._rebuild_windows() after the fact (not
+    # here - plan_windows() itself is band-agnostic, just groups frequencies)
+    # so ScannerEngine._effective_*() can resolve a band's "advanced"
+    # overrides (trigger level, timing, gain, noise reduction) per window
+    # instead of only ever using the global Scanner-tab settings.
+    band: "VfoRangeConfig | None" = None
 
 
 def plan_windows(freqs: list[int], sample_rate_hz: float, channel_bw_hz: float) -> list[ScanWindow]:

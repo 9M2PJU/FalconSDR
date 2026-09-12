@@ -1,12 +1,30 @@
-"""Panel boczny z listą częstotliwości - klik = filtr tabeli do tej częstotliwości."""
+"""Panel boczny z listą częstotliwości - klik = filtr tabeli do tej częstotliwości.
+
+Ma też drugi tryb, przełączany prostym przełącznikiem u góry: "Języki" grupuje
+te same nagrania wg wykrytej/wymuszonej transkrypcji zamiast częstotliwości -
+przydatne np. do wyłapania nagrań, którym słabe audio pomyliło detekcję
+języka na coś egzotycznego (patrz _resolve_language w transcription_engine.py)
+i poprawienia ich ręcznie. Tryb "Częstotliwości" jest domyślny i celowo
+zachowuje dokładnie swoje dotychczasowe zachowanie - _rebuild_frequency_mode()
+to niezmieniona treść dawnego _rebuild()."""
 from __future__ import annotations
 
 from typing import List, Optional
 
 from PyQt6.QtCore import Qt, pyqtSignal
-from PyQt6.QtWidgets import QComboBox, QLineEdit, QListWidget, QListWidgetItem, QVBoxLayout, QWidget
+from PyQt6.QtWidgets import (
+    QButtonGroup,
+    QComboBox,
+    QHBoxLayout,
+    QLineEdit,
+    QListWidget,
+    QListWidgetItem,
+    QPushButton,
+    QVBoxLayout,
+    QWidget,
+)
 
-from smartscan.playback.stats import FrequencyStat, frequency_stats
+from smartscan.playback.stats import FrequencyStat, LanguageStat, frequency_stats, language_stats
 
 ALL_ITEM_FREQ = None
 # Sentinel distinguishing "show favorites only" from a real freq_khz (always
@@ -16,9 +34,13 @@ ALL_ITEM_FREQ = None
 # vice versa, for free, via QListWidget's own single-selection behaviour).
 FAVORITES_ITEM = "__favorites__"
 
+_FREQ_SORT_OPTIONS = ["Sortuj: liczba transmisji", "Sortuj: częstotliwość", "Sortuj: jakość"]
+_LANG_SORT_OPTIONS = ["Sortuj: liczba transmisji", "Sortuj: jakość", "Sortuj: język"]
+
 
 class FrequencyPanel(QWidget):
     frequencySelected = pyqtSignal(object)  # int (kHz), None = wszystkie, albo FAVORITES_ITEM
+    languageSelected = pyqtSignal(object)   # kod ISO, "" (NO_LANGUAGE) = bez transkrypcji, None = wszystkie
 
     def __init__(self, parent=None):
         super().__init__(parent)
@@ -26,12 +48,28 @@ class FrequencyPanel(QWidget):
         # freq_khz -> nazwa z Listy pamieci, zeby rozpoznane czestotliwosci
         # byly widoczne po nazwie, nie tylko po liczbie (patrz set_freq_names()).
         self._freq_names: dict[int, str] = {}
+        self._language_mode = False
 
         layout = QVBoxLayout(self)
         layout.setContentsMargins(0, 0, 0, 0)
 
+        mode_row = QHBoxLayout()
+        self.freq_mode_btn = QPushButton("Częstotliwości")
+        self.lang_mode_btn = QPushButton("Języki")
+        for btn in (self.freq_mode_btn, self.lang_mode_btn):
+            btn.setCheckable(True)
+        self.freq_mode_btn.setChecked(True)
+        self._mode_group = QButtonGroup(self)
+        self._mode_group.setExclusive(True)
+        self._mode_group.addButton(self.freq_mode_btn)
+        self._mode_group.addButton(self.lang_mode_btn)
+        self.lang_mode_btn.toggled.connect(self._on_mode_toggled)
+        mode_row.addWidget(self.freq_mode_btn)
+        mode_row.addWidget(self.lang_mode_btn)
+        layout.addLayout(mode_row)
+
         self.sort_combo = QComboBox()
-        self.sort_combo.addItems(["Sortuj: liczba transmisji", "Sortuj: częstotliwość", "Sortuj: jakość"])
+        self.sort_combo.addItems(_FREQ_SORT_OPTIONS)
         self.sort_combo.currentIndexChanged.connect(self._rebuild)
         layout.addWidget(self.sort_combo)
 
@@ -52,7 +90,29 @@ class FrequencyPanel(QWidget):
         self._freq_names = freq_names
         self._rebuild()
 
+    def switch_to_frequency_mode(self) -> None:
+        """Wołane z PlaybackPanel._jump_to_frequency (dwuklik w Statystykach) -
+        ten skok ma sens tylko w trybie Częstotliwości, więc przełącza z
+        powrotem, jeśli aktualnie pokazywane są Języki."""
+        if self._language_mode:
+            self.freq_mode_btn.setChecked(True)
+
+    def _on_mode_toggled(self, checked: bool) -> None:
+        self._language_mode = checked
+        self.sort_combo.blockSignals(True)
+        self.sort_combo.clear()
+        self.sort_combo.addItems(_LANG_SORT_OPTIONS if checked else _FREQ_SORT_OPTIONS)
+        self.sort_combo.blockSignals(False)
+        self.search_edit.setPlaceholderText("Szukaj języka..." if checked else "Szukaj częstotliwości...")
+        self._rebuild()
+
     def _rebuild(self) -> None:
+        if self._language_mode:
+            self._rebuild_language_mode()
+        else:
+            self._rebuild_frequency_mode()
+
+    def _rebuild_frequency_mode(self) -> None:
         previous = self.current_frequency()
         self.list_widget.blockSignals(True)
         self.list_widget.clear()
@@ -89,6 +149,36 @@ class FrequencyPanel(QWidget):
         self.list_widget.setCurrentRow(selected_row)
         self._apply_filter(self.search_edit.text())
 
+    def _rebuild_language_mode(self) -> None:
+        previous = self.current_frequency()  # w tym trybie: poprzednio wybrany kod jezyka (albo None)
+        self.list_widget.blockSignals(True)
+        self.list_widget.clear()
+
+        total = len(self._recordings)
+        all_item = QListWidgetItem(f"Wszystkie  ({total})")
+        all_item.setData(Qt.ItemDataRole.UserRole, ALL_ITEM_FREQ)
+        self.list_widget.addItem(all_item)
+
+        stats: List[LanguageStat] = language_stats(self._recordings)
+        mode = self.sort_combo.currentIndex()
+        if mode == 1:
+            stats.sort(key=lambda s: s.avg_quality, reverse=True)
+        elif mode == 2:
+            stats.sort(key=lambda s: s.label)
+        # mode == 0 -> już posortowane wg liczby (language_stats default)
+
+        selected_row = 0
+        for i, st in enumerate(stats, start=1):
+            item = QListWidgetItem(f"{st.label}   ({st.count}, śr. jakość {st.avg_quality:.0f})")
+            item.setData(Qt.ItemDataRole.UserRole, st.language)
+            self.list_widget.addItem(item)
+            if previous is not None and st.language == previous:
+                selected_row = i
+
+        self.list_widget.blockSignals(False)
+        self.list_widget.setCurrentRow(selected_row)
+        self._apply_filter(self.search_edit.text())
+
     def _apply_filter(self, text: str) -> None:
         needle = text.strip().lower()
         for i in range(self.list_widget.count()):
@@ -106,4 +196,8 @@ class FrequencyPanel(QWidget):
     def _on_selection_changed(self, current, _previous) -> None:
         if current is None:
             return
-        self.frequencySelected.emit(current.data(Qt.ItemDataRole.UserRole))
+        value = current.data(Qt.ItemDataRole.UserRole)
+        if self._language_mode:
+            self.languageSelected.emit(value)
+        else:
+            self.frequencySelected.emit(value)

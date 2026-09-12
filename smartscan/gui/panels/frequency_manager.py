@@ -16,6 +16,7 @@ from PyQt6.QtWidgets import (
 
 from ...military_presets import FIRE_CHANNELS, MILITARY_CHANNELS
 from ...models import BlacklistEntry, Channel, Modulation
+from ..widgets import apply_emoji_font
 
 RESOURCES_DIR = Path(__file__).resolve().parent.parent / "resources"
 _FOLDER_ICON = QIcon(str(RESOURCES_DIR / "folder.svg"))
@@ -74,6 +75,7 @@ class _ChannelDialog(QDialog):
         form.addRow("Czestotliwosc:", self.freq_spin)
 
         self.name_edit = QLineEdit()
+        apply_emoji_font(self.name_edit)  # np. "🚒 KRG 1" - patrz apply_emoji_font()
         form.addRow("Nazwa:", self.name_edit)
 
         self.mod_combo = QComboBox()
@@ -156,6 +158,7 @@ class _BlacklistDialog(QDialog):
         form.addRow("Margines (+/-):", self.margin_spin)
 
         self.label_edit = QLineEdit()
+        apply_emoji_font(self.label_edit)
         form.addRow("Opis:", self.label_edit)
 
         buttons = QDialogButtonBox(QDialogButtonBox.StandardButton.Ok | QDialogButtonBox.StandardButton.Cancel)

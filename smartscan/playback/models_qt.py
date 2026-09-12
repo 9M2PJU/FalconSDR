@@ -252,6 +252,12 @@ class RecordingsFilterProxy(QSortFilterProxyModel):
         self._min_quality: float = 0.0
         self._search_text: str = ""
         self._favorites_only: bool = False
+        # None = brak filtra językowego; "" (NO_LANGUAGE, patrz stats.py) =
+        # tylko nagrania bez wykrytego języka; kod ISO = tylko ten język.
+        # Osobny wymiar od _freq_khz - freq_panel.py czyści ten przy wyborze
+        # w trybie Częstotliwości i na odwrót, więc oba filtry nigdy się
+        # niespodziewanie nie łączą.
+        self._language: Optional[str] = None
 
     def source(self) -> RecordingsTableModel:
         return self.sourceModel()  # type: ignore[return-value]
@@ -284,11 +290,20 @@ class RecordingsFilterProxy(QSortFilterProxyModel):
         self._favorites_only = favorites_only
         self.invalidateRowsFilter()
 
+    def set_language_filter(self, language: Optional[str]) -> None:
+        self._language = language
+        self.invalidateRowsFilter()
+
     def filterAcceptsRow(self, source_row: int, source_parent: QModelIndex) -> bool:
         rec = self.source().recording_at(source_row)
 
         if self._freq_khz is not None and rec.freq_khz != self._freq_khz:
             return False
+
+        if self._language is not None:
+            rec_lang = rec.transcript.language if rec.transcript and rec.transcript.language else ""
+            if rec_lang != self._language:
+                return False
 
         if self._favorites_only and not rec.is_favorite:
             return False

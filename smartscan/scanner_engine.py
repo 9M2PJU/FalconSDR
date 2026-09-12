@@ -36,7 +36,7 @@ from .edge_compensation import EdgeCompensation
 from .channelizer import (
     USABLE_FRACTION, ScanWindow, channel_powers_dbfs, extend_boundary_window, plan_windows, spectrum_snapshot,
 )
-from .config import AppConfig, VfoRangeConfig
+from .config import AppConfig, CONFIG_DIR, VfoRangeConfig
 from .dsp import Demodulator, NoiseReducer
 from .models import BlacklistEntry, Channel, Modulation, ScannerState
 from .recorder import Recorder
@@ -71,6 +71,34 @@ _DEBUG_TIMING = os.environ.get("SMARTSCAN_DEBUG_LIVE_AUDIO") == "1"
 # (USB/driver waiting for the SDR to actually have `chunk` samples ready)
 # was invisible to it.
 _READ_STALL_LOG_THRESHOLD_S = 0.5
+
+_STARTUP_CHECKPOINT_PATH = CONFIG_DIR / "startup_checkpoints.log"
+
+
+def _checkpoint(msg: str) -> None:
+    """Always-on, best-effort breadcrumb trail through scanner startup -
+    truncated fresh at the start of every run() (see ScannerEngine.run())
+    so it only ever reflects the most recent attempt, not an ever-growing
+    history. Exists to chase a real, still-unexplained bug: the whole
+    process has been observed to vanish completely a few seconds after
+    Start is clicked - no Python traceback, no fatal-signal trace even with
+    faulthandler active (see main.py), no kernel OOM message, no
+    systemd-oomd kill logged - reproducibly when launched from the .desktop
+    file but seemingly never from a terminal. Generic system/journal logs
+    were checked exhaustively (environment variables, resource limits,
+    cgroup/oomd policy, kernel dmesg) without finding the mechanism. This
+    narrows a future recurrence down to "got past checkpoint X but not
+    X+1" from a file this app writes directly, instead of inferring from
+    OS-level logs that turned out not to capture whatever this actually
+    is."""
+    try:
+        CONFIG_DIR.mkdir(parents=True, exist_ok=True)
+        with _STARTUP_CHECKPOINT_PATH.open("a", encoding="utf-8") as f:
+            f.write(f"{time.time():.3f} {msg}\n")
+    except OSError:
+        pass
+
+
 # Reconnect attempts after the SDR drops out (flaky USB dongles, cable
 # issues, etc.) retry at a constant fast interval - never longer than 2s -
 # so a user can physically unplug/replug the dongle a few times in a row
@@ -230,9 +258,11 @@ class _SpectrumWorker:
         self._thread = threading.Thread(target=self._run, daemon=True)
         self._thread.start()
 
-    def submit(self, iq: np.ndarray, sample_rate: float, center_hz: float, trigger_dbfs: float) -> None:
+    def submit(
+        self, iq: np.ndarray, sample_rate: float, center_hz: float, trigger_dbfs: float, custom: bool = False,
+    ) -> None:
         with self._lock:
-            self._pending = (iq, sample_rate, center_hz, trigger_dbfs)
+            self._pending = (iq, sample_rate, center_hz, trigger_dbfs, custom)
         self._wake.set()
 
     def stop(self) -> None:
@@ -251,10 +281,10 @@ class _SpectrumWorker:
                 self._pending = None
             if job is None:
                 continue
-            iq, sample_rate, center_hz, trigger_dbfs = job
+            iq, sample_rate, center_hz, trigger_dbfs, custom = job
             try:
                 freqs, db = spectrum_snapshot(iq, sample_rate, center_hz)
-                self._signals.spectrum_ready.emit(freqs, db, trigger_dbfs)
+                self._signals.spectrum_ready.emit(freqs, db, trigger_dbfs, custom)
             except Exception:
                 pass
 
@@ -288,6 +318,10 @@ class _Slot:
         # _open_slot(), topped up with the closing details in _close_slot().
         self.meta: dict = {}
         self.opened_at = time.monotonic()
+        # Set by _open_slot() right after construction - which window (and
+        # therefore which band's "advanced" overrides, if any) this slot was
+        # opened from. See _effective_* / _apply_noise_reduction.
+        self.window: ScanWindow | None = None
 
 
 class ScannerSignals(QObject):
@@ -300,7 +334,9 @@ class ScannerSignals(QObject):
     recording_changed = pyqtSignal(bool, str)
     recording_finished = pyqtSignal(str)  # path of a just-closed per-transmission file (split mode)
     blacklisted = pyqtSignal(int)
-    spectrum_ready = pyqtSignal(object, object, float)  # freqs_hz, db, trigger_dbfs
+    # freqs_hz, db, trigger_dbfs, custom (True = this window's band has its
+    # own "advanced" overrides - see ScannerPanel/SpectrumView's accent color)
+    spectrum_ready = pyqtSignal(object, object, float, bool)
     # Real, *measured* seconds since this same window (by center_hz) was
     # last tuned to - not a theoretical estimate (weighted scheduling makes
     # that dishonest - different windows get visited at very different real
@@ -329,11 +365,19 @@ class ScannerEngine(threading.Thread):
         self._audio_out: AudioOutput | None = None
         self._spectrum_worker: _SpectrumWorker | None = None
         self._edge_compensation: EdgeCompensation | None = None
+        self._logged_checkpoints: set[str] = set()  # see _checkpoint_once()
 
         # Guards the scheduling state below, which _rebuild_windows() replaces
         # wholesale (from the GUI thread) while _next_window() reads/advances
         # it (from this thread) - see request_rebuild().
         self._lock = threading.Lock()
+        # Set while the Scanner tab has a band open in "advanced" edit mode -
+        # see set_solo_band()/ScannerPanel. Restricts _rebuild_windows() to
+        # that one band alone (ignoring every other band and the whole
+        # Memory List) so tuning a band's own trigger/timing/gain/noise
+        # settings can be heard/seen in isolation, live, without the rest of
+        # the configured scan competing for turns.
+        self._solo_band: VfoRangeConfig | None = None
         self._priority_lanes: list[_Lane] = []
         self._default_lane = _Lane(weight=0.0, windows=[], is_range=False)
         self._scheduler: _WeightedScheduler | None = None
@@ -350,6 +394,13 @@ class ScannerEngine(threading.Thread):
         # time we tuned to this window, for cycle_time_changed - see
         # _pick_next_locked's caller in _main_loop.
         self._window_last_visit: dict[int, float] = {}
+        # Last center_hz actually pushed to the SDR - lets _main_loop skip a
+        # pointless retune (and the TUNING settle wait that goes with it)
+        # when the round-robin picks the exact same window it's already
+        # parked on, e.g. a narrow band that fits entirely in one window
+        # (nothing else to rotate to) or being "solo"'d via the Scanner
+        # tab's "advanced" edit mode - see _main_loop's CALCULATE_NEXT_FREQ.
+        self._last_tuned_center_hz: float | None = None
         # Keyed by freq_hz - naturally unique among *active* transmissions
         # (a frequency can only be in one slot at a time), no fixed size.
         self._slots: dict[int, _Slot] = {}
@@ -424,6 +475,15 @@ class ScannerEngine(threading.Thread):
         running scan, without needing to Stop/Start."""
         self._rebuild_windows()
 
+    def set_solo_band(self, band: VfoRangeConfig | None) -> None:
+        """Restricts scanning to just this one band (None = back to normal,
+        every configured band + Memory List) - see self._solo_band and
+        ScannerPanel's advanced per-band edit mode. Safe to call before the
+        engine thread has even started (e.g. right after construction, to
+        pick up an edit already in progress when Start is pressed)."""
+        self._solo_band = band
+        self._rebuild_windows()
+
     # -- thread body ---------------------------------------------------
     def _maybe_boost_priority(self) -> None:
         """Best-effort: ask the OS to schedule this thread with real-time
@@ -448,10 +508,28 @@ class ScannerEngine(threading.Thread):
         except (PermissionError, OSError):
             pass
 
+    def _checkpoint_once(self, msg: str) -> None:
+        """Like _checkpoint(), but only the first time this exact message is
+        reached per run() - for state-machine transitions inside the
+        per-tick loop that would otherwise write on every single tick."""
+        if msg not in self._logged_checkpoints:
+            self._logged_checkpoints.add(msg)
+            _checkpoint(msg)
+
     def run(self) -> None:
+        self._logged_checkpoints.clear()
+        try:
+            CONFIG_DIR.mkdir(parents=True, exist_ok=True)
+            _STARTUP_CHECKPOINT_PATH.write_text("")  # fresh trail for this attempt - see _checkpoint()
+        except OSError:
+            pass
+        _checkpoint("run() start")
         self._maybe_boost_priority()
+        _checkpoint("priority boost attempted")
         self._setup_static()
+        _checkpoint("_setup_static() done")
         connected = self._open_backend_with_retry(allow_simulated_fallback=True)
+        _checkpoint(f"initial backend open done, connected={connected}")
         self._had_real_hardware = connected and self._backend.label != "simulated"
 
         while connected and not self._stop_evt.is_set():
@@ -482,23 +560,28 @@ class ScannerEngine(threading.Thread):
         """Everything that doesn't depend on the SDR hardware being present."""
         dev = self.config.device
         self._audio_out = AudioOutput(AUDIO_RATE, dev.audio_output_device)
+        _checkpoint(f"AudioOutput created, available={self._audio_out.available}")
         if not self._audio_out.available:
             self.signals.log.emit("Brak wyjscia audio (PyAudio) - monitorowanie na zywo wylaczone.")
         self._spectrum_worker = _SpectrumWorker(self.signals)
+        _checkpoint("_SpectrumWorker thread started")
         # Read once per engine start (not re-read mid-session) - roll-off is
         # a stable physical property of the tuner, so there's no need to
         # keep re-loading the (potentially large) calibration log while
         # scanning. See edge_compensation.py.
         self._edge_compensation = EdgeCompensation()
+        _checkpoint(f"EdgeCompensation loaded, buckets={self._edge_compensation.bucket_count}")
         if self._edge_compensation.has_data:
             self.signals.log.emit(
                 f"Kompensacja opadania sygnalu na krawedziach okna: aktywna "
                 f"({self._edge_compensation.bucket_count} kubelkow danych z historii nasluchu)."
             )
         self._rebuild_windows()
+        _checkpoint("_rebuild_windows() done")
 
     def _open_backend(self, allow_simulated_fallback: bool) -> None:
         dev = self.config.device
+        _checkpoint(f"_open_backend: constructing (driver={dev.driver!r})")
         if allow_simulated_fallback or dev.driver == "simulated":
             self._backend = create_backend(dev.driver, dev.device_args, dev.sample_rate_hz, dev.gain_mode, dev.gain_db)
         else:
@@ -507,10 +590,24 @@ class ScannerEngine(threading.Thread):
             # so a failure here must keep raising, never quietly substitute
             # fake data (that's exactly the bug that confused a user before).
             self._backend = SoapyBackend(dev.driver, dev.device_args, dev.sample_rate_hz, dev.gain_mode, dev.gain_db)
+        _checkpoint(f"_open_backend: constructed (label={self._backend.label})")
         self._applied_gain_mode, self._applied_gain_db = dev.gain_mode, dev.gain_db
         self.signals.gain_range_changed.emit(*self._backend.gain_range_db)
         if self._backend.label == "simulated" and dev.driver != "simulated":
             self.signals.log.emit("Nie znaleziono/nie skonfigurowano SoapySDR - dzialam w trybie SYMULACJI.")
+        # Bezpośredni odczyt tego co sterownik faktycznie oddaje na jedno
+        # readStream() (patrz SoapyBackend.__init__ i jego komentarz o
+        # bufflen) - zamiast dalej zgadywać z samych statystyk, ta liczba
+        # mówi wprost czy jeden takt (chunk_size próbek) w ogóle mieści się
+        # w jednym wywołaniu, czy driver i tak odda mniej niezależnie od
+        # tego jak duży bufor mu podstawimy.
+        mtu = getattr(self._backend, "stream_mtu", None)
+        if mtu is not None:
+            chunk = self._chunk_size()
+            self.signals.log.emit(
+                f"SDR stream MTU: {mtu} probek/wywolanie (takt = {chunk} probek"
+                f"{' - mieści się w jednym readStream()' if mtu >= chunk else ' - NADAL wymaga wielu wywolan na takt'})."
+            )
 
     def _open_backend_with_retry(self, allow_simulated_fallback: bool) -> bool:
         """Keep (re)trying to open the SDR with escalating backoff until it
@@ -570,12 +667,23 @@ class ScannerEngine(threading.Thread):
         sample_rate = self.config.device.sample_rate_hz
         mem_bw = float(self.config.memory_channel_bandwidth_hz)
 
-        channels = list(self.channels) if self.config.memory_list_enabled else []
-        enabled_channels = [c for c in channels if c.enabled]
-        weighted_channels = [c for c in enabled_channels if c.weight > 0]
-        plain_channels = [c for c in enabled_channels if c.weight <= 0]
+        if self._solo_band is not None:
+            # "Advanced" per-band edit mode (see set_solo_band) - everything
+            # else (other bands, the whole Memory List) sits out until this
+            # ends, so the band being tuned is the only thing competing for
+            # airtime while its own settings are being dialled in live.
+            channels = []
+            enabled_channels: list[Channel] = []
+            weighted_channels: list[Channel] = []
+            plain_channels: list[Channel] = []
+            enabled_bands = [self._solo_band] if self._solo_band.enabled else []
+        else:
+            channels = list(self.channels) if self.config.memory_list_enabled else []
+            enabled_channels = [c for c in channels if c.enabled]
+            weighted_channels = [c for c in enabled_channels if c.weight > 0]
+            plain_channels = [c for c in enabled_channels if c.weight <= 0]
+            enabled_bands = [b for b in self.config.bands if b.enabled]
 
-        enabled_bands = [b for b in self.config.bands if b.enabled]
         weighted_bands = [b for b in enabled_bands if b.weight > 0]
         plain_bands = [b for b in enabled_bands if b.weight <= 0]
 
@@ -672,11 +780,21 @@ class ScannerEngine(threading.Thread):
                     _claim(f, float(max(1, vr.step_hz)), band_mod, weight=vr.weight)
             windows = plan_windows(freqs, sample_rate, max(1, vr.step_hz))
             _extend_edges(windows, float(max(1, vr.step_hz)))
+            for w in windows:
+                w.band = vr  # unambiguous: this whole lane is one band's own grid
             priority_lanes.append(_Lane(weight=vr.weight, windows=windows, is_range=True))
 
         # -- default lane: everything with weight 0, pooled together exactly
         # like the original (pre-weights) implementation. -------------------
         default_freqs: list[int] = []
+        # Which single plain band (if any) each pooled frequency came from -
+        # a window built from this pool only gets tagged with a band (see
+        # below) if *every* one of its frequencies traces back to that same
+        # band; a window straddling two bands' channels (only possible if
+        # their ranges are close enough to share one capture) stays
+        # band=None; safe default (global settings), rather than guessing
+        # which of the two "advanced" overrides should apply.
+        freq_to_band: dict[int, VfoRangeConfig] = {}
         for c in plain_channels:
             if c.freq_hz not in bw_map:
                 _claim(c.freq_hz, mem_bw, c.modulation, c.name, c.weight)
@@ -693,10 +811,17 @@ class ScannerEngine(threading.Thread):
                 if f not in bw_map:
                     _claim(f, float(max(1, vr.step_hz)), band_mod, weight=vr.weight)
                 default_freqs.append(f)
+                freq_to_band[f] = vr
 
         default_grouping_bw = max((bw_map[f] for f in default_freqs), default=25_000.0)
         default_windows = plan_windows(default_freqs, sample_rate, default_grouping_bw)
         _extend_edges(default_windows, default_grouping_bw)
+        for w in default_windows:
+            # VfoRangeConfig is a plain (mutable, unhashable) dataclass, so
+            # identity-compare (`is`) rather than building a set of them.
+            owners = [freq_to_band[f] for f in w.freqs if f in freq_to_band]
+            if owners and all(b is owners[0] for b in owners):
+                w.band = owners[0]
 
         # Display-only name lookup for _open_slot(), built from *every* named
         # channel regardless of its own enabled state, and matched by
@@ -753,11 +878,11 @@ class ScannerEngine(threading.Thread):
     def _is_blacklisted(self, freq_hz: int) -> bool:
         return any(e.contains(freq_hz) for e in self.blacklist)
 
-    def _maybe_apply_gain(self) -> None:
-        dev = self.config.device
-        if dev.gain_mode != self._applied_gain_mode or dev.gain_db != self._applied_gain_db:
-            self._backend.set_gain(dev.gain_mode, dev.gain_db)
-            self._applied_gain_mode, self._applied_gain_db = dev.gain_mode, dev.gain_db
+    def _maybe_apply_gain(self, window: ScanWindow | None) -> None:
+        mode, db = self._effective_gain(window)
+        if mode != self._applied_gain_mode or db != self._applied_gain_db:
+            self._backend.set_gain(mode, db)
+            self._applied_gain_mode, self._applied_gain_db = mode, db
 
     def _next_window(self) -> ScanWindow | None:
         with self._lock:
@@ -833,11 +958,13 @@ class ScannerEngine(threading.Thread):
             return ScannerState.SIGNAL_DETECTED
         return ScannerState.LINGER
 
-    def _submit_spectrum(self, iq: np.ndarray, sample_rate: float, center_hz: float) -> None:
+    def _submit_spectrum(
+        self, iq: np.ndarray, sample_rate: float, center_hz: float, trigger_dbfs: float, custom: bool = False,
+    ) -> None:
         """Hands the raw IQ block to _SpectrumWorker's own thread - never
         computes the FFT here, on the same thread that also has to keep
         live audio flowing in real time (see _SpectrumWorker's docstring)."""
-        self._spectrum_worker.submit(iq, sample_rate, center_hz, self.config.trigger_level_dbfs)
+        self._spectrum_worker.submit(iq, sample_rate, center_hz, trigger_dbfs, custom)
 
     def _emit_freqs(self) -> None:
         """Tells the GUI what to show in the frequency display: every
@@ -859,34 +986,51 @@ class ScannerEngine(threading.Thread):
         self.signals.freq_changed.emit(entries)
 
     def _main_loop(self) -> None:
+        _checkpoint("_main_loop() entered")
         state = ScannerState.CALCULATE_NEXT_FREQ
         self._emit_state(state)
         tuning_deadline = scanning_deadline = 0.0
         sample_rate = self.config.device.sample_rate_hz
 
         while not self._stop_evt.is_set():
-            self._maybe_apply_gain()
+            self._maybe_apply_gain(self._cur_window)
             chunk = self._chunk_size()
 
             if state == ScannerState.CALCULATE_NEXT_FREQ:
+                self._checkpoint_once("first CALCULATE_NEXT_FREQ")
                 window = self._next_window()
                 if window is None:
                     time.sleep(0.3)
                     continue
                 self._cur_window = window
-                self._backend.set_frequency(window.center_hz)
-                now = time.monotonic()
-                last_visit = self._window_last_visit.get(window.center_hz)
-                self._window_last_visit[window.center_hz] = now
-                if last_visit is not None:
-                    self.signals.cycle_time_changed.emit(now - last_visit)
                 self._emit_freqs()  # no slots active here (guaranteed - see below) -> shows the window placeholder
-                tuning_deadline = time.monotonic() + self.config.timing.tuning_time_ms / 1000.0
-                state = ScannerState.TUNING
-                self._emit_state(state)
+                if window.center_hz == self._last_tuned_center_hz:
+                    # Already parked here (e.g. a band narrow enough to fit
+                    # in a single window, or a solo'd band) - retuning would
+                    # just be a no-op hardware call followed by a pointless
+                    # tuning-settle wait, and would misleadingly report a
+                    # "return to this window" cycle time for a window we
+                    # never actually left. Skip straight to SCANNING.
+                    scanning_deadline = time.monotonic() + self.config.timing.scanning_dwell_ms / 1000.0
+                    state = ScannerState.SCANNING
+                    self._emit_state(state)
+                else:
+                    self._backend.set_frequency(window.center_hz)
+                    self._last_tuned_center_hz = window.center_hz
+                    self._checkpoint_once("first set_frequency() done")
+                    now = time.monotonic()
+                    last_visit = self._window_last_visit.get(window.center_hz)
+                    self._window_last_visit[window.center_hz] = now
+                    if last_visit is not None:
+                        self.signals.cycle_time_changed.emit(now - last_visit)
+                    tuning_deadline = time.monotonic() + self._effective_tuning_time_ms(window) / 1000.0
+                    state = ScannerState.TUNING
+                    self._emit_state(state)
 
             elif state == ScannerState.TUNING:
+                self._checkpoint_once("first TUNING read() about to run")
                 self._backend.read(chunk)  # discard: head is muted while the tuner settles
+                self._checkpoint_once("first TUNING read() returned")
                 self._skip_evt.clear()
                 self._skip_lockout_evt.clear()
                 if time.monotonic() >= tuning_deadline:
@@ -895,8 +1039,10 @@ class ScannerEngine(threading.Thread):
                     self._emit_state(state)
 
             elif state == ScannerState.SCANNING:
+                self._checkpoint_once("first SCANNING read() about to run")
                 read_start = time.monotonic() if _DEBUG_TIMING else 0.0
                 iq = self._backend.read(chunk)
+                self._checkpoint_once("first SCANNING read() returned")
                 if _DEBUG_TIMING:
                     self._record_read_timing(time.monotonic() - read_start)
                 tick_start = time.monotonic() if _DEBUG_TIMING else 0.0
@@ -926,11 +1072,15 @@ class ScannerEngine(threading.Thread):
                     corrected = self._apply_edge_compensation(raw_powers, window.center_hz)
                     best_freq, best_level = _strongest(corrected)
 
+                effective_trigger = self._effective_trigger_dbfs(window)
                 self.signals.level_changed.emit(
                     primary_level if primary_level is not None
                     else (best_level if best_level is not None else -120.0)
                 )
-                self._submit_spectrum(iq, sample_rate, window.center_hz)
+                self._submit_spectrum(
+                    iq, sample_rate, window.center_hz, effective_trigger,
+                    window.band is not None and window.band.has_advanced_overrides,
+                )
                 self._emit_state(self._display_state())
 
                 if self._skip_evt.is_set() or self._skip_lockout_evt.is_set():
@@ -943,11 +1093,11 @@ class ScannerEngine(threading.Thread):
                     self._skip_lockout_evt.clear()
                     state = ScannerState.CALCULATE_NEXT_FREQ
                     self._emit_state(state)
-                elif best_freq is not None and best_level >= self.config.trigger_level_dbfs:
+                elif best_freq is not None and best_level >= effective_trigger:
                     raw_level = raw_powers[best_freq]
                     self._calibration_log.log_detect(
                         best_freq, window.center_hz, sample_rate, self._applied_gain_mode,
-                        self._applied_gain_db, raw_level, self.config.trigger_level_dbfs,
+                        self._applied_gain_db, raw_level, effective_trigger,
                         self._channel_bw_map.get(best_freq, 0.0),
                     )
                     self._open_slot(best_freq, window, raw_level)
@@ -1039,6 +1189,52 @@ class ScannerEngine(threading.Thread):
             return powers
         return {f: v + self._correction_db(f - center_hz) for f, v in powers.items()}
 
+    # -- per-band "advanced" overrides (Scanner tab) --------------------
+    # A window tagged with a band (see ScanWindow.band / _rebuild_windows)
+    # can carry its own trigger level/timing/gain/noise-reduction, set apart
+    # from every other band's - e.g. a noisier civil-aviation band running a
+    # less sensitive trigger than a quieter fire-brigade band would need.
+    # None on the band's own field (the default - "no override yet") always
+    # falls back to the ordinary global Scanner-tab setting, so an
+    # unconfigured band behaves exactly as it always has.
+    def _effective_trigger_dbfs(self, window: ScanWindow | None) -> float:
+        band = window.band if window is not None else None
+        if band is not None and band.trigger_level_dbfs is not None:
+            return band.trigger_level_dbfs
+        return self.config.trigger_level_dbfs
+
+    def _effective_tuning_time_ms(self, window: ScanWindow | None) -> int:
+        band = window.band if window is not None else None
+        if band is not None and band.tuning_time_ms is not None:
+            return band.tuning_time_ms
+        return self.config.timing.tuning_time_ms
+
+    def _effective_linger_time_ms(self, window: ScanWindow | None) -> int:
+        band = window.band if window is not None else None
+        if band is not None and band.linger_time_ms is not None:
+            return band.linger_time_ms
+        return self.config.timing.linger_time_ms
+
+    def _effective_gain(self, window: ScanWindow | None) -> tuple[str, float]:
+        band = window.band if window is not None else None
+        dev = self.config.device
+        mode = band.gain_mode if band is not None and band.gain_mode is not None else dev.gain_mode
+        db = band.gain_db if band is not None and band.gain_db is not None else dev.gain_db
+        return mode, db
+
+    def _effective_noise_reduction(self, window: ScanWindow | None) -> tuple[bool, float]:
+        band = window.band if window is not None else None
+        nr = self.config.noise_reduction
+        enabled = (
+            band.noise_reduction_enabled if band is not None and band.noise_reduction_enabled is not None
+            else nr.enabled
+        )
+        strength = (
+            band.noise_reduction_strength if band is not None and band.noise_reduction_strength is not None
+            else nr.strength
+        )
+        return enabled, strength
+
     def _maybe_log_floor(self, iq: np.ndarray, sample_rate: float, window: ScanWindow) -> None:
         """See CalibrationLogger - a background-noise snapshot of this whole
         window, throttled to once every _FLOOR_LOG_INTERVAL_S per window
@@ -1063,6 +1259,8 @@ class ScannerEngine(threading.Thread):
             return None
         active_freqs = list(self._slots.keys())
         raw_powers = channel_powers_dbfs(iq, sample_rate, window.center_hz, active_freqs, self._channel_bw_map)
+        trigger_dbfs = self._effective_trigger_dbfs(window)
+        linger_time_ms = self._effective_linger_time_ms(window)
         primary_level = None
         for freq_hz, slot in list(self._slots.items()):
             # Corrected for the linger/level-meter decision (see
@@ -1075,10 +1273,10 @@ class ScannerEngine(threading.Thread):
             stereo = slot.modulation == Modulation.WFM and self.config.wfm_stereo_enabled
             audio = slot.demod.demod(iq, slot.modulation, slot.offset_hz, stereo=stereo)
             self._play_and_record_slot(slot, audio)
-            if level >= self.config.trigger_level_dbfs:
+            if level >= trigger_dbfs:
                 slot.linger_deadline = None
             elif slot.linger_deadline is None:
-                slot.linger_deadline = time.monotonic() + self.config.timing.linger_time_ms / 1000.0
+                slot.linger_deadline = time.monotonic() + linger_time_ms / 1000.0
             elif time.monotonic() >= slot.linger_deadline:
                 self._close_slot(freq_hz)
         return primary_level
@@ -1103,14 +1301,17 @@ class ScannerEngine(threading.Thread):
             self._primary_freq = freq_hz
             self._primary_weight = weight
 
-        nr = self.config.noise_reduction
         timing = self.config.timing
+        nr_enabled, nr_strength = self._effective_noise_reduction(window)
         # Everything the app can gather about this transmission at open
         # time, for the WAV metadata chunk (see wav_metadata.py) - lets a
         # recording later be cross-checked against the exact settings/RF
         # conditions it was captured under (gain, trigger, offset from the
         # window's center, ...). Written to the file once it closes (see
         # _close_slot), since wave.Wave_write finalises its header on close.
+        # Trigger/timing/noise-reduction fields reflect this window's *own*
+        # effective settings (a band's "advanced" override, if it has one -
+        # see _effective_*), not necessarily the global Scanner-tab values.
         slot.meta = {
             "app": "SmartScanATC",
             "freq_hz": freq_hz,
@@ -1121,17 +1322,17 @@ class ScannerEngine(threading.Thread):
             "offset_from_center_hz": offset_hz,
             "sample_rate_hz": dev.sample_rate_hz,
             "channel_bw_hz": self._channel_bw_map.get(freq_hz),
-            "trigger_level_dbfs": self.config.trigger_level_dbfs,
+            "trigger_level_dbfs": self._effective_trigger_dbfs(window),
             "measured_dbfs_at_trigger": level_dbfs,
             "edge_correction_db": self._correction_db(offset_hz),
             "gain_mode": self._applied_gain_mode,
             "gain_db": self._applied_gain_db,
             "device_driver": dev.driver,
             "scanning_dwell_ms": timing.scanning_dwell_ms,
-            "tuning_time_ms": timing.tuning_time_ms,
-            "linger_time_ms": timing.linger_time_ms,
-            "noise_reduction_enabled": nr.enabled,
-            "noise_reduction_strength": nr.strength,
+            "tuning_time_ms": self._effective_tuning_time_ms(window),
+            "linger_time_ms": self._effective_linger_time_ms(window),
+            "noise_reduction_enabled": nr_enabled,
+            "noise_reduction_strength": nr_strength,
             "opened_at_utc": dt.datetime.now(dt.timezone.utc).isoformat(),
         }
 
@@ -1232,10 +1433,10 @@ class ScannerEngine(threading.Thread):
             slot.recorder.write_audio(mono)
 
     def _apply_noise_reduction(self, slot: _Slot, audio):
-        nr = self.config.noise_reduction
-        if not nr.enabled:
+        enabled, strength = self._effective_noise_reduction(slot.window)
+        if not enabled:
             return audio
-        return slot.noise_reducer.process(audio, strength=nr.strength)
+        return slot.noise_reducer.process(audio, strength=strength)
 
 
 def _strongest(powers: dict[int, float]) -> tuple[int | None, float]:

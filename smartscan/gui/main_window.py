@@ -17,6 +17,7 @@ from .panels.playback_panel import PlaybackPanel
 from .panels.recency_boost_panel import RecencyBoostPanel
 from .panels.recording_panel import RecordingPanel
 from .panels.scanner_panel import ScannerPanel
+from .panels.transcription_panel import TranscriptionPanel
 
 ICON_PATH = Path(__file__).resolve().parent / "resources" / "app_icon.svg"
 
@@ -63,15 +64,15 @@ class MainWindow(QMainWindow):
             self.channels, self.blacklist, self.config.default_blacklist_margin_hz, self.channel_folders,
         )
 
-        # Opcje - na razie tylko Nagrywanie, ale to osobna zakladka wlasnie
-        # po to, zeby bylo gdzie dokladac kolejne ustawienia bez zapychania
-        # zakladki Skaner.
+        # Opcje grupują ustawienia niezwiązane bezpośrednio z obsługą skanera.
         options_tab = QWidget()
         options_layout = QVBoxLayout(options_tab)
         self.recording_panel = RecordingPanel(self.config.recording)
         options_layout.addWidget(self.recording_panel)
         self.recency_boost_panel = RecencyBoostPanel(self.config.recency_boost)
         options_layout.addWidget(self.recency_boost_panel)
+        self.transcription_panel = TranscriptionPanel(self.config.transcription)
+        options_layout.addWidget(self.transcription_panel)
         options_layout.addStretch(1)
 
         self.tabs = QTabWidget()
@@ -93,8 +94,12 @@ class MainWindow(QMainWindow):
         self.scanner_panel.settings_changed.connect(self._maybe_live_rebuild)
         self.scanner_panel.memory_list_requested.connect(self._reveal_memory_list)
         self.scanner_panel.channel_weight_changed.connect(self._on_channel_weight_changed)
+        self.scanner_panel.solo_band_changed.connect(self._on_solo_band_changed)
         self.recording_panel.settings_changed.connect(self._save_config)
         self.recency_boost_panel.settings_changed.connect(self._save_config)
+        self.transcription_panel.settings_changed.connect(self._save_config)
+        self.transcription_panel.enabled_changed.connect(self.playback_panel.set_transcription_enabled)
+        self.playback_panel.transcription_enabled_changed.connect(self.transcription_panel.set_enabled)
         self.freq_manager.channels_changed.connect(self._on_channels_changed)
         self.freq_manager.blacklist_changed.connect(self._on_blacklist_changed)
         self.freq_manager.folders_changed.connect(self._on_folders_changed)
@@ -112,6 +117,13 @@ class MainWindow(QMainWindow):
         effect immediately on a running scan - no more Stop/Start required."""
         if self.engine is not None:
             self.engine.request_rebuild()
+
+    def _on_solo_band_changed(self, band) -> None:
+        """A band's "advanced" edit mode started/stopped (Scanner tab) -
+        restrict (or un-restrict) a running scan to just that band. See
+        ScannerPanel.solo_band_changed / ScannerEngine.set_solo_band."""
+        if self.engine is not None:
+            self.engine.set_solo_band(band)
 
     def _on_channel_weight_changed(self) -> None:
         """A channel's weight was edited inline from the Scanner tab's Memory
@@ -199,6 +211,12 @@ class MainWindow(QMainWindow):
         s.gain_range_changed.connect(self.scanner_panel.update_gain_range)
         s.log.connect(self.statusBar().showMessage)
         s.finished.connect(self._on_engine_finished)
+
+        # Pick up a band already in "advanced" edit mode (Scanner tab), if
+        # the user opened it before ever pressing Start this session - a
+        # freshly-constructed ScannerEngine otherwise has no idea one was
+        # in progress (see ScannerPanel.editing_band).
+        self.engine.set_solo_band(self.scanner_panel.editing_band)
 
         self.scanner_panel.set_running(True)
         self.recording_panel.set_running(True)

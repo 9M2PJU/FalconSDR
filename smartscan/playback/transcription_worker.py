@@ -3,14 +3,17 @@
 patrz transcription_engine.py - liczy się jakość, nie szybkość)."""
 from __future__ import annotations
 
-from typing import List
+import logging
+from typing import List, Optional
 
 from PyQt6.QtCore import QThread, pyqtSignal
 
 from smartscan.config import TranscriptionConfig
-from smartscan.playback.models import Recording
+from smartscan.playback.models import Recording, TranscriptionResult
 from smartscan.playback.transcription_cache import TranscriptionCache
 from smartscan.playback.transcription_engine import transcribe_recording
+
+logger = logging.getLogger(__name__)
 
 
 class TranscriptionWorker(QThread):
@@ -25,6 +28,7 @@ class TranscriptionWorker(QThread):
         cache: TranscriptionCache,
         ignore_cache: bool = False,
         include_errors: bool = True,
+        forced_language: Optional[str] = None,
         parent=None,
     ):
         super().__init__(parent)
@@ -33,10 +37,25 @@ class TranscriptionWorker(QThread):
         self._cache = cache
         self._ignore_cache = ignore_cache
         self._include_errors = include_errors
+        # Tylko dla ręcznego "Transkrybuj ponownie" z wybranym językiem w
+        # Odtwarzaczu (zawsze wtedy z dokładnie jednym nagraniem w batchu) -
+        # automatyczna kolejka w tle nigdy tego nie ustawia, więc jej
+        # zachowanie (detekcja języka) zostaje dokładnie takie jak było.
+        self._forced_language = forced_language
         self._stop_requested = False
 
     def request_stop(self) -> None:
         self._stop_requested = True
+
+    def _cached_result(self, rec: Recording) -> Optional[TranscriptionResult]:
+        """self._cache.get(rec.cache_key()), tolerant of a recording whose
+        plik zniknął (skasowany przez uzytkownika, przeniesiony przez
+        organize()...) między zbudowaniem tej listy a teraz - potraktowane
+        jak "brak wyniku w cache", nie jak twardy błąd (patrz też run())."""
+        try:
+            return self._cache.get(rec.cache_key())
+        except OSError:
+            return None
 
     def run(self) -> None:
         if self._ignore_cache:
@@ -49,22 +68,37 @@ class TranscriptionWorker(QThread):
             # każdym razem.
             todo = [
                 r for r in self._recordings
-                if (cached := self._cache.get(r.cache_key())) is None or cached.status == "error"
+                if (cached := self._cached_result(r)) is None or cached.status == "error"
             ]
         else:
             # Automatyczna kontynuacja zaraz po zakończonej paczce (patrz
             # playback_panel._on_transcription_batch_finished) - łapie tylko
             # naprawdę nowe nagrania, nie odpytuje ponownie tych "error" bez
             # żadnej przerwy (patrz include_errors tam).
-            todo = [r for r in self._recordings if self._cache.get(r.cache_key()) is None]
+            todo = [r for r in self._recordings if self._cached_result(r) is None]
         total = len(todo)
         self.progress.emit(0, total)
         for i, rec in enumerate(todo):
             if self._stop_requested:
                 break
-            result = transcribe_recording(rec, self._config)
-            self._cache.put(rec.cache_key(), result)
-            self._cache.save()
-            self.item_done.emit(str(rec.path), result)
+            try:
+                result = transcribe_recording(rec, self._config, forced_language=self._forced_language)
+                self._cache.put(rec.cache_key(), result)
+                self._cache.save()
+                self.item_done.emit(str(rec.path), result)
+            except Exception:
+                # Zaobserwowane naprawdę (crash.log/journalctl): rec.path bywa
+                # skasowany/przeniesiony w trakcie transkrypcji (np. przez
+                # użytkownika klikającego "Usuń" na tym samym nagraniu, albo
+                # organize() z kolejnego odświeżenia) - cache_key() wtedy
+                # rzuca FileNotFoundError. transcribe_recording() sam w sobie
+                # już łapie własne błędy (patrz jego docstring), więc to co
+                # tu ucieka to zawsze coś poza jego kontrolą. Bez tego
+                # try/except wyjątek uciekał z QThread.run() nieobsłużony -
+                # a PyQt6 domyślnie ubija wtedy CAŁY proces, nie tylko ten
+                # wątek (potwierdzone: crash zawsze tuż po takim tracebacku
+                # w logu, żadnego innego śladu błędu) - jeden zniknięty plik
+                # nie może już zabijać reszty programu.
+                logger.exception("Transkrypcja: pominięto %s (błąd przetwarzania)", rec.path)
             self.progress.emit(i + 1, total)
         self.finished_batch.emit()

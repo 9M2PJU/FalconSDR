@@ -38,6 +38,34 @@ class VfoRangeConfig:
     # order, no special treatment", same as Channel.weight (see
     # scanner_engine._WeightedScheduler for how bands and channels compete).
     weight: float = 0.0
+    # "Zaawansowane" per-band overrides (Scanner tab, _BandRow's advanced
+    # button) - None means "use the global slider's value", same as every
+    # other band without an override. Motivating case: civil aviation VHF
+    # runs noisier than a fire-brigade band, so one global trigger level is
+    # always a compromise between "too sensitive on the noisy band" and "too
+    # deaf on the quiet one" - this lets each band carry its own. See
+    # ScannerEngine._effective_* for how these get resolved per window.
+    trigger_level_dbfs: float | None = None
+    tuning_time_ms: int | None = None
+    linger_time_ms: int | None = None
+    gain_mode: str | None = None
+    gain_db: float | None = None
+    noise_reduction_enabled: bool | None = None
+    noise_reduction_strength: float | None = None
+
+    @property
+    def has_advanced_overrides(self) -> bool:
+        """True once at least one "zaawansowane" field above has actually
+        been saved (see ScannerPanel's Save/Reset) - distinguishes a band
+        that's merely *tagged* on a window (see ScanWindow.band) from one
+        that's genuinely diverging from the global settings, e.g. for the
+        spectrum view's trigger-line accent color."""
+        return any((
+            self.trigger_level_dbfs is not None, self.tuning_time_ms is not None,
+            self.linger_time_ms is not None, self.gain_mode is not None,
+            self.gain_db is not None, self.noise_reduction_enabled is not None,
+            self.noise_reduction_strength is not None,
+        ))
 
 
 @dataclass
@@ -91,7 +119,7 @@ class TranscriptionConfig:
     generic_model: str = "large-v3"  # wielojęzyczny model (m.in. polskie transmisje)
     english_atc_model: str = "jacktol/whisper-medium.en-fine-tuned-for-ATC-faster-whisper"
     device: str = "auto"         # "auto" | "cuda" | "cpu"
-    compute_type: str = "auto"   # "auto" -> float16 na GPU, int8 na CPU
+    compute_type: str = "auto"   # "auto" -> int8_float16 na GPU, int8 na CPU
     # Języki, na które obstawiamy wynik detekcji w niepewnych przypadkach (patrz
     # transcription_engine._resolve_language) - w tym nasłuchu realnie liczy się
     # tylko angielski i polski, więc szum radiowy nie myli detekcji egzotycznymi
