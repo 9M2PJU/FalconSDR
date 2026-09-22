@@ -149,6 +149,24 @@ class AppConfig:
     transcription: TranscriptionConfig = field(default_factory=TranscriptionConfig)
     location: LocationConfig = field(default_factory=LocationConfig)
     trigger_level_dbfs: float = -30.0
+    # Extra cutoff for BOTH the live speaker and the recording, expressed as
+    # a dB *offset from trigger_level_dbfs* (always <= 0), never as an
+    # independent absolute value - see ScannerEngine._effective_squelch_dbfs()
+    # and AGENTS.md gotcha 6 for why that distinction matters. Muting only
+    # ever kicks in during LINGER (level already < trigger, slot still open
+    # on the timeout grace period) to cut the loud FM-discriminator noise
+    # burst right after a transmitter releases PTT (see dsp.py's demod() -
+    # phase-derivative FM discrimination on pure noise produces loud
+    # broadband output despite low real RF power once the actual carrier is
+    # gone - the "FM threshold effect") from both live monitoring AND the
+    # recorded file, so a recording ends where the real signal actually did
+    # rather than trailing off into that noise. The gap between this and
+    # trigger stays audible/recorded, since genuine content can briefly dip
+    # below trigger during LINGER without being noise. Off by default -
+    # purely opt-in, never changes anyone's existing listening/recording
+    # behaviour unprompted.
+    squelch_enabled: bool = False
+    squelch_offset_db: float = -6.0
     default_blacklist_margin_hz: int = 5000
     memory_channel_bandwidth_hz: int = 12_500  # per-channel power window used to watch Memory List channels
     # Master on/off for the whole Memory List, independent of each channel's
@@ -194,6 +212,8 @@ class AppConfig:
             transcription=TranscriptionConfig(**raw.get("transcription", {})),
             location=LocationConfig(**raw.get("location", {})),
             trigger_level_dbfs=raw.get("trigger_level_dbfs", -30.0),
+            squelch_enabled=raw.get("squelch_enabled", False),
+            squelch_offset_db=raw.get("squelch_offset_db", -6.0),
             default_blacklist_margin_hz=raw.get("default_blacklist_margin_hz", 5000),
             memory_channel_bandwidth_hz=raw.get("memory_channel_bandwidth_hz", 12_500),
             channel_folders=list(raw.get("channel_folders", [])),

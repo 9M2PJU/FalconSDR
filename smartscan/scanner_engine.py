@@ -1295,6 +1295,25 @@ class ScannerEngine(threading.Thread):
         db = band.gain_db if band is not None and band.gain_db is not None else dev.gain_db
         return mode, db
 
+    def _effective_squelch_dbfs(self, window: ScanWindow | None) -> float | None:
+        """None when squelch is off (the default - see AppConfig.squelch_enabled),
+        otherwise the absolute dBFS level below which both the live speaker
+        AND the recording drop this block (see _play_and_record_slot) -
+        never the LINGER timer/slot-close decision, which stays keyed to
+        trigger_dbfs alone regardless of squelch. Deliberately computed as
+        this window's *effective trigger* (respecting any per-band override
+        - see _effective_trigger_dbfs) plus squelch_offset_db, never as an
+        independent absolute number - squelch_offset_db is clamped to <= 0
+        here too (belt and suspenders; the Scanner tab's slider already
+        can't go positive) so this can never sit above trigger and
+        therefore can never mute anything while the state machine is still
+        in SIGNAL_DETECTED (level >= trigger) - see AGENTS.md gotcha 6 for
+        why that invariant (not whether recording is also squelched) is
+        what actually keeps this safe."""
+        if not self.config.squelch_enabled:
+            return None
+        return self._effective_trigger_dbfs(window) + min(0.0, self.config.squelch_offset_db)
+
     def _effective_noise_reduction(self, window: ScanWindow | None) -> tuple[bool, float]:
         band = window.band if window is not None else None
         nr = self.config.noise_reduction
@@ -1336,6 +1355,7 @@ class ScannerEngine(threading.Thread):
         active_freqs = list(self._slots.keys())
         raw_powers = channel_powers_from_spectrum(spectrum, window.center_hz, active_freqs, self._channel_bw_map)
         trigger_dbfs = self._effective_trigger_dbfs(window)
+        squelch_dbfs = self._effective_squelch_dbfs(window)
         linger_time_ms = self._effective_linger_time_ms(window)
         primary_level = None
         for freq_hz, slot in list(self._slots.items()):
@@ -1348,7 +1368,16 @@ class ScannerEngine(threading.Thread):
                 primary_level = level
             stereo = slot.modulation == Modulation.WFM and self.config.wfm_stereo_enabled
             audio = slot.demod.demod(iq, slot.modulation, slot.offset_hz, stereo=stereo)
-            self._play_and_record_slot(slot, audio)
+            # Squelch (see _effective_squelch_dbfs) mutes the live speaker
+            # AND skips writing this block to the recording (see
+            # _play_and_record_slot) - but never the LINGER timer/slot-close
+            # decision right below, which still depends only on trigger_dbfs.
+            # squelch_dbfs is always <= trigger_dbfs (see
+            # _effective_squelch_dbfs), so this can never fire while level
+            # is still >= trigger - i.e. never while the state machine
+            # itself says SIGNAL_DETECTED.
+            squelched = squelch_dbfs is not None and level < squelch_dbfs
+            self._play_and_record_slot(slot, audio, squelched=squelched)
             if level >= trigger_dbfs:
                 slot.linger_deadline = None
             elif slot.linger_deadline is None:
@@ -1493,7 +1522,20 @@ class ScannerEngine(threading.Thread):
             if lockout:
                 self.signals.blacklisted.emit(freq_hz)
 
-    def _play_and_record_slot(self, slot: _Slot, audio: np.ndarray) -> None:
+    def _play_and_record_slot(self, slot: _Slot, audio: np.ndarray, squelched: bool = False) -> None:
+        # ``squelched`` (see _effective_squelch_dbfs) drops this block
+        # entirely - neither the live speaker nor the recording get it, by
+        # explicit request: a recording should end where the real signal
+        # actually did, not trail off into the loud FM-discriminator noise
+        # burst that follows a transmitter releasing PTT. Skipped before
+        # noise reduction runs too - nothing downstream of demod() needs to
+        # process audio that's about to be discarded either way. Since
+        # squelch_dbfs is always <= trigger_dbfs (see
+        # _effective_squelch_dbfs), this never fires while the state
+        # machine still considers the channel SIGNAL_DETECTED - only during
+        # the LINGER tail, once level has already dropped below trigger.
+        if squelched:
+            return
         if audio.ndim == 1:
             audio = self._apply_noise_reduction(slot, audio)
             mono = audio

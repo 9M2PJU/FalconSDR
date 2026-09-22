@@ -432,8 +432,9 @@ class ScannerPanel(QGroupBox):
 
         self.trigger_slider = SliderSpin(-90, 0, -30, decimals=0, suffix="dBFS")
         self.trigger_slider.valueChanged.connect(self._on_trigger_changed)
-        timing_form.addRow("Trigger Level / Squelch:", self.trigger_slider)
+        timing_form.addRow("Trigger Level:", self.trigger_slider)
 
+        timing_form.addRow("Squelch (wyciszanie szumu):", self._build_squelch_row())
         timing_form.addRow("Gain:", self._build_gain_row())
         timing_form.addRow("Redukcja szumow:", self._build_noise_reduction_row())
 
@@ -584,6 +585,33 @@ class ScannerPanel(QGroupBox):
         lay.addWidget(self.gain_slider, 1)
         return w
 
+    def _build_squelch_row(self) -> QWidget:
+        w = QWidget()
+        lay = QHBoxLayout(w)
+        lay.setContentsMargins(0, 0, 0, 0)
+        self.squelch_check = QCheckBox("Wlacz")
+        self.squelch_check.setToolTip(
+            "Wycisza dzwiek na zywo ORAZ pomija zapis do nagrania, gdy poziom\n"
+            "spadnie o co najmniej ten offset PONIZEJ Trigger Level - wylacznie\n"
+            "w LINGER (po zakonczeniu transmisji, przed zamknieciem kanalu).\n"
+            "Naprawia typowe \"wybuchajace uszy\" po puszczeniu PTT przy NFM: gdy\n"
+            "nosna znika, demodulator FM dostaje sam szum odbiornika, a szum bez\n"
+            "nosnej brzmi bardzo glosno mimo niskiej mocy RF (efekt progowy FM) -\n"
+            "to nie jest usterka. Dzieki temu nagranie konczy sie tam, gdzie\n"
+            "faktycznie skonczyl sie sygnal, bez glosnego \"ogona\" szumu.\n"
+            "Offset zostaje ZAWSZE ponizej triggera (nigdy nad nim), wiec nigdy\n"
+            "nie wyciszy/nie ucina dzwieku, gdy skaner uznaje kanal za aktywny\n"
+            "(SIGNAL_DETECTED). Zostaw margines (np. -6 dB), zeby to co jeszcze\n"
+            "slychac/nagrywa sie w LINGER ponizej triggera (dzieki niemu wlasnie)\n"
+            "nie zostalo od razu ucinane."
+        )
+        self.squelch_check.toggled.connect(self._on_squelch_toggled)
+        self.squelch_offset_slider = SliderSpin(-40, 0, -6, decimals=0, suffix="dB od triggera")
+        self.squelch_offset_slider.valueChanged.connect(self._on_squelch_offset_changed)
+        lay.addWidget(self.squelch_check)
+        lay.addWidget(self.squelch_offset_slider, 1)
+        return w
+
     def _build_noise_reduction_row(self) -> QWidget:
         w = QWidget()
         lay = QHBoxLayout(w)
@@ -696,6 +724,13 @@ class ScannerPanel(QGroupBox):
         self.bandwidth_spin.setValue(self.config.device.sample_rate_hz / 1e6)
         self._load_global_sliders()
         self.wfm_stereo_check.setChecked(self.config.wfm_stereo_enabled)
+        # Global-only, unlike trigger_slider above - never swapped for a
+        # per-band value during "advanced" band editing (see
+        # _band_edit_sliders()), so it's loaded here rather than in
+        # _load_global_sliders() (which _stop_editing_band() also calls).
+        self.squelch_check.setChecked(self.config.squelch_enabled)
+        self.squelch_offset_slider.set_value(self.config.squelch_offset_db)
+        self.squelch_offset_slider.set_enabled_all(self.config.squelch_enabled)
         target = (self.config.device.driver, self.config.device.device_args)
         for i in range(self.device_combo.count()):
             if self.device_combo.itemData(i) == target:
@@ -938,6 +973,21 @@ class ScannerPanel(QGroupBox):
         if self._loading:
             return
         self.config.wfm_stereo_enabled = checked
+        self.settings_changed.emit()
+
+    def _on_squelch_toggled(self, checked: bool) -> None:
+        # Global-only (see squelch_check in _load_from_config) - no
+        # self._editing_band branch, unlike e.g. _on_nr_toggled.
+        self.squelch_offset_slider.set_enabled_all(checked)
+        if self._loading:
+            return
+        self.config.squelch_enabled = checked
+        self.settings_changed.emit()
+
+    def _on_squelch_offset_changed(self, value: float) -> None:
+        if self._loading:
+            return
+        self.config.squelch_offset_db = value
         self.settings_changed.emit()
 
     def _push_settings(self, *_args) -> None:
