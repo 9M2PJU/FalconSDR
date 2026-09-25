@@ -398,18 +398,29 @@ class AcquisitionThread:
         self._queue: deque[np.ndarray] = deque()
         self._lock = threading.Lock()
         self._cond = threading.Condition(self._lock)
-        # Guards actual hardware access (readStream/setFrequency/setGain) -
-        # held by the acquisition thread only while a read() call is
-        # in-flight, and briefly by set_frequency()/set_gain() (called from
-        # the *consumer* thread) - avoids relying on any particular
-        # SoapySDR driver's own thread-safety guarantees for concurrent
-        # streaming vs. non-streaming calls, at the cost of a retune
-        # occasionally waiting out one in-flight read() call (bounded by
-        # one chunk's real-time duration - negligible next to how rarely
-        # retuning happens).
-        self._device_lock = threading.Lock()
         self._stop_evt = threading.Event()
         self._error: BaseException | None = None
+        # Bumped every time a retune/gain change is actually applied (see
+        # _run()'s command handling) - see _run()'s comment on why a read()
+        # started before that point must never be allowed to land in the
+        # queue after it, as if it belonged to the new frequency/gain.
+        self._generation = 0
+        # set_frequency()/set_gain() (called from the *consumer* thread)
+        # hand their request to this thread instead of touching
+        # self._backend themselves - see _submit_command()'s docstring for
+        # why a shared lock across threads was tried first and had to be
+        # abandoned: this thread runs with SCHED_FIFO real-time priority
+        # (see _boost_priority(), needed for prompt/reliable reads), and a
+        # lock shared with a normal-priority caller is exactly the setup
+        # for real-time priority inversion - measured for real on this
+        # project's own hardware, a retune's attempt to acquire that lock
+        # was starved for up to *11.7 seconds* by this thread continuously
+        # winning the race to re-acquire it first, every time it released
+        # it between reads. Single-owner (only this thread ever touches
+        # self._backend, for anything) sidesteps the whole class of bug -
+        # there's no second thread left to starve.
+        self._pending_command: tuple | None = None
+        self._command_done = threading.Event()
         self._thread = threading.Thread(target=self._run, name="sdr-acquisition", daemon=True)
         self._thread.start()
 
@@ -418,7 +429,9 @@ class AcquisitionThread:
         """Same best-effort SCHED_FIFO real-time priority request as
         ScannerEngine._maybe_boost_priority() - see its docstring. Even more
         directly relevant here: this is now the one thread whose own
-        promptness the whole fix depends on."""
+        promptness the whole fix depends on. Safe now to combine with the
+        single-owner design above - see this class's docstring update on
+        why that wasn't true of the shared-lock version this replaced."""
         if not hasattr(os, "sched_setscheduler"):
             return
         try:
@@ -430,9 +443,39 @@ class AcquisitionThread:
     def _run(self) -> None:
         self._boost_priority()
         while not self._stop_evt.is_set():
+            # Apply any pending retune/gain change *before* the next read -
+            # only this thread ever touches self._backend (see __init__'s
+            # comment), so this needs no lock around the actual hardware
+            # call, unlike the shared-_device_lock version that starved a
+            # normal-priority caller for real. Checked once per loop, so a
+            # command is applied within at most one read()'s worth of
+            # latency (~30-100ms on this project's own hardware) - nowhere
+            # near instant, but boundedly so, unlike the multi-second
+            # lock-starvation this replaced.
+            with self._cond:
+                command = self._pending_command
+                self._pending_command = None
+                my_generation = self._generation
+            if command is not None:
+                kind, args = command
+                try:
+                    if kind == "freq":
+                        self._backend.set_frequency(*args)
+                    else:
+                        self._backend.set_gain(*args)
+                except BaseException as exc:  # noqa: BLE001 - propagated to the waiting caller below
+                    with self._cond:
+                        self._error = exc
+                        self._cond.notify_all()
+                    self._command_done.set()
+                    return
+                with self._cond:
+                    self._queue.clear()
+                    self._generation += 1
+                    my_generation = self._generation
+                self._command_done.set()
             try:
-                with self._device_lock:
-                    block = self._backend.read(self._chunk_size)
+                block = self._backend.read(self._chunk_size)
             except BaseException as exc:  # noqa: BLE001 - propagated verbatim to read(), see there
                 with self._cond:
                     self._error = exc
@@ -441,6 +484,26 @@ class AcquisitionThread:
             with self._cond:
                 if self._stop_evt.is_set():
                     return
+                if my_generation != self._generation:
+                    # A retune/gain change was applied (bumping the
+                    # generation, above) while this exact read() call was
+                    # in flight: this block was captured *before* that
+                    # change (the real device was still on the old
+                    # frequency/gain when readStream() ran), so it's
+                    # pre-change data that must not be handed to the caller
+                    # as if it belonged to the new window - discard it.
+                    # Without this check, a window's very first captured
+                    # block after every single retune had a real chance of
+                    # silently being the *previous* window's IQ instead,
+                    # corrupting that window's FFT-based candidate
+                    # detection into spurious "signal found" readings
+                    # (stale strong-signal energy measured against the new,
+                    # usually different, set of channel frequencies) - each
+                    # bogus detection then had to run out its full LINGER
+                    # timer before the scanner could move on. Reproduced
+                    # and confirmed on real hardware (121-136 MHz civil
+                    # aviation band, ~7 capture windows).
+                    continue
                 self._queue.append(block)
                 if len(self._queue) > self._max_queued:
                     self._queue.popleft()
@@ -476,25 +539,35 @@ class AcquisitionThread:
                 raise RuntimeError("Watek akwizycji SDR zatrzymany")
             return self._queue.popleft()
 
-    def flush(self) -> None:
-        """Discards whatever's currently queued - always call right after a
-        retune/gain change (see set_frequency()/set_gain(), which already
-        do this): queued chunks were captured *before* the change, and
-        handing them to the caller as if they matched the new frequency/
-        gain would corrupt every FFT-based power measurement for however
-        long the queue takes to drain otherwise."""
+    def _submit_command(self, kind: str, args: tuple, timeout: float = 2.0) -> None:
+        """Hands a set_frequency()/set_gain() request to the acquisition
+        thread instead of calling self._backend directly from here (the
+        consumer thread) - see __init__'s comment for why: this thread runs
+        with SCHED_FIFO real-time priority for prompt/reliable reads, and a
+        lock shared between it and a normal-priority caller is a real-time
+        priority-inversion hazard, not just a theoretical one (measured:
+        the shared-lock version this replaced starved a retune for up to
+        11.7 seconds on real hardware, turning a several-windows-per-second
+        sweep into multiple seconds per window). Blocks until the
+        acquisition thread has actually applied it (bounded by one read()'s
+        worth of latency, not instant - see _run()) or raises on timeout/
+        the same error a dead device would raise from read()."""
+        self._command_done.clear()
         with self._cond:
-            self._queue.clear()
+            self._pending_command = (kind, args)
+            self._cond.notify_all()
+        if not self._command_done.wait(timeout):
+            raise RuntimeError(
+                "Watek akwizycji SDR nie odpowiedzial na zmiane czestotliwosci/gainu na czas"
+            )
+        if self._error is not None:
+            raise self._error
 
     def set_frequency(self, freq_hz: float) -> None:
-        with self._device_lock:
-            self._backend.set_frequency(freq_hz)
-        self.flush()
+        self._submit_command("freq", (freq_hz,))
 
     def set_gain(self, gain_mode: str, gain_db: float) -> None:
-        with self._device_lock:
-            self._backend.set_gain(gain_mode, gain_db)
-        self.flush()
+        self._submit_command("gain", (gain_mode, gain_db))
 
     def close(self) -> None:
         self._stop_evt.set()
