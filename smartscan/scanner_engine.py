@@ -25,6 +25,7 @@ import datetime as dt
 import os
 import threading
 import time
+from concurrent.futures import ThreadPoolExecutor
 from pathlib import Path
 
 import numpy as np
@@ -421,6 +422,18 @@ class ScannerEngine(threading.Thread):
         self._applied_gain_db = None
         self._had_real_hardware = False
 
+        # Demod/noise-reduction/file-write for every simultaneously active
+        # slot runs on this pool instead of one after another on this
+        # thread - see _service_active_slots/AGENTS.md gotcha 12. Sized
+        # generously (Python's own ThreadPoolExecutor default heuristic,
+        # cpu_count()+4 capped at 32) since idle worker threads cost
+        # nothing and the whole point is to never be the bottleneck itself;
+        # measured 3-4.6x real wall-clock speedup for this workload
+        # (resample_poly/FFT-heavy - releases the GIL enough to matter).
+        self._slot_pool = ThreadPoolExecutor(
+            max_workers=min(32, (os.cpu_count() or 4) + 4), thread_name_prefix="slot-demod",
+        )
+
         self._calibration_log = CalibrationLogger()
         # Keyed by window center_hz - throttles "floor" snapshots, see
         # _FLOOR_LOG_INTERVAL_S.
@@ -708,6 +721,11 @@ class ScannerEngine(threading.Thread):
             self._spectrum_worker.stop()
         if self._backend is not None:
             self._backend.close()
+        # wait=True: every slot was already closed above (nothing left
+        # queued), this just makes sure no worker thread is still mid-write
+        # to a WAV file this same process might touch again right after
+        # (e.g. a quick Stop/Start) before actually returning.
+        self._slot_pool.shutdown(wait=True)
 
     def _rebuild_windows(self) -> None:
         """Rebuilds everything the weighted scanner needs to pick its next
@@ -1374,6 +1392,22 @@ class ScannerEngine(threading.Thread):
         squelch_dbfs = self._effective_squelch_dbfs(window)
         linger_time_ms = self._effective_linger_time_ms(window)
         primary_level = None
+
+        # Demod/noise-reduction/file-write for every active slot is
+        # dispatched to self._slot_pool instead of running one slot after
+        # another on this thread - see AGENTS.md gotcha 12 for the real-
+        # hardware measurements that led to this (many simultaneously
+        # active slots alone was enough to blow the per-tick real-time
+        # budget several times over, backing up the acquisition queue -
+        # see AcquisitionThread - until it started dropping chunks, same
+        # audible symptom as the driver-level overflow that fix solved,
+        # just moved one layer up). Safe to parallelize: each slot owns its
+        # own Demodulator/NoiseReducer/Recorder (see _Slot's docstring), so
+        # there's no shared *mutable* state between these tasks - only
+        # ``iq`` itself is shared, but every task only ever reads it.
+        # ``self._audio_out`` is shared too, but AudioOutput.write() already
+        # holds its own lock internally.
+        tasks = []
         for freq_hz, slot in list(self._slots.items()):
             # Corrected for the linger/level-meter decision (see
             # _apply_edge_compensation) - a slot near the window's edge
@@ -1382,18 +1416,20 @@ class ScannerEngine(threading.Thread):
             level = raw_powers.get(freq_hz, -120.0) + self._correction_db(slot.offset_hz)
             if freq_hz == self._primary_freq:
                 primary_level = level
-            stereo = slot.modulation == Modulation.WFM and self.config.wfm_stereo_enabled
-            audio = slot.demod.demod(iq, slot.modulation, slot.offset_hz, stereo=stereo)
             # Squelch (see _effective_squelch_dbfs) mutes the live speaker
             # AND skips writing this block to the recording (see
             # _play_and_record_slot) - but never the LINGER timer/slot-close
-            # decision right below, which still depends only on trigger_dbfs.
+            # decision below, which still depends only on trigger_dbfs.
             # squelch_dbfs is always <= trigger_dbfs (see
             # _effective_squelch_dbfs), so this can never fire while level
             # is still >= trigger - i.e. never while the state machine
             # itself says SIGNAL_DETECTED.
             squelched = squelch_dbfs is not None and level < squelch_dbfs
-            self._play_and_record_slot(slot, audio, squelched=squelched)
+            future = self._slot_pool.submit(self._process_one_slot, slot, iq, squelched)
+            tasks.append((freq_hz, slot, level, future))
+
+        for freq_hz, slot, level, future in tasks:
+            future.result()  # re-raises whatever that slot's own processing raised, same as the old sequential call would have
             if level >= trigger_dbfs:
                 slot.linger_deadline = None
             elif slot.linger_deadline is None:
@@ -1401,6 +1437,18 @@ class ScannerEngine(threading.Thread):
             elif time.monotonic() >= slot.linger_deadline:
                 self._close_slot(freq_hz)
         return primary_level
+
+    def _process_one_slot(self, slot: _Slot, iq: np.ndarray, squelched: bool) -> None:
+        """Runs on self._slot_pool's worker threads - see
+        _service_active_slots(). Demodulates this one slot's own channel
+        out of the shared ``iq`` block and hands it to
+        _play_and_record_slot(). Reading the same ``iq`` array from several
+        threads at once is safe (nothing anywhere writes back into it,
+        numpy reads don't mutate); each call only ever touches this one
+        slot's own Demodulator/NoiseReducer/Recorder."""
+        stereo = slot.modulation == Modulation.WFM and self.config.wfm_stereo_enabled
+        audio = slot.demod.demod(iq, slot.modulation, slot.offset_hz, stereo=stereo)
+        self._play_and_record_slot(slot, audio, squelched=squelched)
 
     def _open_slot(self, freq_hz: int, window: ScanWindow, level_dbfs: float) -> None:
         dev = self.config.device
