@@ -3,8 +3,11 @@ is fully testable even before a SoapySDR device/module is available.
 """
 from __future__ import annotations
 
+import os
+import threading
 import time
 from abc import ABC, abstractmethod
+from collections import deque
 from pathlib import Path
 
 import numpy as np
@@ -339,6 +342,178 @@ class SimulatedBackend(SdrBackend):
 
     def close(self) -> None:
         pass
+
+
+class AcquisitionThread:
+    """Decouples the real SDR read() from whatever the caller does with the
+    result, so a slow consumer (many simultaneous demodulated channels, a
+    noise reducer's FFT work, WAV file I/O, GIL contention from another
+    thread, ...) can never delay the *next* call into the hardware/driver.
+
+    Why this exists: SoapyBackend.read()'s own docstring already documents
+    that the RTL-SDR driver keeps filling a small (~100ms, see
+    SoapyBackend's ``raw_bufflen``) internal ring buffer regardless of when
+    we actually call readStream() - if the *caller* (the old design: the
+    scanner's single thread, doing read() then demod/noise-reduction/file-
+    write/FFT for every active slot before looping back to read() again)
+    takes too long between two read() calls, that buffer overflows and the
+    driver silently drops/laps real samples. Splicing what we read *after*
+    that onto what came before joins two non-time-contiguous IQ blocks,
+    which shows up as a broadband click/phase discontinuity once
+    demodulated - audible as a "ścinka" in both live audio and recordings,
+    completely unrelated to squelch or noise reduction. Measured for real
+    on this project's own SDR I/O diagnostic log (see io_diag_log.py):
+    historically ~5% of all 5-second windows had at least one such overflow
+    event, and 99.6% had at least one read() call slower than one tick's
+    real-time budget - and confirmed live on real RTL-SDR hardware tuned to
+    a dense FM broadcast segment (many simultaneous demodulated channels -
+    exactly the "many active slots" scenario): 14 overflow events in 35
+    seconds, tick processing running 2.6-5x over its real-time budget.
+
+    The fix (this class): a dedicated thread whose *only* job is to call
+    the real backend's read() back-to-back into a bounded FIFO queue of
+    already-read chunks, with nothing else - no demod, no file I/O, no FFT -
+    ever running between two consecutive read() calls. The scanner's main
+    loop becomes a *consumer* of this queue (via read(), same blocking/
+    exception contract as calling a raw SdrBackend directly - see
+    SdrBackend.read()) instead of calling the hardware directly - exactly
+    the acquisition/processing separation mature SDR software (SDR++
+    included) uses, and the same pattern this project already applies to
+    live audio output (AudioOutput's ring buffer) and the spectrum display
+    (_SpectrumWorker in scanner_engine.py) - just never, until now, to the
+    one thing that actually touches the hardware.
+
+    ``max_queued`` bounds queue growth if the consumer falls behind for a
+    while (rather than unbounded memory growth) - the oldest chunk is
+    dropped, which loses data far more gracefully (a bounded, measurable
+    amount, from a queue - not a silent driver-level splice) than an
+    overflow would. At the default chunk size this is several seconds of
+    margin, comfortably more than any transient consumer stall should need.
+    """
+
+    def __init__(self, backend: "SdrBackend", chunk_size: int, max_queued: int = 64):
+        self._backend = backend
+        self._chunk_size = chunk_size
+        self._max_queued = max_queued
+        self._queue: deque[np.ndarray] = deque()
+        self._lock = threading.Lock()
+        self._cond = threading.Condition(self._lock)
+        # Guards actual hardware access (readStream/setFrequency/setGain) -
+        # held by the acquisition thread only while a read() call is
+        # in-flight, and briefly by set_frequency()/set_gain() (called from
+        # the *consumer* thread) - avoids relying on any particular
+        # SoapySDR driver's own thread-safety guarantees for concurrent
+        # streaming vs. non-streaming calls, at the cost of a retune
+        # occasionally waiting out one in-flight read() call (bounded by
+        # one chunk's real-time duration - negligible next to how rarely
+        # retuning happens).
+        self._device_lock = threading.Lock()
+        self._stop_evt = threading.Event()
+        self._error: BaseException | None = None
+        self._thread = threading.Thread(target=self._run, name="sdr-acquisition", daemon=True)
+        self._thread.start()
+
+    @staticmethod
+    def _boost_priority() -> None:
+        """Same best-effort SCHED_FIFO real-time priority request as
+        ScannerEngine._maybe_boost_priority() - see its docstring. Even more
+        directly relevant here: this is now the one thread whose own
+        promptness the whole fix depends on."""
+        if not hasattr(os, "sched_setscheduler"):
+            return
+        try:
+            tid = threading.get_native_id()
+            os.sched_setscheduler(tid, os.SCHED_FIFO, os.sched_param(10))
+        except (PermissionError, OSError):
+            pass
+
+    def _run(self) -> None:
+        self._boost_priority()
+        while not self._stop_evt.is_set():
+            try:
+                with self._device_lock:
+                    block = self._backend.read(self._chunk_size)
+            except BaseException as exc:  # noqa: BLE001 - propagated verbatim to read(), see there
+                with self._cond:
+                    self._error = exc
+                    self._cond.notify_all()
+                return
+            with self._cond:
+                if self._stop_evt.is_set():
+                    return
+                self._queue.append(block)
+                if len(self._queue) > self._max_queued:
+                    self._queue.popleft()
+                self._cond.notify_all()
+
+    def read(self, num_samples: int, timeout: float = 1.5) -> np.ndarray:
+        """Same contract as SdrBackend.read(): blocks for the next ready
+        chunk (up to ``timeout``), raises on a dead/stopped acquisition
+        thread (propagating whatever exception actually killed it, e.g. the
+        RuntimeError SoapyBackend.read() raises for a dead device - see
+        AGENTS.md gotcha 8 - so ScannerEngine's existing reconnect logic
+        needs no changes at all). ``num_samples`` must match the chunk size
+        this thread was started with (ScannerEngine only ever calls this
+        with its own, unchanging-for-the-life-of-one-backend _chunk_size())."""
+        if num_samples != self._chunk_size:
+            raise ValueError(
+                f"AcquisitionThread was started with chunk_size={self._chunk_size}, "
+                f"but read({num_samples}) was requested - these must match."
+            )
+        deadline = time.monotonic() + timeout
+        with self._cond:
+            while not self._queue and self._error is None and not self._stop_evt.is_set():
+                remaining = deadline - time.monotonic()
+                if remaining <= 0:
+                    raise RuntimeError(
+                        "Watek akwizycji SDR nie dostarczyl danych na czas - "
+                        "urzadzenie odlaczone lub nie odpowiada"
+                    )
+                self._cond.wait(remaining)
+            if self._error is not None:
+                raise self._error
+            if not self._queue:
+                raise RuntimeError("Watek akwizycji SDR zatrzymany")
+            return self._queue.popleft()
+
+    def flush(self) -> None:
+        """Discards whatever's currently queued - always call right after a
+        retune/gain change (see set_frequency()/set_gain(), which already
+        do this): queued chunks were captured *before* the change, and
+        handing them to the caller as if they matched the new frequency/
+        gain would corrupt every FFT-based power measurement for however
+        long the queue takes to drain otherwise."""
+        with self._cond:
+            self._queue.clear()
+
+    def set_frequency(self, freq_hz: float) -> None:
+        with self._device_lock:
+            self._backend.set_frequency(freq_hz)
+        self.flush()
+
+    def set_gain(self, gain_mode: str, gain_db: float) -> None:
+        with self._device_lock:
+            self._backend.set_gain(gain_mode, gain_db)
+        self.flush()
+
+    def close(self) -> None:
+        self._stop_evt.set()
+        with self._cond:
+            self._cond.notify_all()
+        self._thread.join(timeout=2.0)
+        self._backend.close()
+
+    @property
+    def label(self) -> str:
+        return self._backend.label
+
+    @property
+    def gain_range_db(self) -> tuple[float, float]:
+        return self._backend.gain_range_db
+
+    @property
+    def stream_mtu(self):
+        return getattr(self._backend, "stream_mtu", None)
 
 
 def create_backend(driver: str, device_args: str, sample_rate: float, gain_mode: str, gain_db: float) -> SdrBackend:

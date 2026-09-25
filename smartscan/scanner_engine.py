@@ -41,7 +41,7 @@ from .config import AppConfig, CONFIG_DIR, VfoRangeConfig
 from .dsp import Demodulator, NoiseReducer
 from .models import BlacklistEntry, Channel, Modulation, ScannerState
 from .recorder import Recorder
-from .sdr_backend import SoapyBackend, create_backend
+from .sdr_backend import AcquisitionThread, SoapyBackend, create_backend
 from .wav_metadata import append_metadata_chunk
 
 AUDIO_RATE = 12500
@@ -637,13 +637,24 @@ class ScannerEngine(threading.Thread):
         dev = self.config.device
         _checkpoint(f"_open_backend: constructing (driver={dev.driver!r})")
         if allow_simulated_fallback or dev.driver == "simulated":
-            self._backend = create_backend(dev.driver, dev.device_args, dev.sample_rate_hz, dev.gain_mode, dev.gain_db)
+            raw_backend = create_backend(dev.driver, dev.device_args, dev.sample_rate_hz, dev.gain_mode, dev.gain_db)
         else:
             # Bypass create_backend()'s friendly auto-simulate fallback: this
             # is a reconnect after real hardware was already proven present,
             # so a failure here must keep raising, never quietly substitute
             # fake data (that's exactly the bug that confused a user before).
-            self._backend = SoapyBackend(dev.driver, dev.device_args, dev.sample_rate_hz, dev.gain_mode, dev.gain_db)
+            raw_backend = SoapyBackend(dev.driver, dev.device_args, dev.sample_rate_hz, dev.gain_mode, dev.gain_db)
+        # Wrapped in a dedicated acquisition thread (see AcquisitionThread's
+        # docstring) so nothing this loop does between two backend.read()
+        # calls - demod/noise-reduction/file I/O for however many slots are
+        # simultaneously active, or CPU contention from elsewhere - can ever
+        # delay the *actual* hardware read and risk the driver silently
+        # dropping/splicing samples (measured: this was happening for real,
+        # unrelated to squelch - see its docstring). Every other use of
+        # self._backend below is unaffected - AcquisitionThread proxies
+        # label/gain_range_db/stream_mtu/set_frequency/set_gain/read/close
+        # with the same contract a raw SdrBackend has.
+        self._backend = AcquisitionThread(raw_backend, self._chunk_size())
         _checkpoint(f"_open_backend: constructed (label={self._backend.label})")
         self._applied_gain_mode, self._applied_gain_db = dev.gain_mode, dev.gain_db
         self.signals.gain_range_changed.emit(*self._backend.gain_range_db)
