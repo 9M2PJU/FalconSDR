@@ -31,6 +31,11 @@ class Recorder:
         self._wav: wave.Wave_write | None = None
         self._current_path: Path | None = None
         self._session_active = False
+        # Samples actually written to the *current* file since it was opened
+        # - see end_transmission()'s "phantom recording" cleanup below. Reset
+        # per-file in _open_file(), not per-session, since a session can span
+        # many split-mode files.
+        self._frames_written = 0
 
     @property
     def current_path(self) -> str:
@@ -69,11 +74,30 @@ class Recorder:
         """Closes the current per-transmission file (split mode only).
         Returns the finished file's path so the caller can hand it straight
         to the Odtwarzacz library instead of waiting for a periodic rescan.
-        """
+
+        Deletes the file and returns None instead if literally zero audio
+        samples were ever written to it - a real, observed case since
+        Squelch (see AppConfig.squelch_enabled) started dropping blocks
+        below its threshold: a brief above-trigger spike can open a slot,
+        then fall back below the squelch threshold before this slot is even
+        serviced once (see ScannerEngine._service_active_slots/
+        _play_and_record_slot), leaving the slot "open" for the full LINGER
+        grace period with nothing ever actually written. Without this, that
+        produced a header-only WAV (0 real seconds of audio, but a real
+        wall-clock-long open/close cycle) that still got catalogued into
+        the Odtwarzacz library as a genuine recording - pure clutter with
+        nothing to hear."""
         if self.config.mode != "split":
             return None
         path = self._current_path
+        wrote_audio = self._frames_written > 0
         self._close_file()
+        if path is not None and not wrote_audio:
+            try:
+                path.unlink()
+            except OSError:
+                pass
+            return None
         return path
 
     # -- internals ---------------------------------------------------
@@ -113,11 +137,13 @@ class Recorder:
         wav.setframerate(self.audio_rate)
         self._wav = wav
         self._current_path = path
+        self._frames_written = 0
 
     def _write_raw(self, audio: np.ndarray) -> None:
         pcm = np.clip(audio, -1.0, 1.0)
         pcm = (pcm * 32767.0).astype(np.int16)
         self._wav.writeframes(pcm.tobytes())
+        self._frames_written += pcm.size
 
     def _close_file(self) -> None:
         if self._wav is None:

@@ -314,6 +314,11 @@ class _Slot:
         self.noise_reducer = noise_reducer
         self.recorder = recorder
         self.linger_deadline: float | None = None
+        # True while the previous tick's block was dropped by squelch (see
+        # _effective_squelch_dbfs) - lets _play_and_record_slot() detect the
+        # exact tick audio resumes after a squelched gap, to reset
+        # noise_reducer's state right then (see its own comment there).
+        self.was_squelched = False
         # Everything worth remembering about this transmission for the WAV
         # metadata chunk (see wav_metadata.py) - filled in at open time in
         # _open_slot(), topped up with the closing details in _close_slot().
@@ -1535,7 +1540,26 @@ class ScannerEngine(threading.Thread):
         # machine still considers the channel SIGNAL_DETECTED - only during
         # the LINGER tail, once level has already dropped below trigger.
         if squelched:
+            slot.was_squelched = True
             return
+        if slot.was_squelched:
+            # Resuming right after a squelched gap: noise_reducer (see
+            # _apply_noise_reduction) is a stateful STFT processor (input
+            # buffer, overlap-add reconstruction buffer, minimum-statistics
+            # noise-floor tracker - see dsp.py's NoiseReducer) that was
+            # never called during the gap, since it only ever runs below
+            # this point. Left un-reset, its first call after resuming
+            # would silently splice whatever partial frame was buffered
+            # from *before* the gap onto this genuinely new, non-adjacent
+            # audio as if no time had passed - a real, reported "ścinka"/
+            # click right at the resume point. Resetting means losing at
+            # most one FRAME_SIZE-worth (~40ms) of noise-reduction "warm-
+            # up" on resume, a far smaller cost than a stitched artifact.
+            # The demodulator needs no such reset: it runs every tick
+            # regardless of squelch (see _service_active_slots), so its
+            # own state (phase, DC estimate) was never interrupted.
+            slot.noise_reducer.reset()
+            slot.was_squelched = False
         if audio.ndim == 1:
             audio = self._apply_noise_reduction(slot, audio)
             mono = audio
