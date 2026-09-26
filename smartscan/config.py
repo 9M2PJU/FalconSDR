@@ -121,17 +121,17 @@ class NoiseReductionConfig:
 
 @dataclass
 class TranscriptionConfig:
-    enabled: bool = True         # automatyczna transkrypcja nowych nagrań w tle (zakładka Odtwarzacz)
-    generic_model: str = "large-v3"  # wielojęzyczny model (m.in. polskie transmisje)
+    enabled: bool = True         # automatic background transcription of new recordings (Odtwarzacz tab)
+    generic_model: str = "large-v3"  # multilingual model (covers Polish transmissions, among others)
     english_atc_model: str = "jacktol/whisper-medium.en-fine-tuned-for-ATC-faster-whisper"
     device: str = "auto"         # "auto" | "cuda" | "cpu"
-    compute_type: str = "auto"   # "auto" -> int8_float16 na GPU, int8 na CPU
-    # Języki, na które obstawiamy wynik detekcji w niepewnych przypadkach (patrz
-    # transcription_engine._resolve_language) - w tym nasłuchu realnie liczy się
-    # tylko angielski i polski, więc szum radiowy nie myli detekcji egzotycznymi
-    # językami.
+    compute_type: str = "auto"   # "auto" -> int8_float16 on GPU, int8 on CPU
+    # Languages we bet the detection result on in uncertain cases (see
+    # transcription_engine._resolve_language) - in this kind of listening,
+    # only English and Polish realistically matter, so radio noise doesn't
+    # get to confuse detection with exotic languages.
     candidate_languages: list[str] = field(default_factory=lambda: ["en", "pl"])
-    min_duration_sec: float = 0.6  # krótsze nagrania (np. sam trzask squelchu) pomijamy
+    min_duration_sec: float = 0.6  # shorter recordings (e.g. just a squelch crackle) are skipped
 
 
 @dataclass

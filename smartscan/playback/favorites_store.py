@@ -1,6 +1,7 @@
-"""Trwały zbiór ulubionych nagrań - to samo `cache_key()` (ścieżka+rozmiar+
-mtime) co reszta cache'y w tym module, żeby jeden plik trzymał tylko klucze
-(gwiazdka to fakt binarny, nie ma tu nic do przeliczania jak w cache jakości)."""
+"""Persistent set of favorite recordings - the same `cache_key()`
+(path+size+mtime) as the other caches in this module, so one file just holds
+keys (a star is a binary fact, there's nothing to recompute like in the
+quality cache)."""
 from __future__ import annotations
 
 import json
@@ -24,14 +25,14 @@ class FavoritesStore:
             try:
                 self._keys = set(json.loads(self.favorites_file.read_text()))
             except (json.JSONDecodeError, OSError):
-                logger.warning("Nie udało się wczytać listy ulubionych, zaczynam od nowa")
+                logger.warning("Failed to load the favorites list, starting fresh")
                 self._keys = set()
 
     def save(self) -> None:
         try:
             self.favorites_file.write_text(json.dumps(sorted(self._keys)))
         except OSError as exc:
-            logger.warning("Nie udało się zapisać listy ulubionych: %s", exc)
+            logger.warning("Failed to save the favorites list: %s", exc)
 
     def is_favorite(self, key: str) -> bool:
         return key in self._keys
@@ -44,7 +45,7 @@ class FavoritesStore:
         self.save()
 
     def remove(self, key: str) -> None:
-        """Usuwa pojedynczy wpis (np. tuż po ręcznym skasowaniu nagrania przez użytkownika)."""
+        """Removes a single entry (e.g. right after the user manually deletes a recording)."""
         if key in self._keys:
             self._keys.discard(key)
             self.save()

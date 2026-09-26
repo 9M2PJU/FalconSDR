@@ -1,4 +1,4 @@
-"""Struktury danych reprezentujące pojedyncze nagranie."""
+"""Data structures representing a single recording."""
 from __future__ import annotations
 
 from dataclasses import dataclass, field
@@ -9,13 +9,13 @@ from typing import Optional
 
 @dataclass
 class QualityMetrics:
-    noise_floor: float          # amplituda tła (szumu) - RMS, skala 0-32768
-    signal_level: float         # amplituda sygnału (szczyty transmisji) - RMS
-    snr_db: float                # o ile dB sygnał jest ponad szumem
-    clipping_ratio: float        # udział próbek przesterowanych (0-1)
-    quality_score: float         # zbiorczy wynik 0-100 do sortowania
+    noise_floor: float          # background (noise) amplitude - RMS, 0-32768 scale
+    signal_level: float         # signal amplitude (transmission peaks) - RMS
+    snr_db: float                # how many dB the signal is above the noise
+    clipping_ratio: float        # fraction of clipped samples (0-1)
+    quality_score: float         # overall 0-100 score, for sorting
     duration_sec: float
-    readable: bool = True        # False = plik uszkodzony/nieczytelny, metryki powyżej są zerami-zastępczymi
+    readable: bool = True        # False = file corrupt/unreadable, the metrics above are placeholder zeros
 
 
 TRANSCRIPT_STATUSES = ("ok", "low_confidence", "no_speech", "error", "skipped_short")
@@ -24,17 +24,17 @@ TRANSCRIPT_STATUSES = ("ok", "low_confidence", "no_speech", "error", "skipped_sh
 @dataclass
 class TranscriptionResult:
     text: str
-    language: str                # kod ISO wykrytego/użytego języka, np. "en", "pl"
+    language: str                # ISO code of the detected/used language, e.g. "en", "pl"
     language_probability: float
-    status: str                  # patrz TRANSCRIPT_STATUSES
-    engine: str                  # identyfikator użytego modelu (do debugowania/przyszłych zmian)
+    status: str                  # see TRANSCRIPT_STATUSES
+    engine: str                  # identifier of the model used (for debugging/future changes)
     transcribed_at: str          # ISO timestamp
 
 
 @dataclass
 class Recording:
     path: Path
-    dt_local: datetime           # czas polski (ze skanera), tz-aware
+    dt_local: datetime           # local time (from the scanner), tz-aware
     dt_utc: datetime
     freq_khz: int
     quality: Optional[QualityMetrics] = None
@@ -47,7 +47,7 @@ class Recording:
 
     @property
     def transcript_status(self) -> str:
-        """'pending' = jeszcze nie próbowaliśmy transkrybować (odróżnia od realnych statusów)."""
+        """'pending' = haven't tried transcribing yet (distinguishes it from the real statuses)."""
         return self.transcript.status if self.transcript else "pending"
 
     @property

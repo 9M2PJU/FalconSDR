@@ -1,5 +1,5 @@
-"""Trwały cache wyników analizy jakości, żeby nie przeliczać jej za każdym
-uruchomieniem programu dla nagrań, które się nie zmieniły."""
+"""Persistent cache of quality-analysis results, so it doesn't get
+recomputed on every program launch for recordings that haven't changed."""
 from __future__ import annotations
 
 import json
@@ -24,14 +24,14 @@ class QualityCache:
             try:
                 self._data = json.loads(self.cache_file.read_text())
             except (json.JSONDecodeError, OSError):
-                logger.warning("Nie udało się wczytać cache jakości, zaczynam od nowa")
+                logger.warning("Failed to load the quality cache, starting fresh")
                 self._data = {}
 
     def save(self) -> None:
         try:
             self.cache_file.write_text(json.dumps(self._data))
         except OSError as exc:
-            logger.warning("Nie udało się zapisać cache jakości: %s", exc)
+            logger.warning("Failed to save the quality cache: %s", exc)
 
     def get(self, key: str) -> QualityMetrics | None:
         raw = self._data.get(key)
@@ -51,11 +51,11 @@ class QualityCache:
         }
 
     def prune(self, valid_keys: set[str]) -> None:
-        """Usuwa z cache wpisy dla plików, których już nie ma (przeniesione/usunięte)."""
+        """Removes cache entries for files that no longer exist (moved/deleted)."""
         stale = set(self._data) - valid_keys
         for key in stale:
             del self._data[key]
 
     def remove(self, key: str) -> None:
-        """Usuwa pojedynczy wpis (np. tuż po ręcznym skasowaniu nagrania przez użytkownika)."""
+        """Removes a single entry (e.g. right after the user manually deletes a recording)."""
         self._data.pop(key, None)

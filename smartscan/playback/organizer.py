@@ -1,5 +1,5 @@
-"""Segregacja nagrań: przenoszenie luźnych plików .wav z katalogu głównego
-skanera do podfolderów wg daty (czas polski zawarty w nazwie pliku)."""
+"""Recording sorting: moves loose .wav files from the scanner's root output
+directory into date subfolders (local time embedded in the filename)."""
 from __future__ import annotations
 
 import logging
@@ -24,9 +24,9 @@ class ParsedName:
 
 
 def parse_filename(name: str) -> ParsedName | None:
-    """Wyciąga datę/godzinę (czas polski) i częstotliwość (kHz) z nazwy pliku.
-    Mikrosekundy (patrz FILENAME_REGEX) są opcjonalne - stare nazwy plików
-    sprzed tej zmiany parsują się dalej, po prostu z zerowymi mikrosekundami."""
+    """Extracts the date/time (local time) and frequency (kHz) from a
+    filename. Microseconds (see FILENAME_REGEX) are optional - filenames
+    from before that change still parse, just with zero microseconds."""
     m = _NAME_RE.match(name)
     if not m:
         return None
@@ -40,16 +40,15 @@ def parse_filename(name: str) -> ParsedName | None:
 
 
 def organize(root: Path = SMARTSCAN_DIR) -> List[Path]:
-    """Przenosi pliki .wav leżące luzem bezpośrednio w `root` do podfolderów
-    `root/YYYY-MM-DD/` odpowiadających polskiej dacie z nazwy pliku.
+    """Moves .wav files sitting loose directly in `root` into
+    `root/YYYY-MM-DD/` subfolders matching the local date from the filename.
 
-    Zwraca listę nowych ścieżek przeniesionych plików. Operacja jest
-    bezpieczna do wielokrotnego uruchamiania (idempotentna) - pliki, które są
-    już w podfolderach, nie są ruszane.
+    Returns the list of moved files' new paths. Safe to run repeatedly
+    (idempotent) - files already in a date subfolder are left alone.
     """
     root = Path(root)
     if not root.is_dir():
-        logger.warning("Katalog %s nie istnieje", root)
+        logger.warning("Directory %s doesn't exist", root)
         return []
 
     moved: List[Path] = []
@@ -59,7 +58,7 @@ def organize(root: Path = SMARTSCAN_DIR) -> List[Path]:
     for path in sorted(loose_files):
         parsed = parse_filename(path.name)
         if parsed is None:
-            logger.debug("Pomijam plik o nierozpoznanej nazwie: %s", path.name)
+            logger.debug("Skipping file with an unrecognized name: %s", path.name)
             continue
 
         date_dir = root / parsed.dt_local.strftime(DATE_DIR_FORMAT)
@@ -69,26 +68,26 @@ def organize(root: Path = SMARTSCAN_DIR) -> List[Path]:
         if dest.exists():
             if dest.resolve() == path.resolve():
                 continue
-            # Nazwa już zajęta przez inny plik (nie powinno się zdarzyć, bo
-            # znacznik czasu w nazwie ma rozdzielczość sekundy) - dopisz sufiks
-            # zamiast nadpisywać lub gubić dane.
+            # Name already taken by another file (shouldn't normally happen -
+            # the timestamp in the name has second resolution) - append a
+            # suffix instead of overwriting or losing data.
             stem, suffix = dest.stem, dest.suffix
             i = 1
             while dest.exists():
                 dest = date_dir / f"{stem}_dup{i}{suffix}"
                 i += 1
-            logger.warning("Kolizja nazw, zapisuję jako %s", dest.name)
+            logger.warning("Name collision, saving as %s", dest.name)
 
         shutil.move(str(path), str(dest))
         moved.append(dest)
-        logger.info("Przeniesiono %s -> %s", path.name, dest.relative_to(root))
+        logger.info("Moved %s -> %s", path.name, dest.relative_to(root))
 
     return moved
 
 
 def iter_all_recordings(root: Path = SMARTSCAN_DIR):
-    """Zwraca ścieżki wszystkich plików .wav w katalogu głównym oraz we
-    wszystkich podfolderach z datą (posortowane po nazwie, czyli chronologicznie)."""
+    """Returns the paths of every .wav file in the root directory and every
+    date subfolder (sorted by name, i.e. chronologically)."""
     root = Path(root)
     if not root.is_dir():
         return []

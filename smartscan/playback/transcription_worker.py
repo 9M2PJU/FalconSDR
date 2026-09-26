@@ -1,6 +1,6 @@
-"""Transkrypcja nagrań w tle, w osobnym wątku Qt, żeby nie blokować GUI -
-ładowanie modeli Whisper i sama transkrypcja mogą trwać długo (to celowe,
-patrz transcription_engine.py - liczy się jakość, nie szybkość)."""
+"""Background transcription of recordings, on its own Qt thread so the GUI
+doesn't block - loading Whisper models and transcribing itself can take a
+while (deliberately - see transcription_engine.py: quality matters, not speed)."""
 from __future__ import annotations
 
 import logging
@@ -36,8 +36,8 @@ _SAVE_INTERVAL_S = 5.0
 
 
 class TranscriptionWorker(QThread):
-    item_done = Signal(str, object)   # ścieżka pliku (str), TranscriptionResult
-    progress = Signal(int, int)       # zrobione, razem (tylko z tego przebiegu)
+    item_done = Signal(str, object)   # file path (str), TranscriptionResult
+    progress = Signal(int, int)       # done, total (for this run only)
     finished_batch = Signal()
 
     def __init__(
@@ -56,10 +56,10 @@ class TranscriptionWorker(QThread):
         self._cache = cache
         self._ignore_cache = ignore_cache
         self._include_errors = include_errors
-        # Tylko dla ręcznego "Transkrybuj ponownie" z wybranym językiem w
-        # Odtwarzaczu (zawsze wtedy z dokładnie jednym nagraniem w batchu) -
-        # automatyczna kolejka w tle nigdy tego nie ustawia, więc jej
-        # zachowanie (detekcja języka) zostaje dokładnie takie jak było.
+        # Only for a manual "Re-transcribe" with a chosen language in
+        # Odtwarzacz (always exactly one recording in the batch then) - the
+        # automatic background queue never sets this, so its behavior
+        # (language detection) stays exactly as it was.
         self._forced_language = forced_language
         self._stop_requested = False
 
@@ -68,9 +68,9 @@ class TranscriptionWorker(QThread):
 
     def _cached_result(self, rec: Recording) -> Optional[TranscriptionResult]:
         """self._cache.get(rec.cache_key()), tolerant of a recording whose
-        plik zniknął (skasowany przez uzytkownika, przeniesiony przez
-        organize()...) między zbudowaniem tej listy a teraz - potraktowane
-        jak "brak wyniku w cache", nie jak twardy błąd (patrz też run())."""
+        file has disappeared (deleted by the user, moved by organize()...)
+        between building this list and now - treated as "no cached result",
+        not a hard error (see also run())."""
         try:
             return self._cache.get(rec.cache_key())
         except OSError:
@@ -80,20 +80,20 @@ class TranscriptionWorker(QThread):
         if self._ignore_cache:
             todo = list(self._recordings)
         elif self._include_errors:
-            # status "error" nie liczy się jako trwały wynik - to zwykle coś
-            # przejściowego (np. chwilowy brak VRAM) albo błąd środowiska, więc
-            # inaczej niż "ok"/"low_confidence"/"no_speech" chcemy spróbować
-            # ponownie same z siebie, bez klikania "Transkrybuj ponownie" za
-            # każdym razem.
+            # An "error" status doesn't count as a durable result - it's
+            # usually something transient (e.g. a momentary lack of VRAM) or
+            # an environment issue, so unlike "ok"/"low_confidence"/
+            # "no_speech" we want to retry it on our own, without clicking
+            # "Re-transcribe" every time.
             todo = [
                 r for r in self._recordings
                 if (cached := self._cached_result(r)) is None or cached.status == "error"
             ]
         else:
-            # Automatyczna kontynuacja zaraz po zakończonej paczce (patrz
-            # playback_panel._on_transcription_batch_finished) - łapie tylko
-            # naprawdę nowe nagrania, nie odpytuje ponownie tych "error" bez
-            # żadnej przerwy (patrz include_errors tam).
+            # Automatic continuation right after a finished batch (see
+            # playback_panel._on_transcription_batch_finished) - only picks
+            # up genuinely new recordings, doesn't re-query "error" ones
+            # again with no pause at all (see include_errors there).
             todo = [r for r in self._recordings if self._cached_result(r) is None]
         total = len(todo)
         self.progress.emit(0, total)
@@ -113,19 +113,20 @@ class TranscriptionWorker(QThread):
                     dirty = False
                 self.item_done.emit(str(rec.path), result)
             except Exception:
-                # Zaobserwowane naprawdę (crash.log/journalctl): rec.path bywa
-                # skasowany/przeniesiony w trakcie transkrypcji (np. przez
-                # użytkownika klikającego "Usuń" na tym samym nagraniu, albo
-                # organize() z kolejnego odświeżenia) - cache_key() wtedy
-                # rzuca FileNotFoundError. transcribe_recording() sam w sobie
-                # już łapie własne błędy (patrz jego docstring), więc to co
-                # tu ucieka to zawsze coś poza jego kontrolą. Bez tego
-                # try/except wyjątek uciekał z QThread.run() nieobsłużony -
-                # a PySide6 domyślnie ubija wtedy CAŁY proces, nie tylko ten
-                # wątek (potwierdzone: crash zawsze tuż po takim tracebacku
-                # w logu, żadnego innego śladu błędu) - jeden zniknięty plik
-                # nie może już zabijać reszty programu.
-                logger.exception("Transkrypcja: pominięto %s (błąd przetwarzania)", rec.path)
+                # Actually observed (crash.log/journalctl): rec.path can get
+                # deleted/moved mid-transcription (e.g. the user clicking
+                # "Delete" on that same recording, or organize() from another
+                # refresh) - cache_key() then raises FileNotFoundError.
+                # transcribe_recording() already catches its own errors (see
+                # its docstring), so whatever escapes here is always
+                # something outside its control. Without this try/except the
+                # exception would escape QThread.run() unhandled - and
+                # PySide6 kills the WHOLE process by default then, not just
+                # this thread (confirmed: the crash always follows right
+                # after such a traceback in the log, no other trace of a
+                # cause) - one disappeared file can no longer take the rest
+                # of the program down with it.
+                logger.exception("Transcription: skipped %s (processing error)", rec.path)
             self.progress.emit(i + 1, total)
         if dirty:
             # Whatever was put() since the last periodic save (including a

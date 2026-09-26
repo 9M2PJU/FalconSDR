@@ -1,4 +1,4 @@
-"""Budowanie indeksu nagrań (parsowanie nazw + doklejanie wyników analizy jakości)."""
+"""Building the recording index (parsing filenames + attaching quality analysis results)."""
 from __future__ import annotations
 
 import logging
@@ -17,12 +17,12 @@ ProgressCallback = Optional[Callable[[int, int], None]]
 
 
 def scan_recordings(root: Path = SMARTSCAN_DIR) -> List[Recording]:
-    """Parsuje nazwy wszystkich plików .wav (bez liczenia jakości)."""
+    """Parses the names of every .wav file (without computing quality)."""
     recordings: List[Recording] = []
     for path in iter_all_recordings(root):
         parsed = parse_filename(path.name)
         if parsed is None:
-            logger.debug("Pomijam nierozpoznany plik: %s", path)
+            logger.debug("Skipping unrecognized file: %s", path)
             continue
         recordings.append(
             Recording(
@@ -41,7 +41,7 @@ def attach_quality(
     progress_cb: ProgressCallback = None,
     cancel_check: Optional[Callable[[], bool]] = None,
 ) -> None:
-    """Uzupełnia recording.quality, korzystając z cache gdy to możliwe."""
+    """Fills in recording.quality, using the cache when possible."""
     total = len(recordings)
     for i, rec in enumerate(recordings):
         if cancel_check is not None and cancel_check():
@@ -63,7 +63,7 @@ def load_library(
     progress_cb: ProgressCallback = None,
     cancel_check: Optional[Callable[[], bool]] = None,
 ) -> List[Recording]:
-    """Skanuje katalog i zwraca listę nagrań z uzupełnioną jakością (z cache lub przeliczoną)."""
+    """Scans the directory and returns the recording list with quality filled in (from cache or computed)."""
     recordings = scan_recordings(root)
     cache = QualityCache()
     attach_quality(recordings, cache, progress_cb=progress_cb, cancel_check=cancel_check)

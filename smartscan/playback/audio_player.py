@@ -1,4 +1,4 @@
-"""Cienka warstwa nad QMediaPlayer do szybkiego odtwarzania nagrań."""
+"""Thin wrapper around QMediaPlayer for quick recording playback."""
 from __future__ import annotations
 
 from pathlib import Path
@@ -21,7 +21,7 @@ class AudioPlayer(QObject):
 
         self._player.playbackStateChanged.connect(self.stateChanged.emit)
 
-    # -- kontrola odtwarzania -------------------------------------------------
+    # -- playback control -------------------------------------------------
     def play_file(self, path: Path) -> None:
         self._current_path = path
         self._player.setSource(QUrl.fromLocalFile(str(path)))

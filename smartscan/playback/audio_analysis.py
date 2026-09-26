@@ -1,10 +1,11 @@
-"""Analiza jakości nagrań audio.
+"""Audio recording quality analysis.
 
-Nagrania pochodzą ze skanera wyzwalanego squelchem: plik zawiera od momentu
-otwarcia szumów do ich zamknięcia. Zwykle więc słychać tło (szum/nośną) oraz
-- gdy ktoś nadaje - głos wyraźnie głośniejszy od tła. Jakość transmisji
-oceniamy właśnie jako stosunek poziomu sygnału do poziomu tła (SNR), karząc
-dodatkowo przesterowania (clipping) i podejrzanie krótkie "strzały" squelchu.
+Recordings come from a squelch-triggered scanner: the file spans from the
+moment noise opens to when it closes. So there's usually background (noise/
+carrier) audible, plus - when someone's transmitting - a voice clearly
+louder than that background. We score transmission quality as exactly that
+ratio of signal level to background level (SNR), additionally penalizing
+clipping and suspiciously short squelch "bursts".
 """
 from __future__ import annotations
 
@@ -16,11 +17,11 @@ import numpy as np
 
 from smartscan.playback.models import QualityMetrics
 
-WINDOW_SEC = 0.05          # okno do liczenia obwiedni RMS
-NOISE_PERCENTILE = 15      # percentyl obwiedni traktowany jako poziom tła
-SIGNAL_PERCENTILE = 92     # percentyl obwiedni traktowany jako poziom sygnału
-SNR_FOR_100 = 30.0         # SNR (dB) odpowiadający wynikowi 100
-CLIP_THRESHOLD_FRAC = 0.975  # próg (jako ułamek pełnej skali) uznawany za przesterowanie
+WINDOW_SEC = 0.05          # window for computing the RMS envelope
+NOISE_PERCENTILE = 15      # envelope percentile treated as the background level
+SIGNAL_PERCENTILE = 92     # envelope percentile treated as the signal level
+SNR_FOR_100 = 30.0         # SNR (dB) corresponding to a score of 100
+CLIP_THRESHOLD_FRAC = 0.975  # threshold (as a fraction of full scale) considered clipping
 CLIP_PENALTY_SCALE = 300.0
 SHORT_RECORDING_SEC = 1.0
 SHORT_RECORDING_PENALTY = 15.0
@@ -46,7 +47,7 @@ def _read_samples(path: Path) -> tuple[np.ndarray, int, float]:
         data = np.frombuffer(raw, dtype=np.int32).astype(np.float64)
         full_scale = 2147483648.0
     else:
-        raise ValueError(f"Nieobsługiwana głębia próbki: {sampwidth} bajtów")
+        raise ValueError(f"Unsupported sample width: {sampwidth} bytes")
 
     if n_channels > 1 and data.size:
         usable = (data.size // n_channels) * n_channels
@@ -93,7 +94,7 @@ def compute_waveform_peaks(path: Path, n_buckets: int = 400) -> np.ndarray | Non
 
 
 def analyze_wav(path: Path) -> QualityMetrics:
-    """Liczy metryki jakości pojedynczego pliku wav."""
+    """Computes quality metrics for a single wav file."""
     try:
         data, full_scale, duration_sec = _read_samples(path)
     except Exception:
