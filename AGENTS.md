@@ -577,6 +577,39 @@ for exactly this reason. Add a new language by dropping one `.po` file — see
     `AttributeError` alongside `OSError` - `os.getloadavg()` doesn't exist
     on Windows at all, and this runs on the SDR acquisition thread, so it
     must never raise regardless of platform.
+17. **Hardware support beyond RTL-SDR is mostly already there on Linux "for
+    free" via `SoapyBackend` - it's fully generic, nothing RTL-SDR-specific
+    lives in it (all the RTL-SDR-only code is confined to `RtlSdrBackend`,
+    gotcha 16).** `SoapyBackend.enumerate_devices()` lists whatever
+    SoapySDR itself discovers (minus the "audio" driver - gotcha 4), so
+    HackRF/LimeSDR/Airspy/SDRplay/USRP(UHD)/etc. show up automatically the
+    moment the matching `soapysdr-module-*` is installed, no code changes
+    needed - confirmed on real hardware: the UHD module happened to already
+    be installed on the machine this was verified on. The one *actual* bug
+    that *was* artificially blocking other hardware: `ScannerPanel`'s
+    capture-bandwidth spinner (`bandwidth_spin`) was hardcoded to
+    `setRange(0.25, 3.2)` with a tooltip literally saying "e.g. 2.4 MHz for
+    RTL-SDR" - a leftover that capped every other device below its own real
+    capability (HackRF: 20 MHz, LimeSDR: 61.44 MHz, ...) for no reason since
+    the backend itself was never the constraint. Fixed to `(0.25, 61.44)` -
+    a generous, round "typical consumer/prosumer SDR range" bound (LimeSDR's
+    own max sample rate), not a hardware limit this app enforces; raise it
+    further if someone's real device genuinely needs more.
+    **Windows/macOS remain RTL-SDR-only for the "zero extra install" path**
+    (gotcha 16's `pyrtlsdr`/`pyrtlsdrlib` is RTL-SDR-specific by what the
+    library does, not a design choice this app made) - SoapySDR itself has
+    no pip wheel there. Researched (not implemented/verified - no non-
+    RTL-SDR hardware was available to test against): conda-forge is the
+    current, actively-maintained path (unlike PothosSDR, dead since 2021) -
+    `soapysdr` itself publishes win-64/osx builds today, and so do several
+    per-device modules (`soapysdr-module-hackrf`, `-limesdr` if/when
+    published, `-airspyhf`, `-uhd`, `-bladerf`, ...) - see
+    `requirements.txt`'s own note on this. This is a *separate* Python
+    environment from this project's pip/venv install, not something
+    `main.py`'s venv-redirect logic bridges into - documented as an
+    advanced, self-serve path for Windows/macOS users with non-RTL-SDR
+    hardware, deliberately not built into the app's own install flow until
+    an actual user with such hardware confirms it's worth the complexity.
 
 ## Testing without touching the user's real config/recordings
 

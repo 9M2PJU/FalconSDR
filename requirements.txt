@@ -21,12 +21,31 @@ sounddevice
 # SoapySDR (+ device drivers, e.g. SoapySDRRTLSDR) and PyAudio/PortAudio are
 # the two exceptions - they need system-level installation:
 #   Linux (Ubuntu/Debian):  sudo apt install python3-soapysdr soapysdr0.8-module-rtlsdr python3-pyaudio
-#   Windows:                nothing extra - RTL-SDR via pyrtlsdr, audio via
-#                           sounddevice (both above); SoapySDR optional
+#   Windows:                nothing extra for RTL-SDR - it's covered above via
+#                           pyrtlsdr, audio via sounddevice. SoapySDR itself is
+#                           only needed for OTHER hardware (HackRF, LimeSDR,
+#                           Airspy, SDRplay, USRP/UHD, ...) - see below.
 #   macOS:                  nothing extra, same as Windows; SoapySDR optional
 #                           (brew install soapysdr soapyrtlsdr)
 # If no SDR library is available at all, the app still starts and falls back
 # to the built-in Simulated backend rather than failing.
+#
+# --- Non-RTL-SDR hardware on Windows/macOS (HackRF, LimeSDR, Airspy,
+#     SDRplay, USRP/UHD, ...) - requires SoapySDR itself, which has no pip
+#     wheel. PothosSDR (the old "batteries included" Windows installer) has
+#     been unmaintained since 2021 - don't rely on it for anything but an
+#     already-working RTL-SDR setup (which pyrtlsdr above replaces anyway).
+#     The current, actively-maintained path is conda-forge, which does
+#     publish win-64/osx builds of soapysdr and per-device modules
+#     (soapysdr-module-hackrf, -limesdr, -airspy, -sdrplay3, -uhd, ...):
+#       1. Install Miniforge (https://github.com/conda-forge/miniforge)
+#       2. conda install -c conda-forge soapysdr soapysdr-module-<yourdevice>
+#     This is a SEPARATE Python environment from this project's own
+#     pip/venv install - SoapySDR ends up importable only inside that conda
+#     env, not this project's regular Python. Not verified end-to-end by
+#     this project (no non-RTL-SDR hardware was available to test against
+#     when this was written) - if you get it working, a PR/note on what
+#     worked would help the next person.
 #
 # QtMultimedia (used by the Odtwarzacz tab's audio player) is bundled in the
 # single PySide6 wheel - no separate package needed, unlike PyQt6/apt.
