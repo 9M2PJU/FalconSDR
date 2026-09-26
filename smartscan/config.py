@@ -85,6 +85,13 @@ class RecordingConfig:
     mode: str = "split"          # "single" or "split"
     output_dir: str = DEFAULT_RECORDINGS_DIR
     insert_marker: bool = True
+    # "wav" (default, always available) or "mp3" (requires ffmpeg on PATH -
+    # see audio_transcode.py; falls back to keeping the WAV silently if
+    # ffmpeg isn't installed, never loses the recording). WAV is still always
+    # the real-time write target - transcoding only ever runs once a file is
+    # fully closed (scanner_engine.py's _close_slot/stop_manual_recording),
+    # never on the per-chunk recording path.
+    output_format: str = "wav"
 
 
 @dataclass
@@ -216,7 +223,9 @@ class AppConfig:
             legacy_primary = raw.get("vfo_range")
             bands = [VfoRangeConfig(**legacy_primary)] if legacy_primary else [VfoRangeConfig()]
             bands += [VfoRangeConfig(**r) for r in raw.get("extra_vfo_ranges", [])]
-        # audio_format ("mp3") was removed - drop it if present in an older config.json
+        # An early, never-shipped mp3 attempt used the key "audio_format" -
+        # drop it if present so it doesn't collide with RecordingConfig's
+        # current, differently-named "output_format" field.
         recording_raw = dict(raw.get("recording", {}))
         recording_raw.pop("audio_format", None)
         return AppConfig(

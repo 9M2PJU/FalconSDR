@@ -7,6 +7,7 @@ from PySide6.QtWidgets import (
     QPushButton, QRadioButton, QVBoxLayout,
 )
 
+from ...audio_transcode import ffmpeg_available
 from ...config import RecordingConfig
 from ...i18n import tr
 from ..widgets import RecIndicator
@@ -49,6 +50,20 @@ class RecordingPanel(QGroupBox):
         mode_row.addWidget(self.split_radio)
         root.addLayout(mode_row)
 
+        format_row = QHBoxLayout()
+        self.wav_radio = QRadioButton(tr("WAV (uncompressed)"))
+        self.mp3_radio = QRadioButton(tr("MP3 (compressed, requires ffmpeg)"))
+        self.wav_radio.toggled.connect(self._push_settings)
+        format_row.addWidget(self.wav_radio)
+        format_row.addWidget(self.mp3_radio)
+        root.addLayout(format_row)
+
+        self.format_warning_label = QLabel()
+        self.format_warning_label.setStyleSheet("color: #e8a33d;")
+        self.format_warning_label.setWordWrap(True)
+        self.format_warning_label.setVisible(False)
+        root.addWidget(self.format_warning_label)
+
         dir_row = QHBoxLayout()
         self.dir_edit = QLineEdit()
         self.dir_edit.setReadOnly(True)
@@ -73,7 +88,20 @@ class RecordingPanel(QGroupBox):
         self.enable_check.setChecked(self.config.enabled)
         self.single_radio.setChecked(self.config.mode == "single")
         self.split_radio.setChecked(self.config.mode == "split")
+        self.wav_radio.setChecked(self.config.output_format != "mp3")
+        self.mp3_radio.setChecked(self.config.output_format == "mp3")
         self.dir_edit.setText(self.config.output_dir)
+        self._update_format_warning()
+
+    def _update_format_warning(self) -> None:
+        if self.mp3_radio.isChecked() and not ffmpeg_available():
+            self.format_warning_label.setText(tr(
+                "ffmpeg was not found on this system - recordings will be "
+                "saved as WAV until it's installed."
+            ))
+            self.format_warning_label.setVisible(True)
+        else:
+            self.format_warning_label.setVisible(False)
 
     def _browse_dir(self) -> None:
         path = QFileDialog.getExistingDirectory(self, tr("Recordings output folder"), self.config.output_dir)
@@ -89,6 +117,8 @@ class RecordingPanel(QGroupBox):
         changed = enabled != self.config.enabled
         self.config.enabled = enabled
         self.config.mode = "single" if self.single_radio.isChecked() else "split"
+        self.config.output_format = "mp3" if self.mp3_radio.isChecked() else "wav"
+        self._update_format_warning()
         self.settings_changed.emit()
         if changed:
             self.enabled_changed.emit(enabled)
@@ -104,6 +134,8 @@ class RecordingPanel(QGroupBox):
         self.enable_check.setEnabled(not running)
         self.single_radio.setEnabled(not running)
         self.split_radio.setEnabled(not running)
+        self.wav_radio.setEnabled(not running)
+        self.mp3_radio.setEnabled(not running)
         if not running:
             self.rec_indicator.set_on(False)
             self.file_label.setText("")

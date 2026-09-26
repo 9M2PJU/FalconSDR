@@ -32,6 +32,7 @@ import numpy as np
 from PySide6.QtCore import QObject, Signal
 
 from .audio_output import AudioOutput
+from .audio_transcode import transcode_to_mp3
 from .calibration_log import CalibrationLogger
 from .edge_compensation import EdgeCompensation
 from .channelizer import (
@@ -541,6 +542,10 @@ class ScannerEngine(threading.Thread):
             self._manual_recorder = None
         path = recorder.current_path
         recorder.stop_session()
+        if path and self.config.recording.output_format == "mp3":
+            mp3_path = transcode_to_mp3(Path(path))
+            if mp3_path is not None:
+                path = str(mp3_path)
         self.signals.manual_recording_changed.emit(False, "")
         if path:
             self.signals.recording_finished.emit(path)
@@ -1618,20 +1623,36 @@ class ScannerEngine(threading.Thread):
             return
         finished_path = None
         if self.config.recording.enabled:
+            # Single mode: end_transmission() is a split-mode-only concept
+            # (see its own docstring, always returns None otherwise) - grab
+            # the path before stop_session() closes it so mp3 output still
+            # applies to it below, even though (pre-existing, unrelated to
+            # mp3) single mode gets no metadata chunk or recording_finished
+            # signal either way.
+            single_mode_path = slot.recorder.current_path
             finished_path = slot.recorder.end_transmission()
             slot.recorder.stop_session()
+            if finished_path is not None:
+                # Metadata is a bonus on top of an already-successfully-
+                # written recording - never let a problem here (disk full,
+                # weird path, ...) take down the scanner or be mistaken for
+                # a recording failure. Must run before any mp3 transcode:
+                # this project's WAV metadata chunk (wav_metadata.py) is a
+                # RIFF/LIST chunk, which an mp3 container has no room for.
+                try:
+                    slot.meta["close_reason"] = reason
+                    slot.meta["closed_at_utc"] = dt.datetime.now(dt.timezone.utc).isoformat()
+                    slot.meta["duration_sec"] = round(time.monotonic() - slot.opened_at, 3)
+                    append_metadata_chunk(Path(finished_path), slot.meta)
+                except Exception:
+                    pass
+                if self.config.recording.output_format == "mp3":
+                    mp3_path = transcode_to_mp3(Path(finished_path))
+                    if mp3_path is not None:
+                        finished_path = mp3_path
+            elif single_mode_path and self.config.recording.output_format == "mp3":
+                transcode_to_mp3(Path(single_mode_path))
         if finished_path is not None:
-            # Metadata is a bonus on top of an already-successfully-written
-            # recording - never let a problem here (disk full, weird path,
-            # ...) take down the scanner or be mistaken for a recording
-            # failure.
-            try:
-                slot.meta["close_reason"] = reason
-                slot.meta["closed_at_utc"] = dt.datetime.now(dt.timezone.utc).isoformat()
-                slot.meta["duration_sec"] = round(time.monotonic() - slot.opened_at, 3)
-                append_metadata_chunk(Path(finished_path), slot.meta)
-            except Exception:
-                pass
             self.signals.recording_finished.emit(str(finished_path))
         if reason == "linger":
             # Only a natural end-of-transmission earns a boost - a manual

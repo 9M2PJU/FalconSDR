@@ -19,19 +19,28 @@ pyqtgraph>=0.13
 # QtMultimedia (used by the Odtwarzacz tab's audio player) is bundled in the
 # single PySide6 wheel - no separate package needed, unlike PyQt6/apt.
 #
-# --- Transkrypcja (zakładka Odtwarzacz) -------------------------------------
-# faster-whisper (i jego zależności: ctranslate2, av, tokenizers...) NIE jest
-# instalowany do systemowego Pythona - Ubuntu 24.04 blokuje to (PEP 668), a
-# poza tym to sporo wagi (modele ASR), więc trzyma się to w osobnym venv:
+# --- Optional: MP3 recording output (Options tab -> Recording -> MP3) ------
+# Requires a system `ffmpeg` on PATH - not a pip package (same reasoning as
+# SoapySDR/PyAudio above). If it's missing, the app still starts fine and
+# just keeps writing WAV regardless of the MP3 setting (see
+# smartscan/audio_transcode.py):
+#   Linux (Ubuntu/Debian):  sudo apt install ffmpeg
+#   Windows:                winget install ffmpeg  (or download a build and add it to PATH)
+#   macOS:                  brew install ffmpeg
+#
+# --- Optional: transcription (Odtwarzacz tab) -------------------------------
+# faster-whisper (and its dependencies: ctranslate2, av, tokenizers...) is NOT
+# installed into the system Python - Ubuntu 24.04 blocks that (PEP 668), and
+# it's also fairly heavy (ASR models), so it lives in its own venv instead:
 #
 #   python3 -m venv --system-site-packages .venv
 #   .venv/bin/pip install faster-whisper
-#   # opcjonalnie, jeśli chcesz transkrypcję na GPU (NVIDIA/CUDA):
+#   # optional, if you want GPU (NVIDIA/CUDA) transcription:
 #   .venv/bin/pip install nvidia-cublas-cu12 nvidia-cudnn-cu12
 #
-# --system-site-packages sprawia, że venv nadal widzi PySide6/numpy,
-# więc reszta programu działa tak samo. main.py sam przełącza się w ten venv
-# przy starcie (jeśli istnieje), więc uruchamianie "python3 main.py" się nie
-# zmienia. Modele Whisper (duże, ~1.5 GB + ~0.8 GB) pobierają się same z
-# Hugging Face przy pierwszej transkrypcji i lądują w ~/.cache/huggingface.
+# --system-site-packages means the venv still sees PySide6/numpy, so the rest
+# of the app works the same. main.py switches into this venv itself at
+# startup (if it exists), so running "python3 main.py" doesn't change.
+# Whisper's models (large, ~1.5 GB + ~0.8 GB) download themselves from
+# Hugging Face on first transcription and land in ~/.cache/huggingface.
 faster-whisper>=1.2

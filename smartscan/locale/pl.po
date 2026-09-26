@@ -1056,3 +1056,15 @@ msgstr "Automatycznie nagrywa każdą transmisję wykrytą przez skaner - to sam
 msgid "Auto-recording is currently off - the scanner is listening but not saving anything to disk. Turn it on from the Listen tab or Options to start building this library."
 msgstr "Auto-nagrywanie jest obecnie wyłączone - skaner nasłuchuje, ale nic nie zapisuje na dysk. Włącz je w zakładce Nasłuch albo w Opcjach, żeby zacząć budować tę bibliotekę."
 
+
+
+# --- mp3 recording output format (recording_panel/audio_transcode) ---
+
+msgid "WAV (uncompressed)"
+msgstr "WAV (bez kompresji)"
+
+msgid "MP3 (compressed, requires ffmpeg)"
+msgstr "MP3 (skompresowany, wymaga ffmpeg)"
+
+msgid "ffmpeg was not found on this system - recordings will be saved as WAV until it's installed."
+msgstr "Nie znaleziono ffmpeg w systemie - nagrania będą zapisywane jako WAV, dopóki nie zostanie zainstalowany."
