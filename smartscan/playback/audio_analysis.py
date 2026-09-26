@@ -55,6 +55,43 @@ def _read_samples(path: Path) -> tuple[np.ndarray, int, float]:
     return data, full_scale, duration_sec
 
 
+def compute_waveform_peaks(path: Path, n_buckets: int = 400) -> np.ndarray | None:
+    """Peak amplitude (0..1) per time bucket, for WaveformView's visual
+    overview in Odtwarzacz (see gui/widgets.py) - lets a listener see at a
+    glance where a recording is quiet/silent (e.g. a squelched gap - see
+    ScannerEngine._play_and_record_slot, which writes silence rather than
+    cutting the block so the file's timeline stays real) versus genuinely
+    loud/quiet content, without having to play it first.
+
+    Reuses _read_samples() (same WAV-format handling as analyze_wav()) -
+    reading and reducing even a several-minutes-long recording this way is
+    a handful of vectorized numpy calls, fast enough to run synchronously
+    on the GUI thread right as playback starts (see
+    PlaybackPanel._on_playback_started) rather than needing a background
+    worker thread like the library-wide quality scan does.
+
+    Returns None (not an all-zero array) for an unreadable/corrupt file or
+    one with no samples at all, so the caller/widget can tell "no data" (->
+    draws a flat placeholder line) apart from "genuinely silent throughout"
+    (-> draws a flat line too, but that's a real, meaningful measurement,
+    not a fallback)."""
+    try:
+        data, full_scale, _ = _read_samples(path)
+    except Exception:
+        return None
+    if data.size == 0:
+        return None
+
+    n_buckets = max(1, min(n_buckets, data.size))
+    edge = data.size - (data.size % n_buckets)
+    if edge == 0:
+        edge = data.size
+        n_buckets = 1
+    trimmed = np.abs(data[:edge]) / full_scale
+    peaks = trimmed.reshape(n_buckets, -1).max(axis=1)
+    return np.clip(peaks, 0.0, 1.0).astype(np.float32)
+
+
 def analyze_wav(path: Path) -> QualityMetrics:
     """Liczy metryki jakości pojedynczego pliku wav."""
     try:
@@ -73,14 +110,38 @@ def analyze_wav(path: Path) -> QualityMetrics:
     frames = trimmed.reshape(n_windows, window)
     rms = np.sqrt(np.mean(frames ** 2, axis=1))
 
-    noise_floor = float(np.percentile(rms, NOISE_PERCENTILE))
-    signal_level = float(np.percentile(rms, SIGNAL_PERCENTILE))
+    # Windows of EXACT digital silence (RMS == 0.0) are squelch-substituted
+    # gaps (see ScannerEngine._play_and_record_slot / Recorder.write_audio's
+    # ``real=False`` silence, written so a recording's timeline stays real
+    # instead of jump-cutting - see AGENTS.md gotcha 6), not real receiver
+    # noise, however quiet - genuine ADC noise/thermal/quantization dither
+    # essentially never makes an entire ~50ms window land on exactly 0.
+    # Left in, a recording with enough squelched gaps (a real, common case -
+    # any transmission with a mid-conversation pause) pushes the 15th-
+    # percentile "noise floor" straight to 0.0, and dividing by that below
+    # blows the SNR up to nonsense (100+ dB, quality pinned at 100) for a
+    # recording that's often genuinely quiet/marginal - measure quality from
+    # the real content only, exactly like a listener skipping the silent
+    # parts would judge it.
+    real_mask = rms > 0.0
+    if not real_mask.any():
+        # Every window is exact silence - only possible for genuinely
+        # unreadable/all-zero data at this point (an all-squelched
+        # transmission never gets this far - see Recorder's own phantom-
+        # recording cleanup) - fall back to the original, unfiltered arrays
+        # rather than dividing by an empty selection.
+        real_mask = np.ones_like(rms, dtype=bool)
+    real_rms = rms[real_mask]
+    real_data = frames[real_mask].reshape(-1)
+
+    noise_floor = float(np.percentile(real_rms, NOISE_PERCENTILE))
+    signal_level = float(np.percentile(real_rms, SIGNAL_PERCENTILE))
 
     eps = 1e-6
     snr_db = 20.0 * math.log10(max(signal_level, eps) / max(noise_floor, eps))
 
     clip_thresh = CLIP_THRESHOLD_FRAC * full_scale
-    clipping_ratio = float(np.mean(np.abs(data) >= clip_thresh))
+    clipping_ratio = float(np.mean(np.abs(real_data) >= clip_thresh)) if real_data.size else 0.0
 
     snr_component = max(0.0, min(snr_db, SNR_FOR_100)) / SNR_FOR_100 * 100.0
     clip_penalty = min(clipping_ratio * CLIP_PENALTY_SCALE, 40.0)

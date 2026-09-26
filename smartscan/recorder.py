@@ -6,6 +6,7 @@ from __future__ import annotations
 import datetime as dt
 import wave
 from pathlib import Path
+from typing import List
 
 import numpy as np
 
@@ -31,11 +32,22 @@ class Recorder:
         self._wav: wave.Wave_write | None = None
         self._current_path: Path | None = None
         self._session_active = False
-        # Samples actually written to the *current* file since it was opened
-        # - see end_transmission()'s "phantom recording" cleanup below. Reset
+        # True once *real* (non-silence-substituted - see write_audio()'s
+        # ``real`` param) audio has been written to the *current* file -
+        # see end_transmission()'s "phantom recording" cleanup below. Reset
         # per-file in _open_file(), not per-session, since a session can span
         # many split-mode files.
-        self._frames_written = 0
+        self._has_real_audio = False
+        # Silence blocks (write_audio(..., real=False)) are held here rather
+        # than written immediately - see write_audio()'s docstring for why:
+        # a squelched stretch might turn out to be a genuine mid-conversation
+        # pause (more real audio still coming - flushed to disk then, in
+        # order) or the trailing tail of the whole transmission with nothing
+        # more coming - which the user explicitly wants trimmed, not kept as
+        # dead air at the end of the file. Only known which one it was in
+        # hindsight, so hold the audio (bounded - at most one LINGER
+        # period's worth, a handful of chunks) until either happens.
+        self._pending_silence: List[np.ndarray] = []
 
     @property
     def current_path(self) -> str:
@@ -65,34 +77,53 @@ class Recorder:
         elif self._wav is not None and self.config.insert_marker:
             self._write_raw(_marker_tone(self.audio_rate))
 
-    def write_audio(self, audio: np.ndarray) -> None:
+    def write_audio(self, audio: np.ndarray, real: bool = True) -> None:
+        """Writes ``audio`` (mono) to the current file - or, for
+        ``real=False`` (silence substituted for a squelched, below-threshold
+        stretch - see ScannerEngine._play_and_record_slot), holds it instead
+        of writing it immediately (see self._pending_silence). A genuine
+        mid-conversation pause should read as real silence when more speech
+        follows - so once *real* audio arrives, any pending silence is
+        flushed first, in order, ahead of it. But if the transmission ends
+        (see _close_file()) before real audio ever follows a silence block,
+        that pending silence is simply discarded, unwritten - the user
+        explicitly wants a squelched trailing tail trimmed, not kept as dead
+        air at the end of the file. Only the *middle* case should sound like
+        a real pause; the end should just end."""
         if self._wav is None:
             return
+        if not real:
+            self._pending_silence.append(audio)
+            return
+        if self._pending_silence:
+            for chunk in self._pending_silence:
+                self._write_raw(chunk)
+            self._pending_silence = []
         self._write_raw(audio)
+        self._has_real_audio = True
 
     def end_transmission(self) -> Path | None:
         """Closes the current per-transmission file (split mode only).
         Returns the finished file's path so the caller can hand it straight
         to the Odtwarzacz library instead of waiting for a periodic rescan.
 
-        Deletes the file and returns None instead if literally zero audio
-        samples were ever written to it - a real, observed case since
-        Squelch (see AppConfig.squelch_enabled) started dropping blocks
-        below its threshold: a brief above-trigger spike can open a slot,
-        then fall back below the squelch threshold before this slot is even
-        serviced once (see ScannerEngine._service_active_slots/
+        Deletes the file and returns None instead if it never received any
+        *real* audio (see write_audio()'s ``real`` param) - a real, observed
+        case since Squelch (see AppConfig.squelch_enabled) started gating
+        blocks below its threshold: a brief above-trigger spike can open a
+        slot, then fall back below the squelch threshold before this slot is
+        even serviced once (see ScannerEngine._service_active_slots/
         _play_and_record_slot), leaving the slot "open" for the full LINGER
-        grace period with nothing ever actually written. Without this, that
-        produced a header-only WAV (0 real seconds of audio, but a real
-        wall-clock-long open/close cycle) that still got catalogued into
-        the Odtwarzacz library as a genuine recording - pure clutter with
+        grace period with nothing but silence ever written. Without this,
+        that produced an all-silent WAV that still got catalogued into the
+        Odtwarzacz library as a genuine recording - pure clutter with
         nothing to hear."""
         if self.config.mode != "split":
             return None
         path = self._current_path
-        wrote_audio = self._frames_written > 0
+        had_real_audio = self._has_real_audio
         self._close_file()
-        if path is not None and not wrote_audio:
+        if path is not None and not had_real_audio:
             try:
                 path.unlink()
             except OSError:
@@ -137,17 +168,22 @@ class Recorder:
         wav.setframerate(self.audio_rate)
         self._wav = wav
         self._current_path = path
-        self._frames_written = 0
+        self._has_real_audio = False
+        self._pending_silence = []
 
     def _write_raw(self, audio: np.ndarray) -> None:
         pcm = np.clip(audio, -1.0, 1.0)
         pcm = (pcm * 32767.0).astype(np.int16)
         self._wav.writeframes(pcm.tobytes())
-        self._frames_written += pcm.size
 
     def _close_file(self) -> None:
         if self._wav is None:
             return
+        # Any not-yet-flushed silence (write_audio(..., real=False)) is the
+        # trailing tail of this transmission, since nothing - see there -
+        # ever asked for it to be flushed by writing more real audio after
+        # it. Discard rather than write: the trim the user explicitly wants.
+        self._pending_silence = []
         self._wav.close()
         self._wav = None
         self._current_path = None

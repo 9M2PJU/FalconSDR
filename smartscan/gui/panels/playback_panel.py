@@ -38,7 +38,7 @@ from PyQt6.QtWidgets import (
 
 from ...config import AppConfig
 from ...models import Channel, Modulation
-from ...playback.audio_analysis import analyze_wav
+from ...playback.audio_analysis import analyze_wav, compute_waveform_peaks
 from ...playback.audio_player import AudioPlayer
 from ...playback.config import POLAND_TZ, UTC_TZ
 from ...playback.favorites_store import FavoritesStore
@@ -52,7 +52,7 @@ from ...playback.stats_tab import StatsTab
 from ...playback.transcription_cache import TranscriptionCache
 from ...playback.transcription_worker import TranscriptionWorker
 from ...playback.worker import RefreshWorker
-from ..widgets import ClickToSeekSlider, apply_emoji_font
+from ..widgets import WaveformView, apply_emoji_font
 
 RESOURCES_DIR = Path(__file__).resolve().parent.parent / "resources"
 
@@ -147,6 +147,7 @@ class PlaybackPanel(QWidget):
         self._suppress_autoplay = True
         self._worker: Optional[RefreshWorker] = None
         self._last_selected_path = None
+        self._waveform_path = None  # ostatnia ścieżka dla ktorej policzono fale - patrz _on_playback_started
         self._selected_recording: Optional[Recording] = None
         # Śledzi ręczną edycję pola transkrypcji - patrz _flush_transcript_edit().
         # "target" to Recording, do którego aktualnie odnosi się zawartość
@@ -425,41 +426,49 @@ class PlaybackPanel(QWidget):
     def _build_player_bar(self) -> QWidget:
         bar = QFrame()
         bar.setFrameShape(QFrame.Shape.StyledPanel)
-        layout = QHBoxLayout(bar)
+        outer = QVBoxLayout(bar)
 
+        # Fala dźwiękowa zastępuje zwykły pasek postępu (patrz WaveformView) -
+        # ta sama rola (klik/przeciągnięcie = przewijanie), plus od razu widać
+        # gdzie w nagraniu jest cisza (np. przerwa wycięta przez squelch -
+        # patrz ScannerEngine._play_and_record_slot) a gdzie realna treść.
+        # Osobny wiersz na całą szerokość, bo przy wysokości potrzebnej żeby
+        # słupki cokolwiek pokazywały, wciśnięcie jej w ten sam rząd co
+        # 40px-owe przyciski wygladałoby niechlujnie.
+        self.waveform_view = WaveformView()
+        outer.addWidget(self.waveform_view)
+
+        controls = QHBoxLayout()
         self.prev_btn = QPushButton("⏮")
         self.play_btn = QPushButton("▶")
         self.stop_btn = QPushButton("⏹")
         self.next_btn = QPushButton("⏭")
         for b in (self.prev_btn, self.play_btn, self.stop_btn, self.next_btn):
             b.setFixedWidth(40)
-            layout.addWidget(b)
+            controls.addWidget(b)
 
         self.now_playing_label = QLabel("Wybierz nagranie z listy…")
         self.now_playing_label.setMinimumWidth(280)
-        layout.addWidget(self.now_playing_label)
-
-        self.position_slider = ClickToSeekSlider(Qt.Orientation.Horizontal)
-        self.position_slider.setRange(0, 0)
-        layout.addWidget(self.position_slider, stretch=1)
+        controls.addWidget(self.now_playing_label, stretch=1)
 
         self.time_label = QLabel("0:00 / 0:00")
         self.time_label.setFixedWidth(90)
-        layout.addWidget(self.time_label)
+        controls.addWidget(self.time_label)
 
-        layout.addWidget(QLabel("🔊"))
+        controls.addWidget(QLabel("🔊"))
         self.volume_slider = QSlider(Qt.Orientation.Horizontal)
         self.volume_slider.setRange(0, 100)
         self.volume_slider.setValue(90)
         self.volume_slider.setFixedWidth(90)
-        layout.addWidget(self.volume_slider)
+        controls.addWidget(self.volume_slider)
 
         self.autoplay_checkbox = QCheckBox("Auto-odtwarzanie kolejnych")
         self.autoplay_checkbox.setChecked(True)
         self.autoplay_checkbox.setToolTip(
             "Po zakończeniu nagrania automatycznie odtwórz następne z listy - do szybkiego przeglądu ruchu"
         )
-        layout.addWidget(self.autoplay_checkbox)
+        controls.addWidget(self.autoplay_checkbox)
+        outer.addLayout(controls)
 
         return bar
 
@@ -510,7 +519,7 @@ class PlaybackPanel(QWidget):
         self.player.qt_player.positionChanged.connect(self._on_position_changed)
         self.player.qt_player.durationChanged.connect(self._on_duration_changed)
         self.player.qt_player.mediaStatusChanged.connect(self._on_media_status_changed)
-        self.position_slider.sliderMoved.connect(self.player.seek)
+        self.waveform_view.seekRequested.connect(self.player.seek)
 
     def _focus_search(self) -> None:
         self.search_edit.setFocus()
@@ -1249,17 +1258,29 @@ class PlaybackPanel(QWidget):
             self.now_playing_label.setText(f"{path.name}  —  {self._freq_display(parsed.freq_khz)}")
         else:
             self.now_playing_label.setText(path.name)
+        if path != self._waveform_path:
+            # Guarded on the path actually changing - set_known_frequencies()
+            # also calls this (just to refresh the label text after a
+            # channel-name edit, same file still playing), which would
+            # otherwise redo this pointlessly. Synchronous, not a background
+            # worker (unlike the library-wide quality scan) - these files
+            # are individual recordings, typically seconds to tens of
+            # seconds, so reading+reducing one is a handful of vectorized
+            # numpy calls, fast enough not to need one - see
+            # compute_waveform_peaks()'s own docstring.
+            self._waveform_path = path
+            self.waveform_view.set_waveform(compute_waveform_peaks(path))
 
     def _on_playback_state_changed(self, state) -> None:
         self.play_btn.setText("⏸" if state == QMediaPlayer.PlaybackState.PlayingState else "▶")
 
     def _on_position_changed(self, position_ms: int) -> None:
-        if not self.position_slider.isSliderDown():
-            self.position_slider.setValue(position_ms)
-        self.time_label.setText(f"{_format_time(position_ms)} / {_format_time(self.position_slider.maximum())}")
+        if not self.waveform_view.isSliderDown():
+            self.waveform_view.set_position(position_ms)
+        self.time_label.setText(f"{_format_time(position_ms)} / {_format_time(self.waveform_view.duration())}")
 
     def _on_duration_changed(self, duration_ms: int) -> None:
-        self.position_slider.setRange(0, duration_ms)
+        self.waveform_view.set_duration(duration_ms)
 
     def _on_media_status_changed(self, status) -> None:
         if status == QMediaPlayer.MediaStatus.EndOfMedia and self.autoplay_checkbox.isChecked():

@@ -3,7 +3,7 @@ from __future__ import annotations
 
 import numpy as np
 from PyQt6.QtCore import Qt, QRectF, pyqtSignal
-from PyQt6.QtGui import QColor, QFont, QFontDatabase, QLinearGradient, QPainter, QPen
+from PyQt6.QtGui import QColor, QFont, QFontDatabase, QLinearGradient, QPainter, QPen, QPixmap
 from PyQt6.QtWidgets import (
     QDoubleSpinBox,
     QHBoxLayout,
@@ -356,3 +356,165 @@ class RecIndicator(QWidget):
         painter.setBrush(color)
         painter.setPen(QColor("#000000"))
         painter.drawEllipse(1, 1, self.width() - 2, self.height() - 2)
+
+
+class WaveformView(QWidget):
+    """Podgląd fali dźwiękowej odtwarzanego nagrania w Odtwarzaczu, łączący
+    rolę paska postępu (klik/przeciągnięcie = przewijanie - ten sam styl co
+    ClickToSeekSlider) z wizualnym podglądem amplitudy w czasie. Pozwala od
+    razu zobaczyć, gdzie w nagraniu jest cisza (np. przerwa wycięta przez
+    squelch podczas LINGER - patrz ScannerEngine._play_and_record_slot,
+    które teraz świadomo wpisuje ciszę zamiast wycinać fragment, żeby
+    zachować prawdziwy czas trwania) a gdzie realna, głośna/cicha treść -
+    zamiast się tego domyślać z samego upływającego czasu.
+
+    Dane amplitudy (``set_waveform``) i sama geometria widżetu zmieniają
+    się rzadko (nowe nagranie / zmiana rozmiaru okna), ale pozycja
+    odtwarzania zmienia się często (kilka razy na sekundę) - dlatego oba
+    warianty fali (nieodtworzona/odtworzona) są renderowane raz do
+    QPixmap i tylko przycinane/nakładane przy każdej aktualizacji pozycji,
+    zamiast rysować setki prostokątów od nowa przy każdej klatce.
+    """
+
+    seekRequested = pyqtSignal(int)  # nowa pozycja w ms
+
+    _BG = QColor("#12141a")
+    _CENTER_LINE = QColor(255, 255, 255, 22)
+    _BAR_UNPLAYED = QColor("#4a4f59")
+    _BAR_PLAYED = QColor("#2ecc71")
+    _PLAYHEAD = QColor("#e8e8ec")
+
+    def __init__(self, parent=None):
+        super().__init__(parent)
+        self.setMinimumHeight(64)
+        self._peaks: np.ndarray | None = None  # amplitudy 0..1 per "słupek"
+        self._duration_ms = 0
+        self._position_ms = 0
+        self._seeking = False
+        self._cache_unplayed: QPixmap | None = None
+        self._cache_played: QPixmap | None = None
+        self.setToolTip("Klik/przeciągnięcie - przewijanie. Wysokość słupków = głośność w tym miejscu nagrania.")
+
+    # -- API (odpowiednik ClickToSeekSlider/QSlider, żeby PlaybackPanel
+    # zmieniał jak najmniej przy podmianie) --------------------------------
+    def set_waveform(self, peaks: np.ndarray | None) -> None:
+        """``peaks``: amplitudy szczytowe w [0, 1], jedna wartość na slupek,
+        albo None (brak danych - nieczytelny plik/jeszcze nie policzone)."""
+        self._peaks = peaks
+        self._invalidate_cache()
+        self.update()
+
+    def clear_waveform(self) -> None:
+        self.set_waveform(None)
+
+    def set_duration(self, duration_ms: int) -> None:
+        self._duration_ms = max(0, duration_ms)
+        self.update()
+
+    def duration(self) -> int:
+        return self._duration_ms
+
+    def set_position(self, position_ms: int) -> None:
+        """Jak QSlider.setValue() - nie nadpisuje pozycji w trakcie
+        przeciągania przez użytkownika (patrz isSliderDown())."""
+        if self._seeking:
+            return
+        self._position_ms = max(0, min(position_ms, self._duration_ms))
+        self.update()
+
+    def isSliderDown(self) -> bool:  # noqa: N802 - nazwa zgodna z QSlider, patrz docstring klasy
+        return self._seeking
+
+    def resizeEvent(self, event) -> None:
+        self._invalidate_cache()
+        super().resizeEvent(event)
+
+    def _invalidate_cache(self) -> None:
+        self._cache_unplayed = None
+        self._cache_played = None
+
+    # -- klik/przeciągnięcie = przewijanie (jak ClickToSeekSlider) ---------
+    def _position_for_x(self, x: float) -> int:
+        if self.width() <= 0 or self._duration_ms <= 0:
+            return 0
+        frac = max(0.0, min(1.0, x / self.width()))
+        return int(round(frac * self._duration_ms))
+
+    def mousePressEvent(self, event) -> None:
+        if event.button() == Qt.MouseButton.LeftButton and self._duration_ms > 0:
+            self._seeking = True
+            x = event.position().x() if hasattr(event, "position") else event.x()
+            self._position_ms = self._position_for_x(x)
+            self.update()
+            self.seekRequested.emit(self._position_ms)
+            event.accept()
+            return
+        super().mousePressEvent(event)
+
+    def mouseMoveEvent(self, event) -> None:
+        if self._seeking and self._duration_ms > 0:
+            x = event.position().x() if hasattr(event, "position") else event.x()
+            self._position_ms = self._position_for_x(x)
+            self.update()
+            self.seekRequested.emit(self._position_ms)
+            event.accept()
+            return
+        super().mouseMoveEvent(event)
+
+    def mouseReleaseEvent(self, event) -> None:
+        if event.button() == Qt.MouseButton.LeftButton and self._seeking:
+            self._seeking = False
+            event.accept()
+            return
+        super().mouseReleaseEvent(event)
+
+    # -- rysowanie -----------------------------------------------------
+    def _render_bars(self, bar_color: QColor) -> QPixmap:
+        w, h = max(1, self.width()), max(1, self.height())
+        pixmap = QPixmap(w, h)
+        pixmap.fill(self._BG)
+        painter = QPainter(pixmap)
+        painter.setRenderHint(QPainter.RenderHint.Antialiasing)
+        mid_y = h / 2.0
+        painter.setPen(QPen(self._CENTER_LINE, 1))
+        painter.drawLine(0, int(mid_y), w, int(mid_y))
+        if self._peaks is not None and self._peaks.size:
+            n = self._peaks.size
+            max_half_h = max(1.0, mid_y - 3)
+            bar_w = w / n
+            painter.setPen(Qt.PenStyle.NoPen)
+            painter.setBrush(bar_color)
+            gap = 0.15 * bar_w if bar_w > 2 else 0.0
+            for i in range(n):
+                amp = float(self._peaks[i])
+                bh = max(1.0, amp * max_half_h)
+                painter.drawRect(QRectF(i * bar_w, mid_y - bh, max(1.0, bar_w - gap), bh * 2))
+        else:
+            # brak danych jeszcze (ładowanie/nieczytelny plik) - płaska linia
+            painter.setPen(QPen(bar_color, 2))
+            painter.drawLine(0, int(mid_y), w, int(mid_y))
+        painter.end()
+        return pixmap
+
+    def paintEvent(self, _event) -> None:
+        if self._cache_unplayed is None or self._cache_unplayed.size() != self.size():
+            self._cache_unplayed = self._render_bars(self._BAR_UNPLAYED)
+            self._cache_played = self._render_bars(self._BAR_PLAYED)
+
+        painter = QPainter(self)
+        painter.setRenderHint(QPainter.RenderHint.Antialiasing)
+        painter.drawPixmap(0, 0, self._cache_unplayed)
+
+        if self._duration_ms > 0 and self._peaks is not None and self._peaks.size:
+            played_x = int(round((self._position_ms / self._duration_ms) * self.width()))
+            if played_x > 0:
+                painter.setClipRect(0, 0, played_x, self.height())
+                painter.drawPixmap(0, 0, self._cache_played)
+                painter.setClipping(False)
+            painter.setPen(QPen(self._PLAYHEAD, 1.5))
+            painter.drawLine(played_x, 0, played_x, self.height())
+
+        # Subtelna ramka - ta sama konwencja co LevelMeter/SpectrumView, żeby
+        # widżet nie "pływał" bez wyraźnej granicy na tle reszty paska odtwarzacza.
+        painter.setPen(QColor(255, 255, 255, 30))
+        painter.drawRect(self.rect().adjusted(0, 0, -1, -1))

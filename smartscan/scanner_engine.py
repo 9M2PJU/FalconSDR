@@ -1587,19 +1587,38 @@ class ScannerEngine(threading.Thread):
                 self.signals.blacklisted.emit(freq_hz)
 
     def _play_and_record_slot(self, slot: _Slot, audio: np.ndarray, squelched: bool = False) -> None:
-        # ``squelched`` (see _effective_squelch_dbfs) drops this block
-        # entirely - neither the live speaker nor the recording get it, by
-        # explicit request: a recording should end where the real signal
-        # actually did, not trail off into the loud FM-discriminator noise
-        # burst that follows a transmitter releasing PTT. Skipped before
-        # noise reduction runs too - nothing downstream of demod() needs to
-        # process audio that's about to be discarded either way. Since
-        # squelch_dbfs is always <= trigger_dbfs (see
+        # ``squelched`` (see _effective_squelch_dbfs) always skips the live
+        # speaker - no one wants the loud FM-discriminator noise burst that
+        # follows a transmitter releasing PTT in their ears. The recording
+        # gets SILENCE for this block instead - explicit user request/
+        # design decision: skipping the block outright (an earlier version
+        # of this) made a single, still-open recording jump-cut mid-file
+        # with no way to tell, on playback, whether a message was genuinely
+        # continuous or just a signal caught in bursts with real gaps
+        # edited out. A *mid*-transmission gap should sound like a real
+        # pause; recorder.write_audio()'s own ``real=False`` handling is
+        # what then decides, in hindsight, whether this particular silence
+        # turns out to be that (more real audio follows - written as real
+        # silence, in order) or the trailing tail of the whole transmission
+        # (nothing follows - trimmed, unwritten, per a later explicit
+        # follow-up request: the end should just end, not trail into dead
+        # air). A real, audible gap belongs *between* recordings - once
+        # LINGER fully expires and a later, genuinely new detection starts a
+        # separate file, two recordings existing is exactly right - never
+        # *inside* one. Since squelch_dbfs is always <= trigger_dbfs (see
         # _effective_squelch_dbfs), this never fires while the state
         # machine still considers the channel SIGNAL_DETECTED - only during
         # the LINGER tail, once level has already dropped below trigger.
         if squelched:
             slot.was_squelched = True
+            if self.config.recording.enabled:
+                # real=False: silence substituted for a squelched block
+                # doesn't count as "this transmission had anything worth
+                # hearing" - see Recorder.end_transmission()'s phantom-
+                # recording cleanup, which would otherwise never trigger
+                # again now that *something* always gets written.
+                silence = np.zeros(audio.shape[0], dtype=np.float32)
+                slot.recorder.write_audio(silence, real=False)
             return
         if slot.was_squelched:
             # Resuming right after a squelched gap: noise_reducer (see
