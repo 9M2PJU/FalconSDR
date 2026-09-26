@@ -42,6 +42,7 @@ from .channelizer import (
 from .config import AppConfig, CONFIG_DIR, RecordingConfig, VfoRangeConfig
 from .dsp import Demodulator, NoiseReducer
 from .i18n import tr
+from .iq_recorder import IQRecorder
 from .models import BlacklistEntry, Channel, Modulation, ScannerState
 from .recorder import Recorder
 from .sdr_backend import AcquisitionThread, SoapyBackend, create_backend
@@ -347,6 +348,11 @@ class ScannerSignals(QObject):
     # recording_changed, which reflects only the automatic, per-transmission
     # recording driven by the trigger/signal-detection state machine.
     manual_recording_changed = Signal(bool, str)
+    # Raw wideband IQ recording (see start_raw_iq_recording()) - (active,
+    # path). A third, independent recording mechanism again: not audio at
+    # all, so its finished file never goes through recording_finished (the
+    # Odtwarzacz library only expects playable WAV/MP3 there).
+    raw_iq_recording_changed = Signal(bool, str)
     blacklisted = Signal(int)
     # freqs_hz, db, trigger_dbfs, custom (True = this window's band has its
     # own "advanced" overrides - see ScannerPanel/SpectrumView's accent color)
@@ -438,6 +444,15 @@ class ScannerEngine(threading.Thread):
         # the primary slot's audio) - see _feed_manual_recording().
         self._manual_recorder: Recorder | None = None
         self._manual_recorder_lock = threading.Lock()
+
+        # Raw wideband IQ recording (see start_raw_iq_recording()) - only
+        # ever touched by the GUI thread (start/stop) and the main loop
+        # thread (feeding it each SCANNING-state read), never the slot pool
+        # (it captures the whole window, not any one demodulated channel) -
+        # but still locked for the same GUI-thread-vs-engine-thread safety
+        # as the manual audio recorder above.
+        self._iq_recorder: IQRecorder | None = None
+        self._iq_recorder_lock = threading.Lock()
 
         # Demod/noise-reduction/file-write for every simultaneously active
         # slot runs on this pool instead of one after another on this
@@ -562,6 +577,39 @@ class ScannerEngine(threading.Thread):
             recorder = self._manual_recorder
         if recorder is not None:
             recorder.write_audio(audio, real=True)
+
+    # -- raw wideband IQ recording (technical) -----------------------------
+    # See iq_recorder.py's module docstring for the format (SigMF) and why
+    # this is a third, independent recording mechanism from both the
+    # per-transmission auto-recording above and manual audio recording. Fed
+    # only from _main_loop()'s SCANNING-state read (never TUNING, which is
+    # deliberately muted garbage while the tuner settles).
+    def start_raw_iq_recording(self) -> None:
+        with self._iq_recorder_lock:
+            if self._iq_recorder is not None:
+                return
+            recorder = IQRecorder(self.config.recording.output_dir, self.config.device.sample_rate_hz)
+            self._iq_recorder = recorder
+        self.signals.raw_iq_recording_changed.emit(True, recorder.current_path)
+
+    def stop_raw_iq_recording(self) -> None:
+        with self._iq_recorder_lock:
+            recorder = self._iq_recorder
+            if recorder is None:
+                return
+            self._iq_recorder = None
+        recorder.close()
+        self.signals.raw_iq_recording_changed.emit(False, "")
+
+    def is_recording_raw_iq(self) -> bool:
+        with self._iq_recorder_lock:
+            return self._iq_recorder is not None
+
+    def _feed_raw_iq(self, iq: np.ndarray, center_freq_hz: float) -> None:
+        with self._iq_recorder_lock:
+            recorder = self._iq_recorder
+        if recorder is not None:
+            recorder.write(iq, center_freq_hz)
 
     def update_channels(self, channels: list[Channel]) -> None:
         self.channels = channels
@@ -794,12 +842,16 @@ class ScannerEngine(threading.Thread):
                     time.sleep(0.1)
 
     def _teardown(self) -> None:
-        # A manual recording only makes sense while there's live audio to
-        # mirror - can't outlive the engine that feeds it. Stopping it here
-        # (rather than leaving it dangling) both finalizes the WAV file
-        # properly and gets it into the Odtwarzacz library via the usual
-        # recording_finished signal.
+        # Neither the manual audio recording nor the raw IQ recording makes
+        # sense outliving the engine that feeds them - stop both here so a
+        # Stop click always finalizes whatever's still open instead of
+        # leaving a file handle (or, for the manual recording, the WAV
+        # header) dangling. The manual recording's file also still needs to
+        # reach the Odtwarzacz library via recording_finished (see
+        # stop_manual_recording()); raw IQ never does (see
+        # ScannerSignals.raw_iq_recording_changed).
         self.stop_manual_recording()
+        self.stop_raw_iq_recording()
         for freq_hz in list(self._slots.keys()):
             self._close_slot(freq_hz, reason="stopped")
         if self._audio_out is not None:
@@ -1238,6 +1290,7 @@ class ScannerEngine(threading.Thread):
                     self._record_read_timing(time.monotonic() - read_start)
                 tick_start = time.monotonic() if _DEBUG_TIMING else 0.0
                 window = self._cur_window
+                self._feed_raw_iq(iq, window.center_hz)
 
                 # One FFT/PSD/cumsum for the whole captured block, shared by
                 # both steps below (already-active slots + new-detection

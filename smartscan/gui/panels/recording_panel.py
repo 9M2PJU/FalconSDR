@@ -21,6 +21,11 @@ class RecordingPanel(QGroupBox):
     # the Listen tab) can stay in sync without a signal loop - see
     # MainWindow.
     enabled_changed = Signal(bool)
+    # Raw IQ Record/Stop button - a manual, momentary action (like
+    # ScannerPanel's audio Record button), never persisted to config and
+    # never synced anywhere else, so this is just "user clicked it" -> "ask
+    # MainWindow to start/stop ScannerEngine.start_raw_iq_recording()".
+    raw_iq_record_toggled = Signal(bool)
 
     def __init__(self, config: RecordingConfig, parent=None):
         super().__init__(tr("Recording"), parent)
@@ -84,6 +89,26 @@ class RecordingPanel(QGroupBox):
         status_row.addWidget(self.file_label, 1)
         root.addLayout(status_row)
 
+        raw_iq_row = QHBoxLayout()
+        self.raw_iq_btn = QPushButton(tr("Record raw IQ"))
+        self.raw_iq_btn.setCheckable(True)
+        self.raw_iq_btn.setEnabled(False)  # only while the scanner is running - see set_running()
+        self.raw_iq_btn.setToolTip(tr(
+            "Advanced/technical: records the actual wideband complex samples "
+            "this app demodulates from, in the SigMF format (readable by GNU "
+            "Radio, Inspectrum, SDR++, ...) - independent of any specific "
+            "channel or trigger. Saved to a 'raw_iq' subfolder, separate from "
+            "the Odtwarzacz library. Warning: uncompressed IQ is large - "
+            "roughly sample_rate x 8 bytes/second (~19 MB/s at this app's "
+            "default 2.4 MSPS capture bandwidth)."
+        ))
+        self.raw_iq_btn.toggled.connect(self.raw_iq_record_toggled.emit)
+        self.raw_iq_label = QLabel("")
+        self.raw_iq_label.setStyleSheet("color: #9aa0a6;")
+        raw_iq_row.addWidget(self.raw_iq_btn)
+        raw_iq_row.addWidget(self.raw_iq_label, 1)
+        root.addLayout(raw_iq_row)
+
     def _load_from_config(self) -> None:
         self.enable_check.setChecked(self.config.enabled)
         self.single_radio.setChecked(self.config.mode == "single")
@@ -136,10 +161,19 @@ class RecordingPanel(QGroupBox):
         self.split_radio.setEnabled(not running)
         self.wav_radio.setEnabled(not running)
         self.mp3_radio.setEnabled(not running)
+        self.raw_iq_btn.setEnabled(running)
         if not running:
             self.rec_indicator.set_on(False)
             self.file_label.setText("")
+            self.set_raw_iq_recording_active(False)
 
     def set_recording(self, active: bool, path: str) -> None:
         self.rec_indicator.set_on(active)
         self.file_label.setText(path if active else "")
+
+    def set_raw_iq_recording_active(self, active: bool) -> None:
+        self.raw_iq_btn.blockSignals(True)
+        self.raw_iq_btn.setChecked(active)
+        self.raw_iq_btn.blockSignals(False)
+        self.raw_iq_btn.setText(tr("■ Stop recording IQ") if active else tr("Record raw IQ"))
+        self.raw_iq_label.setText(tr("Recording raw IQ...") if active else "")
