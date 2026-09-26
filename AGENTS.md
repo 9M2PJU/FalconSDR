@@ -678,6 +678,70 @@ for exactly this reason. Add a new language by dropping one `.po` file — see
     its full size/download cost by default; the version constraint
     (`>=1.2`) lives only as a comment for the installer/anyone doing this by
     hand to match.
+19. **A "single" mode filename (manual recording, gotcha 13; the global
+    "Single File" auto-recording option) has no frequency in it at all
+    (`recorder._single_file_path()` - literally `..._session.wav`), which
+    `FILENAME_REGEX`/`parse_filename()` (`smartscan/playback/config.py`/
+    `organizer.py`) didn't originally account for at all.** Real user-hit
+    bug: `organize()` silently skipped every such file forever (`parse_filename()`
+    returning `None` for a name it can't parse) and `scan_recordings()` did
+    the same, so a manual recording **worked perfectly** (a real, playable
+    WAV with real audio got written to disk - confirmed on the reporting
+    user's own machine: several hours' worth of orphaned `..._session.wav`
+    files sitting loose in their output directory, one from the exact
+    session where they reported "Record doesn't do anything") but was
+    **completely invisible in Odtwarzacz** - looked exactly like "manual
+    recording is broken" from the user's side, backed by zero evidence
+    either way since there was nothing to click into. Compounded by
+    `ScannerPanel._on_manual_record_toggled()`'s button label updating
+    optimistically on click (`setText()` right there, before the engine
+    confirms anything - see gotcha 13) - a real failure to start would
+    *also* show "■ Stop recording" with nothing happening, so this bug and
+    an actual engine-side failure would have looked identical from the UI
+    alone; always check the filesystem directly (`ls` the output dir) before
+    assuming which one you're looking at.
+    Fixed by extending `FILENAME_REGEX` to accept the literal `session`
+    token as an alternative to a numeric frequency, `parse_filename()`
+    mapping that case to `models.MANUAL_FREQ_KHZ` (`0` - never a real radio
+    frequency, so it can't collide with an actual channel) instead of
+    returning `None`. Every frequency-label call site needed its own
+    `MANUAL_FREQ_KHZ` special case (`Recording.freq_label`,
+    `RecordingsTableModel._freq_display()`, `PlaybackPanel._freq_display()`
+    - yes, two independent copies of that method existed already -
+    `FrequencyStat.label`) so it reads "Manual recording" instead of a
+    nonsensical "0.000 MHz"; also disabled `save_freq_btn` for a
+    `MANUAL_FREQ_KHZ` recording specifically, since "Save this frequency to
+    the Memory List" would otherwise create a bogus 0 Hz channel. A useful
+    side effect, not a separate fix: `organize()` now also files these into
+    the normal `YYYY-MM-DD/` date folders instead of leaving them loose at
+    the root forever, same as every other recording. If you touch filename
+    parsing again: `FILENAME_REGEX` is the single source of truth every
+    consumer (`organizer.py`, `library.py`, `playback_panel.py`'s live
+    ingest) goes through - a new naming scheme needs exactly one regex
+    change, not one per consumer, which is exactly how this bug happened in
+    the first place (the "single" mode naming existed before any of those
+    consumers accounted for it).
+    **Still open, found while fixing this, deliberately not fixed here:**
+    an MP3-transcoded recording (gotcha 14) has the exact same invisibility
+    problem one layer further down - `FILENAME_REGEX` only ever matched
+    `\.wav$`, and `organizer.iter_all_recordings()`/`organize()`'s loose-file
+    scan both only look for `.wav`, so a `.mp3` file (auto/split, single, or
+    manual - any of them, once `output_format == "mp3"`) would currently
+    never appear in Odtwarzacz at all, exactly like the bug above. Unlike
+    the bug above, this one is *not* just a filename-parsing gap:
+    `audio_analysis.py`'s `analyze_wav()`/`compute_waveform_peaks()` use
+    Python's stdlib `wave` module, which cannot decode mp3 at all - it
+    would land on `analyze_wav()`'s existing `except Exception: readable=False`
+    fallback rather than crash (verified: that fallback already exists for
+    exactly this kind of unreadable-file case), so an mp3 recording *could*
+    be made visible without an immediate crash, but would show a permanent
+    "unreadable"/zero quality score and no waveform preview - a real,
+    user-visible correctness gap of its own, not just a smaller version of
+    the bug above. Properly supporting mp3 quality analysis needs an actual
+    mp3-capable decoder, which raises a real question this session
+    deliberately left open rather than silently deciding: pull in a decoder
+    dependency for the *core* (non-optional) playback path just for this,
+    or accept degraded quality metrics for mp3 recordings specifically.
 
 ## Testing without touching the user's real config/recordings
 

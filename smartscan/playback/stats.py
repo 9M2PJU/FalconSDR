@@ -8,7 +8,7 @@ from datetime import datetime
 from typing import Dict, List, Optional
 
 from smartscan.i18n import tr
-from smartscan.playback.models import Recording
+from smartscan.playback.models import MANUAL_FREQ_KHZ, Recording
 
 
 @dataclass
@@ -25,6 +25,8 @@ class FrequencyStat:
 
     @property
     def label(self) -> str:
+        if self.freq_khz == MANUAL_FREQ_KHZ:
+            return tr("Manual recording")
         return f"{self.freq_mhz:.3f} MHz"
 
 

@@ -10,7 +10,7 @@ from PySide6.QtCore import QModelIndex, QSortFilterProxyModel, Qt, QAbstractTabl
 from PySide6.QtGui import QColor
 
 from smartscan.i18n import tr
-from smartscan.playback.models import Recording, TranscriptionResult
+from smartscan.playback.models import MANUAL_FREQ_KHZ, Recording, TranscriptionResult
 
 COL_DATE, COL_TIME, COL_FREQ, COL_DUR, COL_SNR, COL_QUALITY, COL_SIZE, COL_TRANSCRIPT = range(8)
 
@@ -104,6 +104,8 @@ class RecordingsTableModel(QAbstractTableModel):
             self.dataChanged.emit(top_left, bottom_right, [Qt.ItemDataRole.DisplayRole])
 
     def _freq_display(self, freq_khz: int) -> str:
+        if freq_khz == MANUAL_FREQ_KHZ:
+            return tr("Manual recording")
         name = self._freq_names.get(freq_khz)
         label = f"{freq_khz / 1000:.3f} MHz"
         return f"{label} — {name}" if name else label

@@ -44,7 +44,7 @@ from ...playback.audio_player import AudioPlayer
 from ...playback.config import POLAND_TZ, UTC_TZ
 from ...playback.favorites_store import FavoritesStore
 from ...playback.freq_panel import ALL_ITEM_FREQ, FAVORITES_ITEM, FrequencyPanel
-from ...playback.models import Recording, TranscriptionResult
+from ...playback.models import MANUAL_FREQ_KHZ, Recording, TranscriptionResult
 from ...playback.models_qt import COL_DATE, COL_QUALITY, RecordingsFilterProxy, RecordingsTableModel
 from ...playback.organizer import parse_filename
 from ...playback.quality_cache import QualityCache
@@ -925,6 +925,8 @@ class PlaybackPanel(QWidget):
     def _freq_display(self, freq_khz: int) -> str:
         """e.g. "Downtown Tower (128.950 MHz)" when the frequency is known
         from the Memory List, otherwise just "128.950 MHz"."""
+        if freq_khz == MANUAL_FREQ_KHZ:
+            return tr("Manual recording")
         name = self._freq_names.get(freq_khz)
         freq_text = f"{freq_khz / 1000:.3f} MHz"
         return f"{name} ({freq_text})" if name else freq_text
@@ -945,7 +947,10 @@ class PlaybackPanel(QWidget):
         )
         self.fr24_btn.setEnabled(True)
         self.adsbx_btn.setEnabled(True)
-        self.save_freq_btn.setEnabled(True)
+        # A manual/"Single File" recording isn't tied to one real frequency
+        # (see models.MANUAL_FREQ_KHZ) - saving "0.000 MHz" to the Memory
+        # List would just create a bogus channel entry.
+        self.save_freq_btn.setEnabled(rec.freq_khz != MANUAL_FREQ_KHZ)
         self.favorite_btn.setEnabled(True)
         self._set_favorite_btn_state(rec.is_favorite)
         freq_bit = self._freq_display(rec.freq_khz)

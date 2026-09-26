@@ -11,6 +11,7 @@ from pathlib import Path
 from typing import List
 
 from smartscan.playback.config import DATE_DIR_FORMAT, FILENAME_REGEX, POLAND_TZ, SMARTSCAN_DIR
+from smartscan.playback.models import MANUAL_FREQ_KHZ
 
 logger = logging.getLogger(__name__)
 
@@ -36,7 +37,11 @@ def parse_filename(name: str) -> ParsedName | None:
         microsecond=int(micros) if micros else 0,
         tzinfo=POLAND_TZ,
     )
-    return ParsedName(dt_local=dt_local, freq_khz=int(freq))
+    # freq is None for a "..._session.wav" name (manual/"Single File" mode -
+    # see FILENAME_REGEX's own comment) - no single fixed frequency, so
+    # MANUAL_FREQ_KHZ (0, never a real radio frequency) stands in for it.
+    freq_khz = int(freq) if freq is not None else MANUAL_FREQ_KHZ
+    return ParsedName(dt_local=dt_local, freq_khz=freq_khz)
 
 
 def organize(root: Path = SMARTSCAN_DIR) -> List[Path]:

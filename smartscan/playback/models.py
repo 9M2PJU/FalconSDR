@@ -6,6 +6,19 @@ from datetime import datetime
 from pathlib import Path
 from typing import Optional
 
+from ..i18n import tr
+
+# recorder.py's "single" mode (manual recording - see scanner_engine.py's
+# start_manual_recording - and the global Single/Split setting's "Single
+# File" option) never ties one file to one fixed frequency the way split
+# mode does (see _single_file_path() - literally "..._session.wav", no
+# frequency at all), since the recorded channel can change mid-file (manual
+# recording mirrors whatever's currently primary; "Single File" mode reuses
+# one file across multiple detections). 0 is never a real radio frequency,
+# so it's a safe, unambiguous sentinel - see organizer.parse_filename(),
+# which is the only place that ever produces this value.
+MANUAL_FREQ_KHZ = 0
+
 
 @dataclass
 class QualityMetrics:
@@ -56,6 +69,8 @@ class Recording:
 
     @property
     def freq_label(self) -> str:
+        if self.freq_khz == MANUAL_FREQ_KHZ:
+            return tr("Manual recording")
         return f"{self.freq_mhz:.3f} MHz"
 
     @property

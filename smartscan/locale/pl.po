@@ -1116,3 +1116,9 @@ msgstr "Transkrypcja nie jest zainstalowana - to opcjonalny, osobny download. Za
 
 msgid "Transcription was just installed into a separate environment - restart SmartScanATC now to start using it? Any recording in progress will be stopped first, same as a normal Stop."
 msgstr "Transkrypcja została właśnie zainstalowana w osobnym środowisku - uruchomić SmartScanATC ponownie, żeby zacząć z niej korzystać? Trwające nagrywanie zostanie najpierw zatrzymane, tak samo jak zwykły Stop."
+
+
+# --- manual/"Single File" recordings now visible in Odtwarzacz (models/organizer/stats) ---
+
+msgid "Manual recording"
+msgstr "Nagranie ręczne"

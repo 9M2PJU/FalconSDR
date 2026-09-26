@@ -35,7 +35,17 @@ DATE_DIR_FORMAT = "%Y-%m-%d"
 # impossible, not just "very unlikely": two Python statements can't execute
 # within the same microsecond). Older recordings without this segment still
 # parse correctly, see parse_filename() in organizer.py - the last number is
-# the rounded frequency in kHz)
-FILENAME_REGEX = r"^(\d{4})-(\d{2})-(\d{2})_(\d{2})-(\d{2})-(\d{2})(?:-(\d{6}))?_(\d+)\.wav$"
+# the rounded frequency in kHz.
+#
+# Also matches recorder.py's "single" mode naming (manual recording, and the
+# global "Single File" option) - literally "..._session.wav", no frequency
+# at all, since that file isn't tied to one fixed channel - see
+# organizer.parse_filename()'s handling (models.MANUAL_FREQ_KHZ). Without
+# this alternative, every such file was silently invisible to the whole
+# Odtwarzacz library (organize() skipped it forever, scan_recordings()
+# dropped it) despite being a perfectly real, playable recording on disk -
+# a real bug a user hit (manual Record "did nothing" - it did, the file just
+# never showed up anywhere).
+FILENAME_REGEX = r"^(\d{4})-(\d{2})-(\d{2})_(\d{2})-(\d{2})-(\d{2})(?:-(\d{6}))?_(?:(\d+)|session)\.wav$"
 
 APP_DATA_DIR.mkdir(parents=True, exist_ok=True)
