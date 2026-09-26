@@ -492,8 +492,8 @@ msgstr "Urządzenie SDR:"
 msgid " MHz capture"
 msgstr " MHz przechwytu"
 
-msgid "Bandwidth captured by the SDR in one shot (e.g. 2.4 MHz for RTL-SDR).\nThe scanner groups the whole range/channel list into as few such windows\nas possible instead of retuning channel by channel."
-msgstr "Szerokość pasma jednorazowo przechwytywanego przez SDR (np. 2.4 MHz dla RTL-SDR).\nSkaner grupuje cały zakres/listę kanałów w jak najmniej takich okien zamiast\nprzestrajać się kanał-po-kanale."
+msgid "Bandwidth captured by the SDR in one shot (e.g. 2.4 MHz for RTL-SDR,\nup to tens of MHz for HackRF/LimeSDR/Airspy/SDRplay/USRP).\nThe scanner groups the whole range/channel list into as few such windows\nas possible instead of retuning channel by channel."
+msgstr "Szerokość pasma jednorazowo przechwytywanego przez SDR (np. 2.4 MHz dla RTL-SDR,\naż do kilkudziesięciu MHz dla HackRF/LimeSDR/Airspy/SDRplay/USRP).\nSkaner grupuje cały zakres/listę kanałów w jak najmniej takich okien zamiast\nprzestrajać się kanał-po-kanale."
 
 msgid "Tuning Time:"
 msgstr "Tuning Time:"

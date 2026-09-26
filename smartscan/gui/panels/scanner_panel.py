@@ -410,11 +410,22 @@ class ScannerPanel(QGroupBox):
         top_row.addWidget(self.device_combo, 1)
 
         self.bandwidth_spin = QDoubleSpinBox()
-        self.bandwidth_spin.setRange(0.25, 3.2)
+        # Upper bound is a generous, round "covers the common consumer/
+        # prosumer SDR range" figure (LimeSDR's own max sample rate is
+        # 61.44 MSPS), not a hardware limit this app enforces - SoapyBackend
+        # itself is generic and just passes whatever's set here straight to
+        # the device (see AGENTS.md's hardware-compatibility notes). The
+        # previous 3.2 MHz cap was an RTL-SDR-only leftover that silently
+        # capped HackRF/LimeSDR/Airspy/SDRplay/USRP users below their
+        # device's real capability for no reason - if someone's hardware
+        # genuinely needs more than this, raise it further, it's not a
+        # meaningful safety limit.
+        self.bandwidth_spin.setRange(0.25, 61.44)
         self.bandwidth_spin.setDecimals(2)
         self.bandwidth_spin.setSuffix(tr(" MHz capture"))
         self.bandwidth_spin.setToolTip(tr(
-            "Bandwidth captured by the SDR in one shot (e.g. 2.4 MHz for RTL-SDR).\n"
+            "Bandwidth captured by the SDR in one shot (e.g. 2.4 MHz for RTL-SDR,\n"
+            "up to tens of MHz for HackRF/LimeSDR/Airspy/SDRplay/USRP).\n"
             "The scanner groups the whole range/channel list into as few such windows\n"
             "as possible instead of retuning channel by channel."
         ))
