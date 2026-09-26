@@ -50,6 +50,7 @@ from ...playback.organizer import parse_filename
 from ...playback.quality_cache import QualityCache
 from ...playback.stats import counts_per_day
 from ...playback.stats_tab import StatsTab
+from ...playback.transcription_availability import is_transcription_installed
 from ...playback.transcription_cache import TranscriptionCache
 from ...playback.transcription_worker import TranscriptionWorker
 from ...playback.worker import RefreshWorker
@@ -213,6 +214,7 @@ class PlaybackPanel(QWidget):
         self._build_ui()
         self._connect_signals()
         self.update_recording_notice()
+        self.refresh_transcription_availability()
 
         # New recordings are added to the library on the fly via
         # ingest_finished_recording() (see MainWindow), so there's no more
@@ -243,6 +245,18 @@ class PlaybackPanel(QWidget):
         )
         self.recording_disabled_label.setVisible(False)
         outer.addWidget(self.recording_disabled_label)
+
+        # Shown/hidden by refresh_transcription_availability() - discoverable
+        # from right here (not just Options -> Transcription), since this is
+        # exactly where someone would notice recordings never get a
+        # transcript and wonder why - see transcription_install.py.
+        self.transcription_unavailable_label = QLabel()
+        self.transcription_unavailable_label.setWordWrap(True)
+        self.transcription_unavailable_label.setStyleSheet(
+            "background: #3a2f12; color: #ffb454; padding: 6px 10px; border-radius: 4px;"
+        )
+        self.transcription_unavailable_label.setVisible(False)
+        outer.addWidget(self.transcription_unavailable_label)
 
         outer.addWidget(self._build_browser_tab(), stretch=1)
         # Statistics lives as its own top-level tab (see MainWindow), but is
@@ -840,6 +854,14 @@ class PlaybackPanel(QWidget):
     def _launch_transcription_worker(self, recordings: List[Recording], include_errors: bool = True) -> None:
         if self._transcription_worker is not None and self._transcription_worker.isRunning():
             return
+        if not is_transcription_installed():
+            # Not an error - just not installed. Without this check every
+            # recording would get queued, fail with a plain ImportError deep
+            # inside transcribe_recording(), get cached as status "error",
+            # and then be retried forever (see TranscriptionWorker.run()'s
+            # own "error" isn't a durable result" comment) - wasted work on
+            # every single batch for as long as it stays uninstalled.
+            return
         self._transcription_worker = TranscriptionWorker(
             recordings, self.config.transcription, self._transcription_cache,
             include_errors=include_errors, parent=self,
@@ -1373,6 +1395,28 @@ class PlaybackPanel(QWidget):
             "Options to start building this library."
         ))
         self.recording_disabled_label.setVisible(True)
+
+    def refresh_transcription_availability(self) -> None:
+        """Shows/hides both the banner and the toolbar's Auto-transcribe
+        checkbox/progress label based on whether faster-whisper is actually
+        installed right now - called at construction, and again by
+        MainWindow after TranscriptionPanel's installer finishes without
+        needing a restart (the common case - see
+        TranscriptionInstallWorker's docstring)."""
+        installed = is_transcription_installed()
+        self.transcription_checkbox.setVisible(installed)
+        self.transcription_progress_label.setVisible(installed)
+        self.transcribe_now_btn.setVisible(installed)
+        self.transcribe_language_combo.setVisible(installed)
+        if installed:
+            self.transcription_unavailable_label.setVisible(False)
+            return
+        self.transcription_unavailable_label.setText(tr(
+            "Transcription isn't installed - it's an optional, separate "
+            "download. Install it from the Options tab to get automatic "
+            "speech-to-text for recordings."
+        ))
+        self.transcription_unavailable_label.setVisible(True)
 
     def shutdown(self) -> None:
         """Waits for background workers - called from the main window's closeEvent."""

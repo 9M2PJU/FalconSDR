@@ -610,6 +610,74 @@ for exactly this reason. Add a new language by dropping one `.po` file — see
     advanced, self-serve path for Windows/macOS users with non-RTL-SDR
     hardware, deliberately not built into the app's own install flow until
     an actual user with such hardware confirms it's worth the complexity.
+18. **Transcription (faster-whisper) is an in-app-installable optional
+    extra, not a `requirements.txt` dependency and not a manual venv recipe
+    anymore (punkt 11).** `smartscan/playback/transcription_availability.py`'s
+    `is_transcription_installed()` (`importlib.util.find_spec` after
+    `importlib.invalidate_caches()` - the latter matters: a package a pip
+    subprocess just installed into a directory this process already has on
+    `sys.path` wouldn't otherwise be seen, since path-based finders cache
+    directory listings) is the *one* place everything else asks - keep it
+    that way rather than letting a second ad-hoc `import faster_whisper`
+    try/except grow somewhere else.
+    `smartscan/playback/transcription_install.py`'s `TranscriptionInstallWorker`
+    (a `QThread`, launched only from `TranscriptionPanel`) tries a plain
+    `pip install` straight into whatever's running the app *first* - this
+    is enough, and needs no restart at all, for Windows/macOS and any Linux
+    that isn't PEP 668 "externally managed". Only on the specific
+    `externally-managed-environment` error (confirmed against this
+    project's own dev machine, a real PEP-668 Ubuntu) does it fall back to
+    creating `smartscan/venv_paths.VENV_DIR` (`--system-site-packages`) and
+    installing there instead - that fallback path is the *only* one that
+    needs a restart (`TranscriptionPanel.restart_requested`, reusing
+    `MainWindow._offer_restart()` - now takes an optional `body` so it isn't
+    hardcoded to the language-change wording it was written for first). A
+    genuine failure (network, disk, ...) at either step is reported as-is -
+    never silently swallowed into "must be the PEP 668 case", since a venv
+    wouldn't fix an unrelated error. If an existing `VENV_DIR` is already
+    there, the worker installs into it directly without re-attempting the
+    direct install it already knows fails on this machine.
+    `main.py`'s own startup re-exec check (unchanged in spirit, but now
+    reads `smartscan/venv_paths.py` instead of computing its own POSIX-only
+    path) is what makes a later `python3 main.py` transparently pick up a
+    venv the installer *just* created - verified end-to-end: launching with
+    the system interpreter directly re-execs into `.venv/bin/python3`
+    (confirmed via `/proc/<pid>/cmdline` after the fact, not just "didn't
+    crash"). `venv_paths.py` also fixed a real cross-platform gap the old
+    inline computation had: it only ever checked `bin/python3` (POSIX
+    layout) - a venv created on Windows uses `Scripts\python.exe`, so the
+    original check could never have found one there at all.
+    `TranscriptionPanel` is a real three-state UI, not just on/off:
+    not-installed (intro text + Install button + GPU checkbox + live
+    install log, checkbox/backlog text hidden), installed-off,
+    installed-on - `_refresh_installed_state()` is the one place that
+    decides which. `PlaybackPanel.refresh_transcription_availability()`
+    mirrors the same installed/not-installed split for the Odtwarzacz tab's
+    own Auto-transcribe checkbox/progress label (hidden when not installed)
+    and a `transcription_unavailable_label` banner (shown when not,
+    pointing at Options) - the same visual pattern as the existing
+    `recording_disabled_label` for auto-recording. `installed_changed`
+    (emitted only when the *no-restart* branch succeeds) is what lets
+    Odtwarzacz's own copy update immediately without the user needing to
+    stumble back onto the Options tab to notice anything changed.
+    `PlaybackPanel._launch_transcription_worker()` now also gates on
+    `is_transcription_installed()` before ever constructing a
+    `TranscriptionWorker` - without this, every recording would still get
+    queued, fail deep inside `transcribe_recording()` with a plain
+    `ImportError` on the lazy `from faster_whisper... import`, get cached
+    with status `"error"`, and then be retried **forever** (see
+    `TranscriptionWorker.run()`'s own "`error` isn't a durable result"
+    comment - it's deliberately always retried) - wasted work on every
+    single batch for as long as it stays uninstalled, not just a cosmetic
+    issue. The manual per-recording "Re-transcribe" button isn't separately
+    gated the same way (it doesn't loop, so the failure-mode risk doesn't
+    apply) - it's just hidden by the same installed/not-installed check
+    instead, for discoverability rather than correctness.
+    `requirements.txt` deliberately does **not** list `faster-whisper` as a
+    real dependency line - a `pip install -r requirements.txt` must not pay
+    its full size/download cost by default; the version constraint
+    (`>=1.2`) lives only as a comment for the installer/anyone doing this by
+    hand to match.
 
 ## Testing without touching the user's real config/recordings
 

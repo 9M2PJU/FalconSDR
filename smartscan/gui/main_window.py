@@ -111,6 +111,8 @@ class MainWindow(QMainWindow):
         self.recency_boost_panel.settings_changed.connect(self._save_config)
         self.transcription_panel.settings_changed.connect(self._save_config)
         self.transcription_panel.enabled_changed.connect(self.playback_panel.set_transcription_enabled)
+        self.transcription_panel.restart_requested.connect(self._offer_restart_for_transcription)
+        self.transcription_panel.installed_changed.connect(self.playback_panel.refresh_transcription_availability)
         self.playback_panel.transcription_enabled_changed.connect(self.transcription_panel.set_enabled)
         self.location_panel.settings_changed.connect(self._save_config)
         self.language_panel.settings_changed.connect(self._save_config)
@@ -348,25 +350,37 @@ class MainWindow(QMainWindow):
         self._shutdown()
         event.accept()
 
-    def _offer_restart(self) -> None:
-        """LanguagePanel just changed the language - offer to apply it right
-        now instead of leaving the user to notice on their own that nothing
-        changed and go hunt for how to restart. See i18n.py's module
-        docstring for why a restart is needed at all instead of a live
-        retranslation."""
-        reply = QMessageBox.question(
-            self,
-            tr("Restart to apply language"),
-            tr(
+    def _offer_restart(self, body: str | None = None) -> None:
+        """Offers to restart right now instead of leaving the user to notice
+        on their own that nothing changed yet and go hunt for how to
+        restart. Originally just for LanguagePanel (see i18n.py's module
+        docstring for why a restart is needed there at all instead of a live
+        retranslation) - also reused by the transcription installer's
+        PEP-668 venv fallback (see _offer_restart_for_transcription()),
+        which needs a *different* explanation but the exact same restart
+        mechanism, hence the overridable ``body``."""
+        if body is None:
+            body = tr(
                 "Restart SmartScanATC now to switch the interface language? "
                 "Any recording in progress will be stopped first, same as a "
                 "normal Stop."
-            ),
+            )
+        reply = QMessageBox.question(
+            self,
+            tr("Restart to apply changes"),
+            body,
             QMessageBox.StandardButton.Yes | QMessageBox.StandardButton.No,
             QMessageBox.StandardButton.Yes,
         )
         if reply == QMessageBox.StandardButton.Yes:
             self._restart_app()
+
+    def _offer_restart_for_transcription(self) -> None:
+        self._offer_restart(tr(
+            "Transcription was just installed into a separate environment - "
+            "restart SmartScanATC now to start using it? Any recording in "
+            "progress will be stopped first, same as a normal Stop."
+        ))
 
     def _restart_app(self) -> None:
         """Shuts down cleanly, then re-execs this same process - the same

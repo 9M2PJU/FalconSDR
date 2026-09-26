@@ -60,18 +60,33 @@ sounddevice
 #   macOS:                  brew install ffmpeg
 #
 # --- Optional: transcription (Odtwarzacz tab) -------------------------------
-# faster-whisper (and its dependencies: ctranslate2, av, tokenizers...) is NOT
-# installed into the system Python - Ubuntu 24.04 blocks that (PEP 668), and
-# it's also fairly heavy (ASR models), so it lives in its own venv instead:
+# NOT listed as a plain dependency above on purpose - it's a large, separate
+# download (faster-whisper + ctranslate2/av/tokenizers, then ~1.5 GB + ~0.8 GB
+# of Whisper models on first use), so it's opt-in rather than bundled. Install
+# it from inside the app itself: Options tab -> Transcription -> "Install
+# transcription" - one click, with a live log, and a restart prompt only if
+# your platform actually needs one (see below). The app works completely
+# normally without it; Options/Odtwarzacz both show a clear "not installed"
+# notice with that same button instead of a confusing silent failure.
 #
-#   python3 -m venv --system-site-packages .venv
-#   .venv/bin/pip install faster-whisper
-#   # optional, if you want GPU (NVIDIA/CUDA) transcription:
-#   .venv/bin/pip install nvidia-cublas-cu12 nvidia-cudnn-cu12
-#
-# --system-site-packages means the venv still sees PySide6/numpy, so the rest
-# of the app works the same. main.py switches into this venv itself at
-# startup (if it exists), so running "python3 main.py" doesn't change.
-# Whisper's models (large, ~1.5 GB + ~0.8 GB) download themselves from
-# Hugging Face on first transcription and land in ~/.cache/huggingface.
-faster-whisper>=1.2
+# What that button does (smartscan/playback/transcription_install.py), for
+# anyone who'd rather do it by hand or is scripting a deployment:
+#   1. Tries `pip install faster-whisper` straight into whatever's running
+#      the app - this is *all* that's needed on Windows/macOS and on any
+#      Linux distro that doesn't lock down its system Python.
+#   2. Only if that fails with pip's own "externally-managed-environment"
+#      error (Ubuntu and similar - PEP 668) does it fall back to a dedicated
+#      venv instead:
+#        python3 -m venv --system-site-packages .venv
+#        .venv/bin/pip install faster-whisper
+#      --system-site-packages means this venv still sees the app's own
+#      PySide6/numpy/etc. main.py's own startup check transparently re-execs
+#      into this venv if it exists, so "python3 main.py" doesn't change -
+#      this is the *only* case that needs a restart to take effect.
+#   3. Optional, either way: nvidia-cublas-cu12 + nvidia-cudnn-cu12 for GPU
+#      (NVIDIA/CUDA) transcription - CPU works fine without them, just slower.
+# Deliberately NOT listed as a real requirement line below - `pip install -r
+# requirements.txt` must NOT pull this in unconditionally, or every install
+# pays its full size/download cost regardless of whether transcription is
+# ever used. faster-whisper>=1.2 is the version constraint the installer/any
+# manual install above should use.

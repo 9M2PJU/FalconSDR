@@ -4,21 +4,27 @@ import os
 import sys
 from pathlib import Path
 
+sys.path.insert(0, str(Path(__file__).resolve().parent))
+from smartscan.venv_paths import VENV_DIR, VENV_PYTHON
+
 # The transcription tab (smartscan/playback/transcription_engine.py) needs
-# faster-whisper, which we don't install into the system Python (PEP 668).
-# So "python3 main.py" keeps working without remembering to activate a venv,
-# we re-exec once at startup into the .venv interpreter (which also sees the
-# system PySide6 thanks to --system-site-packages). If .venv doesn't exist,
-# the app just starts on the system Python without transcription.
-_VENV_DIR = Path(__file__).resolve().parent / ".venv"
-_VENV_PYTHON = _VENV_DIR / "bin" / "python3"
-# Note: .venv/bin/python3 is usually a symlink to the system interpreter, so
-# comparing sys.executable.resolve() to _VENV_PYTHON.resolve() wouldn't tell
-# us anything (both point at the same file). Whether we're actually running
-# "inside" this venv is what sys.prefix says - the interpreter itself sets it
-# based on the pyvenv.cfg next to whichever binary it was started with.
-if _VENV_PYTHON.exists() and Path(sys.prefix).resolve() != _VENV_DIR.resolve():
-    os.execv(str(_VENV_PYTHON), [str(_VENV_PYTHON), str(Path(__file__).resolve()), *sys.argv[1:]])
+# faster-whisper. On a plain (non-externally-managed) Python it's installed
+# straight into whatever's running this file - see
+# smartscan/playback/transcription_install.py, which tries that first. This
+# .venv is only the fallback for platforms/installs where a direct pip
+# install is blocked (PEP 668 - Ubuntu and other distros that mark their
+# system Python "externally managed"): the installer creates it with
+# --system-site-packages (so it still sees the system PySide6/numpy/etc.),
+# and this re-exec is what makes "python3 main.py" transparently pick it up
+# afterwards without the user needing to remember to activate anything.
+# If .venv doesn't exist, the app just starts normally without transcription.
+# Note: .venv/bin/python3 (or Scripts\python.exe on Windows) is usually a
+# symlink/copy of the system interpreter, so comparing sys.executable to
+# VENV_PYTHON wouldn't tell us anything - whether we're actually running
+# "inside" this venv is what sys.prefix says instead, set by the interpreter
+# itself from the pyvenv.cfg next to whichever binary it was started with.
+if VENV_PYTHON.exists() and Path(sys.prefix).resolve() != VENV_DIR.resolve():
+    os.execv(str(VENV_PYTHON), [str(VENV_PYTHON), str(Path(__file__).resolve()), *sys.argv[1:]])
 
 # Real crashes have been observed (journalctl, when launched from the .desktop
 # file - see sdr_backend.py's LAST_CLOSE_FILE comment for the leading theory:

@@ -1017,8 +1017,8 @@ msgstr "Automatyczny (język systemu)"
 msgid "Missing your language? Adding one is just a text file - no programming needed, see smartscan/locale/README.md in the source for the three-step guide."
 msgstr "Brakuje Twojego języka? Dodanie go to tylko plik tekstowy - bez programowania, zobacz smartscan/locale/README.md w źródłach programu, gdzie jest trzykrokowa instrukcja."
 
-msgid "Restart to apply language"
-msgstr "Restart, aby zastosować język"
+msgid "Restart to apply changes"
+msgstr "Uruchom ponownie, aby zastosować zmiany"
 
 msgid "Restart SmartScanATC now to switch the interface language? Any recording in progress will be stopped first, same as a normal Stop."
 msgstr "Zrestartować SmartScanATC teraz, aby zmienić język interfejsu? Trwające nagrywanie zostanie najpierw zatrzymane, tak jak zwykłym Stop."
@@ -1083,3 +1083,36 @@ msgstr "■ Zatrzymaj nagrywanie IQ"
 
 msgid "Recording raw IQ..."
 msgstr "Nagrywanie surowego IQ..."
+
+
+# --- optional transcription install flow (transcription_panel/playback_panel/transcription_install) ---
+
+msgid "Optional: automatic speech-to-text for recordings (Whisper), shown in the Odtwarzacz tab. Not installed - it's a large, separate download (models + engine), so it's opt-in rather than bundled with the app."
+msgstr "Opcjonalnie: automatyczna transkrypcja mowy na tekst dla nagrań (Whisper), widoczna w zakładce Odtwarzacz. Niezainstalowane - to duży, osobny download (modele + silnik), więc jest opcjonalne, a nie dołączone do programu."
+
+msgid "Also install GPU (NVIDIA/CUDA) support"
+msgstr "Zainstaluj też wsparcie GPU (NVIDIA/CUDA)"
+
+msgid "Optional and heavier still - only useful if you have an NVIDIA GPU. Transcription works on CPU either way, just slower."
+msgstr "Opcjonalne i jeszcze cięższe - przydatne tylko jeśli masz kartę NVIDIA. Transkrypcja i tak działa na CPU, tylko wolniej."
+
+msgid "Install transcription"
+msgstr "Zainstaluj transkrypcję"
+
+msgid "Installing… this can take a few minutes."
+msgstr "Instalowanie… to może potrwać kilka minut."
+
+msgid "Installed."
+msgstr "Zainstalowano."
+
+msgid "Installation failed - see the log above for details. You can try again."
+msgstr "Instalacja nie powiodła się - szczegóły w logu powyżej. Możesz spróbować ponownie."
+
+msgid "Installed. Restart SmartScanATC to start using it."
+msgstr "Zainstalowano. Uruchom ponownie SmartScanATC, żeby zacząć z tego korzystać."
+
+msgid "Transcription isn't installed - it's an optional, separate download. Install it from the Options tab to get automatic speech-to-text for recordings."
+msgstr "Transkrypcja nie jest zainstalowana - to opcjonalny, osobny download. Zainstaluj ją w zakładce Opcje, żeby uzyskać automatyczną transkrypcję mowy na tekst dla nagrań."
+
+msgid "Transcription was just installed into a separate environment - restart SmartScanATC now to start using it? Any recording in progress will be stopped first, same as a normal Stop."
+msgstr "Transkrypcja została właśnie zainstalowana w osobnym środowisku - uruchomić SmartScanATC ponownie, żeby zacząć z niej korzystać? Trwające nagrywanie zostanie najpierw zatrzymane, tak samo jak zwykły Stop."
