@@ -25,12 +25,15 @@ That's the whole process - restart the app and it appears in the language
 list automatically (``available_languages()`` just lists whatever ``.po``
 files exist).
 
-Changing the active language takes effect on the *next* restart, not live:
-every widget's text is set once, at construction time, from whatever
-``tr()`` returned back then - there's no app-wide "retranslate every already-
-built widget" mechanism (that's a much bigger feature - Qt calls this a
-LanguageChange event + a retranslateUi() convention - and isn't worth the
-complexity for a desktop tool nobody switches language in mid-session).
+Changing the active language still needs a restart to actually apply - every
+widget's text is set once, at construction time, from whatever ``tr()``
+returned back then, and there's no app-wide "retranslate every already-built
+widget" mechanism (that's a much bigger feature - Qt calls this a
+LanguageChange event + a retranslateUi() convention). But the restart itself
+is one click, not a manual close-and-reopen: MainWindow's language panel
+offers to do it immediately (shut down cleanly, then re-exec the same
+process - see MainWindow._restart_app()), the same self-re-exec trick
+main.py already uses for the venv redirect.
 """
 from __future__ import annotations
 
@@ -38,6 +41,12 @@ import re
 from pathlib import Path
 
 LOCALE_DIR = Path(__file__).resolve().parent / "locale"
+
+# Sentinel config value (see AppConfig.language) meaning "no explicit choice
+# yet - follow the system's own language". Resolved once, at startup, by
+# resolve_system_language() - never stored back into the catalog lookup
+# itself, so tr()/current_language() never see "auto" directly.
+AUTO = "auto"
 
 # Display names for the Options language dropdown - a language whose .po
 # file exists but isn't listed here still works, it just shows its raw code
@@ -128,16 +137,43 @@ def language_display_name(code: str) -> str:
     return LANGUAGE_NAMES.get(code, code)
 
 
+def resolve_system_language() -> str:
+    """Maps the OS's own configured language to one of our supported codes,
+    or "en" if it isn't one we have a translation for. Used when
+    AppConfig.language is AUTO (the default for a fresh install - see
+    config.py) so a Polish-language system gets a Polish UI without the user
+    having to find the setting first, while everyone else still gets English
+    rather than a language they can't read.
+
+    Uses Qt's own QLocale instead of Python's stdlib ``locale`` module -
+    QLocale.system() reads the OS's actual UI language setting on every
+    platform this app targets (Linux/Windows/macOS) consistently, where the
+    stdlib module leans on environment variables (LANG/LC_*) that aren't
+    reliably set at all on Windows and can lag behind the OS's real setting
+    even on Linux. Imported lazily so this module stays importable (e.g. for
+    a quick .po-parsing test) without Qt available.
+    """
+    try:
+        from PySide6.QtCore import QLocale
+        system_code = QLocale.system().name()[:2].lower()  # e.g. "pl_PL" -> "pl"
+    except Exception:
+        return "en"
+    return system_code if system_code in available_languages() else "en"
+
+
 _catalog: dict[str, str] = {}
 _current_language = "en"
 
 
 def set_language(lang: str) -> None:
-    """Loads ``smartscan/locale/<lang>.po`` into the active catalog. "en"
-    (or any language with no .po file, e.g. a code that got typed wrong in
+    """Loads ``smartscan/locale/<lang>.po`` into the active catalog. ``lang``
+    of AUTO resolves via resolve_system_language() first. "en" (or any
+    language with no .po file, e.g. a code that got typed wrong in
     config.json) means "no translation" - tr() then just echoes its input,
     which is already English, so this is always a safe, silent fallback."""
     global _catalog, _current_language
+    if lang == AUTO:
+        lang = resolve_system_language()
     _current_language = lang
     path = LOCALE_DIR / f"{lang}.po"
     if lang == "en" or not path.exists():
@@ -150,6 +186,8 @@ def set_language(lang: str) -> None:
 
 
 def current_language() -> str:
+    """The language actually in effect - already resolved past AUTO, unlike
+    AppConfig.language itself, which may still literally say "auto"."""
     return _current_language
 
 

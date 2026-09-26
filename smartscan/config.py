@@ -188,9 +188,12 @@ class AppConfig:
     # has no effect on AM/NFM. Recordings stay mono regardless.
     wfm_stereo_enabled: bool = False
     # UI language - a code with a matching smartscan/locale/<code>.po file,
-    # or "en" (the source language, built into every string, needs no file).
-    # See smartscan/i18n.py. Takes effect on next restart, not live.
-    language: str = "en"
+    # "en" (the source language, built into every string, needs no file), or
+    # "auto" (default for a fresh install - follow the OS's own language,
+    # falling back to English if we have no translation for it). See
+    # smartscan/i18n.py's resolve_system_language()/set_language(). Applying
+    # a change needs a restart - see MainWindow._restart_app().
+    language: str = "auto"
 
     @staticmethod
     def load() -> "AppConfig":
@@ -229,7 +232,7 @@ class AppConfig:
             channel_folders=list(raw.get("channel_folders", [])),
             memory_list_enabled=raw.get("memory_list_enabled", True),
             wfm_stereo_enabled=raw.get("wfm_stereo_enabled", False),
-            language=raw.get("language", "en"),
+            language=raw.get("language", "auto"),
         )
 
     def save(self) -> None:

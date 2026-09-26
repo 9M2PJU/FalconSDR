@@ -1008,3 +1008,24 @@ msgstr "Służby Ratunkowe / PRM (168.5-169.2 MHz)"
 msgid "State medical rescue service (ambulances / PRM), power-grid\nemergency service, and municipal services. Ambulances and PRM\ndispatchers in many regions still transmit here in analog.\nPoland-specific."
 msgstr "Państwowe Ratownictwo Medyczne (karetki / PRM), Pogotowie\nEnergetyczne i służby komunalne. Karetki i dyspozytorzy PRM\nw wielu rejonach wciąż nadają tu w analogu. Specyficzne dla Polski."
 
+
+# --- language_panel.py / main_window.py - live restart + auto locale ---
+
+msgid "Automatic (system language)"
+msgstr "Automatyczny (język systemu)"
+
+msgid "Missing your language? Adding one is just a text file - no programming needed, see smartscan/locale/README.md in the source for the three-step guide."
+msgstr "Brakuje Twojego języka? Dodanie go to tylko plik tekstowy - bez programowania, zobacz smartscan/locale/README.md w źródłach programu, gdzie jest trzykrokowa instrukcja."
+
+msgid "Restart to apply language"
+msgstr "Restart, aby zastosować język"
+
+msgid "Restart SmartScanATC now to switch the interface language? Any recording in progress will be stopped first, same as a normal Stop."
+msgstr "Zrestartować SmartScanATC teraz, aby zmienić język interfejsu? Trwające nagrywanie zostanie najpierw zatrzymane, tak jak zwykłym Stop."
+
+msgid "Restart failed"
+msgstr "Restart nie powiódł się"
+
+msgid "Couldn't restart automatically ({error}). Please close and reopen the app by hand."
+msgstr "Nie udało się zrestartować automatycznie ({error}). Zamknij i otwórz program ponownie ręcznie."
+

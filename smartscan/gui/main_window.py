@@ -1,6 +1,8 @@
 """Main application window assembling the panels from spec section 6."""
 from __future__ import annotations
 
+import os
+import sys
 from pathlib import Path
 
 from PySide6.QtGui import QIcon
@@ -108,6 +110,7 @@ class MainWindow(QMainWindow):
         self.playback_panel.transcription_enabled_changed.connect(self.transcription_panel.set_enabled)
         self.location_panel.settings_changed.connect(self._save_config)
         self.language_panel.settings_changed.connect(self._save_config)
+        self.language_panel.restart_requested.connect(self._offer_restart)
         self.freq_manager.channels_changed.connect(self._on_channels_changed)
         self.freq_manager.blacklist_changed.connect(self._on_blacklist_changed)
         self.freq_manager.folders_changed.connect(self._on_folders_changed)
@@ -267,7 +270,10 @@ class MainWindow(QMainWindow):
         self.scanner_panel.set_running(False)
         self.recording_panel.set_running(False)
 
-    def closeEvent(self, event) -> None:
+    def _shutdown(self) -> None:
+        """Stops the scanner (if running) and persists everything - shared by
+        closeEvent() and _restart_app(), so restarting to apply a language
+        change leaves state exactly as clean as a normal quit would."""
         if self.engine is not None:
             self.engine.request_stop()
             self.engine.join(timeout=3.0)
@@ -275,4 +281,45 @@ class MainWindow(QMainWindow):
         self._save_config()
         storage.save_channels(self.channels)
         storage.save_blacklist(self.blacklist)
+
+    def closeEvent(self, event) -> None:
+        self._shutdown()
         event.accept()
+
+    def _offer_restart(self) -> None:
+        """LanguagePanel just changed the language - offer to apply it right
+        now instead of leaving the user to notice on their own that nothing
+        changed and go hunt for how to restart. See i18n.py's module
+        docstring for why a restart is needed at all instead of a live
+        retranslation."""
+        reply = QMessageBox.question(
+            self,
+            tr("Restart to apply language"),
+            tr(
+                "Restart SmartScanATC now to switch the interface language? "
+                "Any recording in progress will be stopped first, same as a "
+                "normal Stop."
+            ),
+            QMessageBox.StandardButton.Yes | QMessageBox.StandardButton.No,
+            QMessageBox.StandardButton.Yes,
+        )
+        if reply == QMessageBox.StandardButton.Yes:
+            self._restart_app()
+
+    def _restart_app(self) -> None:
+        """Shuts down cleanly, then re-execs this same process - the same
+        self-re-exec trick main.py already uses for the venv redirect, so a
+        language change applies with one click instead of a manual close-
+        and-reopen. os.execv() replaces the process image outright (nothing
+        after a successful call ever runs), which is exactly why _shutdown()
+        must happen first - there's no "after" to clean up in."""
+        self._shutdown()
+        try:
+            os.execv(sys.executable, [sys.executable, *sys.argv])
+        except OSError as exc:
+            QMessageBox.warning(
+                self, tr("Restart failed"),
+                tr("Couldn't restart automatically ({error}). Please close and reopen the app by hand.").format(
+                    error=exc,
+                ),
+            )

@@ -1,7 +1,8 @@
 """UI language selection - see smartscan/i18n.py for how translations are
-loaded and how to add a new one. Deliberately takes effect on next restart,
-not live (see i18n.py's module docstring for why) - this panel just says so
-plainly instead of pretending to be more dynamic than it is.
+loaded and how to add a new one. Applying a change still needs a restart
+(every widget's text is set once, at construction time - see i18n.py's
+module docstring), but the restart itself is offered as one click right
+here (restart_requested), not a manual close-and-reopen.
 """
 from __future__ import annotations
 
@@ -9,11 +10,15 @@ from PySide6.QtCore import Signal
 from PySide6.QtWidgets import QComboBox, QFormLayout, QGroupBox, QLabel, QVBoxLayout
 
 from ...config import AppConfig
-from ...i18n import available_languages, language_display_name, tr
+from ...i18n import AUTO, available_languages, language_display_name, tr
 
 
 class LanguagePanel(QGroupBox):
     settings_changed = Signal()
+    # Emitted right after a real change (not on initial load) - MainWindow
+    # offers to restart immediately instead of leaving the user to notice on
+    # their own that nothing changed and wonder why.
+    restart_requested = Signal()
 
     def __init__(self, config: AppConfig, parent=None):
         super().__init__(tr("Language"), parent)
@@ -28,6 +33,7 @@ class LanguagePanel(QGroupBox):
 
         form = QFormLayout()
         self.language_combo = QComboBox()
+        self.language_combo.addItem(tr("Automatic (system language)"), AUTO)
         for code in available_languages():
             self.language_combo.addItem(language_display_name(code), code)
         self.language_combo.currentIndexChanged.connect(self._push_settings)
@@ -35,10 +41,9 @@ class LanguagePanel(QGroupBox):
         root.addLayout(form)
 
         note = QLabel(tr(
-            "Takes effect after restarting the app. Missing your language? "
-            "Adding one is just a text file - no programming needed, see "
-            "smartscan/locale/README.md in the source for the three-step "
-            "guide."
+            "Missing your language? Adding one is just a text file - no "
+            "programming needed, see smartscan/locale/README.md in the "
+            "source for the three-step guide."
         ))
         note.setWordWrap(True)
         note.setStyleSheet("color: #9aa0a6;")
@@ -53,5 +58,9 @@ class LanguagePanel(QGroupBox):
     def _push_settings(self, *_args) -> None:
         if self._loading:
             return
-        self.config.language = self.language_combo.currentData()
+        new_lang = self.language_combo.currentData()
+        changed = new_lang != self.config.language
+        self.config.language = new_lang
         self.settings_changed.emit()
+        if changed:
+            self.restart_requested.emit()
