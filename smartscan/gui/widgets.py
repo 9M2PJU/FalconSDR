@@ -14,6 +14,8 @@ from PySide6.QtWidgets import (
     QWidget,
 )
 
+from ..i18n import tr
+
 try:
     import pyqtgraph as pg
     HAVE_PYQTGRAPH = True
@@ -85,10 +87,10 @@ def install_app_emoji_fallback(app) -> None:
 
 
 class ClickToSeekSlider(QSlider):
-    """QSlider gdzie kliknięcie w dowolne miejsce paska (nie tylko przeciąganie
-    uchwytu) od razu przeskakuje do tej pozycji - tak jak w typowych
-    odtwarzaczach internetowych (YouTube itp.), zamiast domyślnego zachowania
-    Qt (krok strony po kliknięciu obok uchwytu)."""
+    """QSlider where clicking anywhere on the bar (not just dragging the
+    handle) jumps straight to that position - like typical web media players
+    (YouTube etc.), instead of Qt's default behavior (a page-step when
+    clicking beside the handle)."""
 
     def mousePressEvent(self, event) -> None:
         if event.button() == Qt.MouseButton.LeftButton:
@@ -284,12 +286,11 @@ class SpectrumView(QWidget):
             self._plot.showGrid(x=True, y=True, alpha=0.2)
             self._plot.setLabel("bottom", "MHz")
             self._plot.setLabel("left", "dB")
-            # To jest czysty podglad, nie narzedzie do eksploracji widma -
-            # przypadkowe przeciagniecie/scroll myszka potrafilo
-            # przesunac/przybilzyc widok bez zadnego prostego sposobu na
-            # powrot do domyslnego. Wylaczamy cala interakcje myszka
-            # (przeciaganie, scroll-zoom, menu PPM) - wykres zawsze zostaje w
-            # automatycznie dopasowanym widoku, tak jak przy starcie programu.
+            # This is a pure preview, not a spectrum-exploration tool - an
+            # accidental mouse drag/scroll could pan/zoom the view with no
+            # simple way back to the default. Disable all mouse interaction
+            # (drag, scroll-zoom, right-click menu) - the plot always stays
+            # in its auto-fitted view, same as at program startup.
             self._plot.getPlotItem().getViewBox().setMouseEnabled(x=False, y=False)
             self._plot.setMenuEnabled(False)
             self._curve = self._plot.plot(pen=pg.mkPen("#2ecc71", width=1.5))
@@ -300,7 +301,7 @@ class SpectrumView(QWidget):
             layout.addWidget(self._plot)
         else:
             from PySide6.QtWidgets import QLabel
-            layout.addWidget(QLabel("pyqtgraph niedostepny - podglad widma wylaczony"))
+            layout.addWidget(QLabel(tr("pyqtgraph unavailable - spectrum preview disabled")))
 
     @property
     def available(self) -> bool:
@@ -359,24 +360,25 @@ class RecIndicator(QWidget):
 
 
 class WaveformView(QWidget):
-    """Podgląd fali dźwiękowej odtwarzanego nagrania w Odtwarzaczu, łączący
-    rolę paska postępu (klik/przeciągnięcie = przewijanie - ten sam styl co
-    ClickToSeekSlider) z wizualnym podglądem amplitudy w czasie. Pozwala od
-    razu zobaczyć, gdzie w nagraniu jest cisza (np. przerwa wycięta przez
-    squelch podczas LINGER - patrz ScannerEngine._play_and_record_slot,
-    które teraz świadomo wpisuje ciszę zamiast wycinać fragment, żeby
-    zachować prawdziwy czas trwania) a gdzie realna, głośna/cicha treść -
-    zamiast się tego domyślać z samego upływającego czasu.
+    """Waveform preview of the recording being played in Odtwarzacz,
+    combining the role of a progress bar (click/drag = seek - same style as
+    ClickToSeekSlider) with a visual preview of amplitude over time. Lets you
+    see right away where in the recording there's silence (e.g. a gap
+    trimmed by squelch during LINGER - see
+    ScannerEngine._play_and_record_slot, which deliberately writes silence
+    instead of cutting the segment, to preserve the real elapsed duration)
+    versus real, loud/quiet content - instead of having to guess from the
+    elapsed time alone.
 
-    Dane amplitudy (``set_waveform``) i sama geometria widżetu zmieniają
-    się rzadko (nowe nagranie / zmiana rozmiaru okna), ale pozycja
-    odtwarzania zmienia się często (kilka razy na sekundę) - dlatego oba
-    warianty fali (nieodtworzona/odtworzona) są renderowane raz do
-    QPixmap i tylko przycinane/nakładane przy każdej aktualizacji pozycji,
-    zamiast rysować setki prostokątów od nowa przy każdej klatce.
+    The amplitude data (``set_waveform``) and the widget's own geometry
+    change rarely (new recording / window resize), but the playback position
+    changes often (several times a second) - so both waveform variants
+    (unplayed/played) are rendered once to a QPixmap and only clipped/
+    composited on every position update, instead of redrawing hundreds of
+    rectangles from scratch every frame.
     """
 
-    seekRequested = Signal(int)  # nowa pozycja w ms
+    seekRequested = Signal(int)  # new position in ms
 
     _BG = QColor("#12141a")
     _CENTER_LINE = QColor(255, 255, 255, 22)
@@ -387,19 +389,19 @@ class WaveformView(QWidget):
     def __init__(self, parent=None):
         super().__init__(parent)
         self.setMinimumHeight(64)
-        self._peaks: np.ndarray | None = None  # amplitudy 0..1 per "słupek"
+        self._peaks: np.ndarray | None = None  # amplitudes 0..1 per "bar"
         self._duration_ms = 0
         self._position_ms = 0
         self._seeking = False
         self._cache_unplayed: QPixmap | None = None
         self._cache_played: QPixmap | None = None
-        self.setToolTip("Klik/przeciągnięcie - przewijanie. Wysokość słupków = głośność w tym miejscu nagrania.")
+        self.setToolTip(tr("Click/drag to seek. Bar height = loudness at that point in the recording."))
 
-    # -- API (odpowiednik ClickToSeekSlider/QSlider, żeby PlaybackPanel
-    # zmieniał jak najmniej przy podmianie) --------------------------------
+    # -- API (equivalent to ClickToSeekSlider/QSlider, so PlaybackPanel
+    # changes as little as possible when swapping it in) --------------------
     def set_waveform(self, peaks: np.ndarray | None) -> None:
-        """``peaks``: amplitudy szczytowe w [0, 1], jedna wartość na slupek,
-        albo None (brak danych - nieczytelny plik/jeszcze nie policzone)."""
+        """``peaks``: peak amplitudes in [0, 1], one value per bar, or None
+        (no data - unreadable file/not computed yet)."""
         self._peaks = peaks
         self._invalidate_cache()
         self.update()
@@ -415,14 +417,14 @@ class WaveformView(QWidget):
         return self._duration_ms
 
     def set_position(self, position_ms: int) -> None:
-        """Jak QSlider.setValue() - nie nadpisuje pozycji w trakcie
-        przeciągania przez użytkownika (patrz isSliderDown())."""
+        """Like QSlider.setValue() - doesn't overwrite the position while the
+        user is dragging (see isSliderDown())."""
         if self._seeking:
             return
         self._position_ms = max(0, min(position_ms, self._duration_ms))
         self.update()
 
-    def isSliderDown(self) -> bool:  # noqa: N802 - nazwa zgodna z QSlider, patrz docstring klasy
+    def isSliderDown(self) -> bool:  # noqa: N802 - name matches QSlider, see the class docstring
         return self._seeking
 
     def resizeEvent(self, event) -> None:
@@ -433,7 +435,7 @@ class WaveformView(QWidget):
         self._cache_unplayed = None
         self._cache_played = None
 
-    # -- klik/przeciągnięcie = przewijanie (jak ClickToSeekSlider) ---------
+    # -- click/drag = seek (like ClickToSeekSlider) ---------
     def _position_for_x(self, x: float) -> int:
         if self.width() <= 0 or self._duration_ms <= 0:
             return 0
@@ -468,7 +470,7 @@ class WaveformView(QWidget):
             return
         super().mouseReleaseEvent(event)
 
-    # -- rysowanie -----------------------------------------------------
+    # -- drawing -----------------------------------------------------
     def _render_bars(self, bar_color: QColor) -> QPixmap:
         w, h = max(1, self.width()), max(1, self.height())
         pixmap = QPixmap(w, h)
@@ -490,7 +492,7 @@ class WaveformView(QWidget):
                 bh = max(1.0, amp * max_half_h)
                 painter.drawRect(QRectF(i * bar_w, mid_y - bh, max(1.0, bar_w - gap), bh * 2))
         else:
-            # brak danych jeszcze (ładowanie/nieczytelny plik) - płaska linia
+            # no data yet (loading/unreadable file) - flat line
             painter.setPen(QPen(bar_color, 2))
             painter.drawLine(0, int(mid_y), w, int(mid_y))
         painter.end()
@@ -514,7 +516,7 @@ class WaveformView(QWidget):
             painter.setPen(QPen(self._PLAYHEAD, 1.5))
             painter.drawLine(played_x, 0, played_x, self.height())
 
-        # Subtelna ramka - ta sama konwencja co LevelMeter/SpectrumView, żeby
-        # widżet nie "pływał" bez wyraźnej granicy na tle reszty paska odtwarzacza.
+        # Subtle border - same convention as LevelMeter/SpectrumView, so the
+        # widget doesn't "float" without a clear edge against the rest of the player bar.
         painter.setPen(QColor(255, 255, 255, 30))
         painter.drawRect(self.rect().adjusted(0, 0, -1, -1))

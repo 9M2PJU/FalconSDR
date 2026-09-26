@@ -420,3 +420,309 @@ msgstr "Zapisano {freq:.4f} MHz w Liście pamięci"
 
 msgid "Blacklisted {freq:.4f} MHz (lockout)."
 msgstr "Zablokowano {freq:.4f} MHz (lockout)."
+
+# --- gui/panels/scanner_panel.py ---
+
+msgid "Enable/disable this band without removing it from the list."
+msgstr "Włącz/wyłącz to pasmo bez usuwania go z listy."
+
+msgid "Name"
+msgstr "Nazwa"
+
+msgid "1 channel"
+msgstr "1 kanał"
+
+msgid "A single frequency instead of a range, e.g. 121.500 MHz (guard)\nalongside the scanned band."
+msgstr "Pojedyncza częstotliwość zamiast zakresu, np. 121.500 MHz (guard)\nobok skanowanego pasma."
+
+msgid " kHz step"
+msgstr " kHz krok"
+
+msgid "Modulation for this band: AM (aviation), NFM (PMR/ham/marine),\nWFM (FM broadcast radio)."
+msgstr "Modulacja dla tego pasma: AM (lotnictwo), NFM (PMR/amatorskie/morskie),\nWFM (radio FM)."
+
+msgid "Scan priority weight (0 = default, no special treatment). The higher it is relative to other weighted bands/frequencies, the more often the scanner returns to it - e.g. 1 and 2 means \"twice as often\". Setting a weight on a single frequency from the Memory List (below), alongside a weight on the whole band, lets you return to it more often without giving up on the rest of the band."
+msgstr "Waga priorytetu skanowania (0 = domyślna, bez wyróżnienia). Im wyższa względem innych ważonych pasm/częstotliwości, tym częściej skaner do niego wraca - np. 1 i 2 znaczy \"dwa razy częściej\". Ustawienie wagi na pojedynczej częstotliwości z Listy pamięci (poniżej) obok wagi całego pasma pozwala częściej wracać do niej, nie rezygnując z reszty pasma."
+
+msgid "Advanced - a trigger level, tuning/linger time, gain and noise\nreduction of its own for just this band, independent of the\nrest of the scanned bands/channels (see the sliders below once clicked)."
+msgstr "Zaawansowane - własny trigger level, tuning/linger time, gain i\nredukcja szumów tylko dla tego pasma, niezależne od reszty\nskanowanych pasm/kanałów (patrz suwaki poniżej po kliknięciu)."
+
+msgid "Remove this band from the list."
+msgstr "Usuń to pasmo z listy."
+
+msgid "Enable/disable the whole Memory List at once - behaves like a band's checkbox.\nDisabling it here disables scanning of every channel, even ones\nindividually marked enabled in the Channels tab."
+msgstr "Włącz/wyłącz całą Listę pamięci naraz - działa jak checkbox pasma.\nWyłączenie tu wyłącza skanowanie wszystkich kanałów, nawet tych\noznaczonych jako włączone pojedynczo w zakładce Kanały."
+
+msgid "Expand/collapse the list of enabled channels and their weights."
+msgstr "Rozwiń/zwiń listę włączonych kanałów i ich wag."
+
+msgid "Memory List (channels)"
+msgstr "Lista pamięci (kanały)"
+
+msgid "Name / Folder"
+msgstr "Nazwa / Folder"
+
+msgid "Frequency (MHz)"
+msgstr "Częstotliwość (MHz)"
+
+msgid "Modulation"
+msgstr "Modulacja"
+
+msgid "Weight"
+msgstr "Waga"
+
+msgid "{count} enabled"
+msgstr "{count} włączonych"
+
+msgid "no channels enabled"
+msgstr "brak włączonych kanałów"
+
+msgid "(unnamed)"
+msgstr "(bez nazwy)"
+
+msgid "Priority weight for this frequency (0 = default, no special\ntreatment). Competes with whole-band weights - see the weight\ntooltip above."
+msgstr "Waga priorytetu tej częstotliwości (0 = domyślna, bez wyróżnienia).\nKonkuruje z wagami całych pasm - patrz podpowiedź przy wadze pasma\npowyżej."
+
+msgid "Scanner"
+msgstr "Skaner"
+
+msgid "SDR device:"
+msgstr "Urządzenie SDR:"
+
+msgid " MHz capture"
+msgstr " MHz przechwytu"
+
+msgid "Bandwidth captured by the SDR in one shot (e.g. 2.4 MHz for RTL-SDR).\nThe scanner groups the whole range/channel list into as few such windows\nas possible instead of retuning channel by channel."
+msgstr "Szerokość pasma jednorazowo przechwytywanego przez SDR (np. 2.4 MHz dla RTL-SDR).\nSkaner grupuje cały zakres/listę kanałów w jak najmniej takich okien zamiast\nprzestrajać się kanał-po-kanale."
+
+msgid "Tuning Time:"
+msgstr "Tuning Time:"
+
+msgid "Linger Time:"
+msgstr "Linger Time:"
+
+msgid "Trigger Level:"
+msgstr "Trigger Level:"
+
+msgid "Squelch (mute noise):"
+msgstr "Squelch (wyciszanie szumu):"
+
+msgid "Gain:"
+msgstr "Gain:"
+
+msgid "Noise reduction:"
+msgstr "Redukcja szumów:"
+
+msgid "Stereo (FM WFM)"
+msgstr "Stereo (FM WFM)"
+
+msgid "Decodes stereo (19 kHz pilot) for live monitoring of FM broadcast\nradio (WFM) - has no effect on AM/NFM. Recordings always stay mono."
+msgstr "Dekoduje stereo (pilot 19 kHz) przy nasłuchu na żywo pasma radia\nFM (WFM) - nie ma znaczenia dla AM/NFM. Nagrania zawsze zostają mono."
+
+msgid "Save"
+msgstr "Zapisz"
+
+msgid "Saves the current settings (trigger/timing/gain/noise reduction)\nas this band's own and returns to normal editing."
+msgstr "Zapisuje bieżące ustawienia (trigger/timing/gain/redukcja szumów)\njako własne dla edytowanego pasma i wraca do zwykłej edycji."
+
+msgid "Reset to defaults"
+msgstr "Przywróć domyślne"
+
+msgid "Removes every advanced setting from this band (reverts to the\nglobal ones) and saves right away."
+msgstr "Usuwa wszystkie zaawansowane ustawienia tego pasma (wraca do\nglobalnych) i od razu zapisuje."
+
+msgid "START"
+msgstr "START"
+
+msgid "SKIP"
+msgstr "SKIP"
+
+msgid "Moves on to the next frequency/channel immediately, without\nwaiting for the transmission/linger to end. Does NOT add it to\nthe blacklist - this frequency will be visited again on the\nnext scan pass. Use this when something interesting is\nhappening on the current channel and you want to leave it alone\nfor later, but move on."
+msgstr "Przechodzi natychmiast do kolejnej częstotliwości/kanału, bez\nczekania na koniec transmisji/linger. NIE dodaje do czarnej listy -\nta częstotliwość zostanie odwiedzona ponownie w kolejnym przebiegu\nskanowania. Użyj tego, gdy coś ciekawego dzieje się na bieżącym\nkanale i chcesz go zostawić w spokoju na przyszłość, ale iść dalej."
+
+msgid "SKIP + BLACKLIST"
+msgstr "SKIP + BLACKLIST"
+
+msgid "Like SKIP, but also permanently blocks the current frequency\n(adds it to the blacklist) - the scanner won't visit it again.\nTakes effect immediately, with no confirmation; undo it by\ndeleting the entry in the Blacklist tab."
+msgstr "Jak SKIP, ale dodatkowo trwale blokuje bieżącą częstotliwość\n(dodaje do czarnej listy) - skaner już jej nie odwiedzi. Działa od\nrazu, bez potwierdzenia; cofniesz to kasując wpis w zakładce\nCzarna lista."
+
+msgid "MUTE"
+msgstr "WYCISZ"
+
+msgid "Mutes only the live audio in your headphones/speakers -\nrecording to disk (if enabled) keeps running in the background,\nso you can catch up later by listening to recordings from the\nRecordings tab while the scanner keeps working quietly."
+msgstr "Wycisza tylko dźwięk na żywo w słuchawkach/głośnikach - nagrywanie na\ndysk (jeśli włączone) działa dalej w tle, więc można nadrobić zaległości\nodsłuchując nagrania z zakładki Nagrania podczas gdy skaner pracuje po cichu."
+
+msgid "Auto (AGC)"
+msgstr "Auto (AGC)"
+
+msgid "Enable"
+msgstr "Włącz"
+
+msgid "Mutes the live audio AND skips writing to the recording, once the\nlevel drops at least this offset BELOW Trigger Level - only\nduring LINGER (after the transmission ends, before the channel\ncloses). Fixes the typical \"ear-blasting\" burst after releasing\nPTT on NFM: once the carrier disappears, the FM demodulator gets\npure receiver noise, and noise without a carrier sounds very\nloud despite low RF power (the FM threshold effect) - this isn't\na bug. Thanks to this, a recording ends where the signal actually\nended, without a loud noise \"tail\". The offset always stays\nbelow the trigger (never above it), so it can never mute/cut\naudio while the scanner considers the channel active\n(SIGNAL_DETECTED). Leave a margin (e.g. -6 dB) so whatever's\nstill audible/recorded during LINGER below the trigger (thanks\nto it) isn't cut off immediately."
+msgstr "Wycisza dźwięk na żywo ORAZ pomija zapis do nagrania, gdy poziom\nspadnie o co najmniej ten offset PONIŻEJ Trigger Level - wyłącznie\nw LINGER (po zakończeniu transmisji, przed zamknięciem kanału).\nNaprawia typowe \"wybuchające uszy\" po puszczeniu PTT przy NFM: gdy\nnośna znika, demodulator FM dostaje sam szum odbiornika, a szum bez\nnośnej brzmi bardzo głośno mimo niskiej mocy RF (efekt progowy FM) -\nto nie jest usterka. Dzięki temu nagranie kończy się tam, gdzie\nfaktycznie skończył się sygnał, bez głośnego \"ogona\" szumu.\nOffset zostaje ZAWSZE poniżej triggera (nigdy nad nim), więc nigdy\nnie wyciszy/nie utnie dźwięku, gdy skaner uznaje kanał za aktywny\n(SIGNAL_DETECTED). Zostaw margines (np. -6 dB), żeby to co jeszcze\nsłychać/nagrywa się w LINGER poniżej triggera (dzięki niemu właśnie)\nnie zostało od razu ucinane."
+
+msgid "dB from trigger"
+msgstr "dB od triggera"
+
+msgid "Enable (adaptive, intelligent)"
+msgstr "Włącz (inteligentna, adaptacyjna)"
+
+msgid "Continuously tracks the background noise level in the audio\nspectrum and attenuates bands close to that level (spectral\ngating), leaving speech bands relatively untouched. Helps with a\nweak antenna/low SNR, but at very high noise levels costs a\nslightly \"digital\" sound."
+msgstr "Śledzi na bieżąco poziom szumu tła w widmie dźwięku i wycisza pasma\nbliskie temu poziomowi (spectral gating), zostawiając pasma z mową\nwzględnie nietknięte. Pomaga przy słabej antenie/niskim SNR, ale przy\nbardzo silnym szumie kosztem lekko \"cyfrowego\" brzmienia audio."
+
+msgid "Sources to scan - add presets, custom ranges (with your own start/stop/step) or single frequencies, e.g. 121.500 MHz alongside the scanned band. Every entry enabled below is scanned together, in one session, along with every enabled channel from the Memory List below - no need to switch between them."
+msgstr "Źródła do skanowania - dodawaj presety, własne zakresy (z własnym start/stop/step) lub pojedyncze częstotliwości, np. 121.500 MHz obok skanowanego pasma. Wszystkie włączone pozycje poniżej są skanowane razem, w jednej sesji, wraz z każdym włączonym kanałem z Listy pamięci poniżej - nie trzeba między nimi przełączać."
+
+msgid "Add preset"
+msgstr "Dodaj preset"
+
+msgid "Add custom range"
+msgstr "Dodaj własny zakres"
+
+msgid "Memory list (channels)"
+msgstr "Lista pamięci (kanały)"
+
+msgid "Switch to the Channels tab, where individual\nfrequencies/folders can be managed. They're always scanned\ntogether with the bands above, in one session."
+msgstr "Przełącz na zakładkę Kanały, gdzie można zarządzać pojedynczymi\nczęstotliwościami/folderami. Są one zawsze skanowane razem z\npasmami powyżej, w jednej sesji."
+
+msgid "Quick-add a frequency:"
+msgstr "Szybkie dodanie częstotliwości:"
+
+msgid "Add"
+msgstr "Dodaj"
+
+msgid "Adds a single channel to the list, e.g. 121.500 MHz (guard)\nalongside the scanned band."
+msgstr "Dodaje pojedynczy kanał do listy, np. 121.500 MHz (guard)\nobok skanowanego pasma."
+
+msgid "Automatic (first detected)"
+msgstr "Automatycznie (pierwsze wykryte)"
+
+msgid "Simulation (no hardware)"
+msgstr "Symulacja (brak sprzętu)"
+
+msgid "Custom range"
+msgstr "Własny zakres"
+
+msgid "STOP"
+msgstr "STOP"
+
+msgid "MUTED"
+msgstr "WYCISZONE"
+
+msgid "(+{count} more)"
+msgstr "(+{count} więcej)"
+
+msgid "Back to this window: {seconds:.2f}s ago"
+msgstr "Powrót do tego okna: {seconds:.2f}s temu"
+
+
+# --- gui/panels/frequency_manager.py ---
+
+msgid "Channel"
+msgstr "Kanał"
+
+msgid "Frequency:"
+msgstr "Częstotliwość:"
+
+msgid "Name:"
+msgstr "Nazwa:"
+
+msgid "Modulation:"
+msgstr "Modulacja:"
+
+msgid "Folder in the Memory List (for organizing/bulk enable-disable).\nPick an existing one or type a new name to create it right away."
+msgstr "Folder w Liście pamięci (do organizacji/grupowego włączania-wyłączania).\nWybierz istniejący albo wpisz nową nazwę, żeby go od razu utworzyć."
+
+msgid "(no folder)"
+msgstr "(brak folderu)"
+
+msgid "Folder:"
+msgstr "Folder:"
+
+msgid "Scan priority weight (0 = default, no special treatment). You can\nalso set/preview it more conveniently in the Scanner tab, in the\nexpandable Memory List next to each channel."
+msgstr "Waga priorytetu skanowania (0 = domyślna, bez wyróżnienia). Można ją\nteż ustawić/podejrzeć wygodniej w zakładce Skaner, w rozwijanej\nLiście pamięci obok każdego kanału."
+
+msgid "Weight:"
+msgstr "Waga:"
+
+msgid "Add to blacklist"
+msgstr "Dodaj do czarnej listy"
+
+msgid "Margin (+/-):"
+msgstr "Margines (+/-):"
+
+msgid "Description:"
+msgstr "Opis:"
+
+msgid "Search (frequency, name, modulation, folder)... [Ctrl+F]"
+msgstr "Szukaj (częstotliwość, nazwa, modulacja, folder)... [Ctrl+F]"
+
+msgid "Enabled"
+msgstr "Włączony"
+
+msgid "Add"
+msgstr "Dodaj"
+
+msgid "Edit"
+msgstr "Edytuj"
+
+msgid "Edit the selected channel, or rename the selected folder."
+msgstr "Edytuj zaznaczony kanał, albo zmień nazwę zaznaczonego folderu."
+
+msgid "Delete"
+msgstr "Usuń"
+
+msgid "New folder"
+msgstr "Nowy folder"
+
+msgid "Creates an empty folder, to which frequencies can be dragged\nright away from the list below (or picked when adding/editing a channel)."
+msgstr "Tworzy pusty folder, do którego można od razu przeciągać częstotliwości\nz listy poniżej (albo wybrać go przy dodawaniu/edycji kanału)."
+
+msgid "Load military (known frequencies)"
+msgstr "Wczytaj wojskowe (znane częstotliwości)"
+
+msgid "Appends verified, publicly known military frequencies: guard,\nair-to-air refueling (tankers), Warsaw OAT sectors, and\ntower/approach frequencies of QRA/Baltic Air Policing bases\n(Malbork, Łask, Mińsk Mazowiecki, Powidz, Świdwin, Mirosławiec).\nPoland-specific - doesn't overwrite the existing list."
+msgstr "Dopisuje sprawdzone, publicznie znane częstotliwości wojskowe: guard,\ntankowanie w powietrzu (cysterny), sektory OAT Warszawa oraz wieże/\npodejścia baz QRA/Baltic Air Policing (Malbork, Łask, Mińsk Mazowiecki,\nPowidz, Świdwin, Mirosławiec). Specyficzne dla Polski - nie nadpisuje istniejącej listy."
+
+msgid "Load fire brigade (known frequencies)"
+msgstr "Wczytaj straż pożarną (znane częstotliwości)"
+
+msgid "Appends the nationwide PSP rescue-firefighting channels (KRG 1-8)\nand OSP siren-alerting frequencies (148.6625-149.3375 MHz, NFM).\nMany volunteer fire brigades still operate on analog despite PSP's\nmigration to DMR. Poland-specific - doesn't overwrite the existing list."
+msgstr "Dopisuje ogólnopolskie kanały ratowniczo-gaśnicze PSP (KRG 1-8) oraz\nczęstotliwości alarmowania syren OSP (148.6625-149.3375 MHz, NFM).\nWiele OSP nadal pracuje analogowo mimo migracji PSP do DMR. Specyficzne dla Polski - nie nadpisuje istniejącej listy."
+
+msgid "Channels (Memory List)"
+msgstr "Kanały (Memory List)"
+
+msgid "Rename folder"
+msgstr "Zmień nazwę folderu"
+
+msgid "Folder name:"
+msgstr "Nazwa folderu:"
+
+msgid "Folder “{name}” already exists."
+msgstr "Folder „{name}” już istnieje."
+
+msgid "Margin (kHz)"
+msgstr "Margines (kHz)"
+
+msgid "Description"
+msgstr "Opis"
+
+msgid "Added"
+msgstr "Dodano"
+
+msgid "Add manually"
+msgstr "Dodaj ręcznie"
+
+msgid "Blacklist"
+msgstr "Czarna lista (Blacklist)"
+
+
+# --- gui/widgets.py ---
+
+msgid "pyqtgraph unavailable - spectrum preview disabled"
+msgstr "pyqtgraph niedostępny - podgląd widma wyłączony"
+
+msgid "Click/drag to seek. Bar height = loudness at that point in the recording."
+msgstr "Klik/przeciągnięcie - przewijanie. Wysokość słupków = głośność w tym miejscu nagrania."
+

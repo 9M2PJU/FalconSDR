@@ -1,4 +1,4 @@
-"""Panel Glowny Skanera: device/timing controls, level meter, start/stop/skip."""
+"""Main Scanner panel: device/timing controls, level meter, start/stop/skip."""
 from __future__ import annotations
 
 from pathlib import Path
@@ -13,6 +13,7 @@ from PySide6.QtWidgets import (
 )
 
 from ...config import AppConfig, VfoRangeConfig
+from ...i18n import tr
 from ...military_presets import BAND_PRESETS
 from ...models import Channel
 from ...sdr_backend import DEFAULT_GAIN_RANGE_DB, SoapyBackend
@@ -43,23 +44,23 @@ class _BandRow(QWidget):
         lay.setContentsMargins(2, 2, 2, 2)
 
         self.enabled_check = QCheckBox()
-        self.enabled_check.setToolTip("Wlacz/wylacz to pasmo bez usuwania go z listy.")
+        self.enabled_check.setToolTip(tr("Enable/disable this band without removing it from the list."))
         self.enabled_check.setChecked(entry.enabled)
         self.enabled_check.toggled.connect(self._on_enabled)
         lay.addWidget(self.enabled_check)
 
         self.label_edit = QLineEdit(entry.label)
-        self.label_edit.setPlaceholderText("Nazwa")
+        self.label_edit.setPlaceholderText(tr("Name"))
         self.label_edit.setMaximumWidth(150)
         apply_emoji_font(self.label_edit)
         self.label_edit.editingFinished.connect(self._on_label)
         lay.addWidget(self.label_edit)
 
-        self.single_check = QCheckBox("1 kanal")
-        self.single_check.setToolTip(
-            "Pojedyncza czestotliwosc zamiast zakresu, np. 121.500 MHz (guard)\n"
-            "obok skanowanego pasma."
-        )
+        self.single_check = QCheckBox(tr("1 channel"))
+        self.single_check.setToolTip(tr(
+            "A single frequency instead of a range, e.g. 121.500 MHz (guard)\n"
+            "alongside the scanned band."
+        ))
         self.single_check.setChecked(entry.start_hz == entry.stop_hz)
         self.single_check.toggled.connect(self._on_single_toggled)
         lay.addWidget(self.single_check)
@@ -86,7 +87,7 @@ class _BandRow(QWidget):
         self.step_spin = QDoubleSpinBox()
         self.step_spin.setRange(0.1, 1000.0)
         self.step_spin.setDecimals(3)
-        self.step_spin.setSuffix(" kHz krok")
+        self.step_spin.setSuffix(tr(" kHz step"))
         self.step_spin.setValue(entry.step_hz / 1e3)
         self.step_spin.valueChanged.connect(self._on_step)
         lay.addWidget(self.step_spin)
@@ -95,10 +96,10 @@ class _BandRow(QWidget):
         self.mod_combo.addItems(_MODULATIONS)
         if entry.modulation in _MODULATIONS:
             self.mod_combo.setCurrentText(entry.modulation)
-        self.mod_combo.setToolTip(
-            "Modulacja dla tego pasma: AM (lotnictwo), NFM (PMR/amatorskie/morskie),\n"
-            "WFM (radio FM)."
-        )
+        self.mod_combo.setToolTip(tr(
+            "Modulation for this band: AM (aviation), NFM (PMR/ham/marine),\n"
+            "WFM (FM broadcast radio)."
+        ))
         self.mod_combo.currentTextChanged.connect(self._on_modulation)
         lay.addWidget(self.mod_combo, 1)
 
@@ -108,43 +109,46 @@ class _BandRow(QWidget):
         self.weight_spin.setSingleStep(0.5)
         self.weight_spin.setPrefix("W: ")
         self.weight_spin.setValue(entry.weight)
-        self.weight_spin.setToolTip(
-            "Waga priorytetu skanowania (0 = domyslna, bez wyroznienia). Im wyzsza\n"
-            "wzgledem innych wazonych pasm/czestotliwosci, tym czesciej skaner do\n"
-            "niego wraca - np. 1 i 2 znaczy \"dwa razy czesciej\". Ustawienie wagi na\n"
-            "pojedynczej czestotliwosci z Listy pamieci (ponizej) obok wagi calego\n"
-            "pasma pozwala czesciej wracac do niej, nie rezygnujac z reszty pasma."
-        )
+        self.weight_spin.setToolTip(tr(
+            "Scan priority weight (0 = default, no special treatment). The "
+            "higher it is relative to other weighted bands/frequencies, the "
+            "more often the scanner returns to it - e.g. 1 and 2 means "
+            "\"twice as often\". Setting a weight on a single frequency from "
+            "the Memory List (below), alongside a weight on the whole band, "
+            "lets you return to it more often without giving up on the rest "
+            "of the band."
+        ))
         self.weight_spin.valueChanged.connect(self._on_weight)
         lay.addWidget(self.weight_spin)
 
-        # Zebatka renderowala sie od zawsze poprawnie jako kolorowy glif
-        # (NotoColorEmoji faktycznie pokrywa U+2699 - sprawdzone wprost w
-        # foncie), problem byl gdzie indziej: globalny QPushButton { padding:
-        # 6px 12px; } z theme.py DARK_STYLESHEET razem z setFixedWidth(28)
-        # zostawia realnie ~2px na sam glif (zmierzone: QPushButton("✕").
-        # sizeHint() pod tym stylem to QSize(37, 32), czyli o 9px szersze niz
-        # przycisk) - stad wyglada jak kropka, niezaleznie od tego, jaki znak
-        # tam wstawimy. Lokalny override paddingu (ponizej) daje glifowi
-        # miejsce w tej samej szerokosci 28px zamiast zmieniac znak.
+        # The gear glyph has always rendered correctly as a color glyph
+        # (NotoColorEmoji does cover U+2699 - confirmed directly in the
+        # font), the problem was elsewhere: a global QPushButton { padding:
+        # 6px 12px; } from theme.py's DARK_STYLESHEET combined with
+        # setFixedWidth(28) leaves ~2px for the glyph itself (measured:
+        # QPushButton("✕").sizeHint() under this style is QSize(37, 32),
+        # i.e. 9px wider than the button) - hence it looks like a dot,
+        # regardless of which character we put there. A local padding
+        # override (below) gives the glyph room within that same 28px width
+        # instead of changing the character.
         _ICON_BTN_STYLE = "QPushButton { padding: 2px; }"
 
         self.advanced_btn = QPushButton("⚙")
         self.advanced_btn.setFixedWidth(28)
         self.advanced_btn.setStyleSheet(_ICON_BTN_STYLE)
         self.advanced_btn.setCheckable(True)
-        self.advanced_btn.setToolTip(
-            "Zaawansowane - wlasny trigger level, tuning/linger time, gain i\n"
-            "redukcja szumow tylko dla tego pasma, niezalezne od reszty\n"
-            "skanowanych pasm/kanalow (patrz suwaki ponizej po kliknieciu)."
-        )
+        self.advanced_btn.setToolTip(tr(
+            "Advanced - a trigger level, tuning/linger time, gain and noise\n"
+            "reduction of its own for just this band, independent of the\n"
+            "rest of the scanned bands/channels (see the sliders below once clicked)."
+        ))
         self.advanced_btn.clicked.connect(lambda: on_advanced(self))
         lay.addWidget(self.advanced_btn)
 
         self.remove_btn = QPushButton("✕")
         self.remove_btn.setFixedWidth(28)
         self.remove_btn.setStyleSheet(_ICON_BTN_STYLE)
-        self.remove_btn.setToolTip("Usun to pasmo z listy.")
+        self.remove_btn.setToolTip(tr("Remove this band from the list."))
         self.remove_btn.clicked.connect(lambda: on_remove(self))
         lay.addWidget(self.remove_btn)
 
@@ -204,12 +208,12 @@ class _BandRow(QWidget):
 
 
 class _MemoryListRow(QWidget):
-    """"Lista pamieci" jako jeszcze jedna pozycja w edytorze pasm: wlasny
-    checkbox wlacz/wylacz (dziala jak pasmo - wylaczenie tu wylacza
-    skanowanie wszystkich kanalow, nawet tych oznaczonych jako wlaczone
-    pojedynczo w zakladce Kanaly), plus rozwijane drzewo aktualnie wlaczonych
-    kanalow (z folderami jako podfolderami), gdzie mozna ustawic wage kazdego
-    z nich - konkuruje ona z wagami pasm powyzej (patrz _BandRow.weight_spin).
+    """The Memory List as one more entry in the band editor: its own
+    enable/disable checkbox (behaves like a band - disabling it here disables
+    scanning of every channel, even ones individually marked enabled in the
+    Channels tab), plus an expandable tree of the currently enabled channels
+    (with folders as sub-folders), where each one's weight can be set - it
+    competes with the band weights above (see _BandRow.weight_spin).
     """
 
     def __init__(self, config: AppConfig, on_master_toggled: Callable[[], None],
@@ -227,11 +231,11 @@ class _MemoryListRow(QWidget):
 
         header = QHBoxLayout()
         self.enabled_check = QCheckBox()
-        self.enabled_check.setToolTip(
-            "Wlacz/wylacz cala Liste pamieci naraz - dziala jak checkbox pasma.\n"
-            "Wylaczenie tu wylacza skanowanie wszystkich kanalow, nawet tych\n"
-            "oznaczonych jako wlaczone pojedynczo w zakladce Kanaly."
-        )
+        self.enabled_check.setToolTip(tr(
+            "Enable/disable the whole Memory List at once - behaves like a "
+            "band's checkbox.\nDisabling it here disables scanning of every "
+            "channel, even ones\nindividually marked enabled in the Channels tab."
+        ))
         self.enabled_check.setChecked(config.memory_list_enabled)
         self.enabled_check.toggled.connect(self._on_enabled_toggled)
         header.addWidget(self.enabled_check)
@@ -239,11 +243,11 @@ class _MemoryListRow(QWidget):
         self.expand_btn = QToolButton()
         self.expand_btn.setCheckable(True)
         self.expand_btn.setArrowType(Qt.ArrowType.RightArrow)
-        self.expand_btn.setToolTip("Rozwin/zwin liste wlaczonych kanalow i ich wag.")
+        self.expand_btn.setToolTip(tr("Expand/collapse the list of enabled channels and their weights."))
         self.expand_btn.toggled.connect(self._on_expand_toggled)
         header.addWidget(self.expand_btn)
 
-        title = QLabel("Lista pamieci (kanaly)")
+        title = QLabel(tr("Memory List (channels)"))
         bold = title.font()
         bold.setBold(True)
         title.setFont(bold)
@@ -255,16 +259,16 @@ class _MemoryListRow(QWidget):
         root.addLayout(header)
 
         self.tree = QTreeWidget()
-        self.tree.setHeaderLabels(["Nazwa / Folder", "Czestotliwosc (MHz)", "Modulacja", "Waga"])
+        self.tree.setHeaderLabels([tr("Name / Folder"), tr("Frequency (MHz)"), tr("Modulation"), tr("Weight")])
         hdr = self.tree.header()
         hdr.setSectionResizeMode(0, QHeaderView.ResizeMode.Stretch)
         hdr.setSectionResizeMode(1, QHeaderView.ResizeMode.ResizeToContents)
         hdr.setSectionResizeMode(2, QHeaderView.ResizeMode.ResizeToContents)
         hdr.setSectionResizeMode(3, QHeaderView.ResizeMode.ResizeToContents)
-        # Rozwinieta lista ma miec sporo miejsca od razu - to ekran, na ktorym
-        # ustawia sie wagi, nie ma potrzeby sciskac go do malego okienka z
-        # wlasnym przewijaniem; ewentualne przewijanie calej zakladki w dol
-        # jest tu zupelnie w porzadku.
+        # The expanded list should have plenty of room right away - this is
+        # the screen where weights get set, no need to squeeze it into a
+        # small box with its own scrolling; scrolling the whole tab further
+        # down is perfectly fine here.
         self.tree.setMinimumHeight(420)
         self.tree.setVisible(False)
         root.addWidget(self.tree, 1)
@@ -277,7 +281,9 @@ class _MemoryListRow(QWidget):
 
     def _refresh(self) -> None:
         enabled = [c for c in self._channels if c.enabled]
-        self.count_label.setText(f"{len(enabled)} wlaczonych" if enabled else "brak wlaczonych kanalow")
+        self.count_label.setText(
+            tr("{count} enabled").format(count=len(enabled)) if enabled else tr("no channels enabled")
+        )
         self.tree.clear()
 
         by_folder: dict[str, list[Channel]] = {}
@@ -305,7 +311,7 @@ class _MemoryListRow(QWidget):
 
     def _add_channel_item(self, parent: QTreeWidgetItem | None, channel: Channel) -> None:
         item = QTreeWidgetItem([
-            channel.name or "(bez nazwy)", f"{channel.freq_hz / 1e6:.4f}", channel.modulation.value, "",
+            channel.name or tr("(unnamed)"), f"{channel.freq_hz / 1e6:.4f}", channel.modulation.value, "",
         ])
         item.setTextAlignment(1, Qt.AlignmentFlag.AlignRight | Qt.AlignmentFlag.AlignVCenter)
         if parent is None:
@@ -319,11 +325,11 @@ class _MemoryListRow(QWidget):
         spin.setSingleStep(0.5)
         spin.setPrefix("W: ")
         spin.setValue(channel.weight)
-        spin.setToolTip(
-            "Waga priorytetu tej czestotliwosci (0 = domyslna, bez wyroznienia).\n"
-            "Konkuruje z wagami calych pasm - patrz podpowiedz przy wadze pasma\n"
-            "powyzej."
-        )
+        spin.setToolTip(tr(
+            "Priority weight for this frequency (0 = default, no special\n"
+            "treatment). Competes with whole-band weights - see the weight\n"
+            "tooltip above."
+        ))
         spin.valueChanged.connect(lambda value, ch=channel: self._on_channel_weight(ch, value))
         self.tree.setItemWidget(item, 3, spin)
 
@@ -349,7 +355,7 @@ class ScannerPanel(QGroupBox):
     skip_blacklist_requested = Signal()
     mute_toggled = Signal(bool)
     settings_changed = Signal()
-    memory_list_requested = Signal()  # "Lista pamieci" shortcut - handled by MainWindow
+    memory_list_requested = Signal()  # "Memory list" shortcut - handled by MainWindow
     channel_weight_changed = Signal()  # a channel's weight was edited inline - MainWindow persists/rebuilds
     # Emitted (VfoRangeConfig or None) when a band's "advanced" edit mode
     # starts/stops - MainWindow forwards this straight to
@@ -358,7 +364,7 @@ class ScannerPanel(QGroupBox):
     solo_band_changed = Signal(object)
 
     def __init__(self, config: AppConfig, channels: list[Channel] | None = None, parent=None):
-        super().__init__("Skaner", parent)
+        super().__init__(tr("Scanner"), parent)
         self.config = config
         self.channels: list[Channel] = channels or []
         self._loading = True
@@ -380,8 +386,8 @@ class ScannerPanel(QGroupBox):
         return self._editing_band
 
     def set_channels(self, channels: list[Channel]) -> None:
-        """Odswieza podglad Listy pamieci (nazwy/wagi) po zmianie kanalow z
-        innej zakladki (Kanaly, albo "Zapisz czestotliwosc" w Odtwarzaczu)."""
+        """Refreshes the Memory List preview (names/weights) after channels
+        change from another tab (Channels, or "Save frequency" in Odtwarzacz)."""
         self.channels = channels
         self.memory_list_row.set_channels(self.channels)
 
@@ -391,28 +397,29 @@ class ScannerPanel(QGroupBox):
         top_row = QHBoxLayout()
         self.device_combo = QComboBox()
         self._populate_devices()
-        top_row.addWidget(QLabel("Urzadzenie SDR:"))
+        top_row.addWidget(QLabel(tr("SDR device:")))
         top_row.addWidget(self.device_combo, 1)
 
         self.bandwidth_spin = QDoubleSpinBox()
         self.bandwidth_spin.setRange(0.25, 3.2)
         self.bandwidth_spin.setDecimals(2)
-        self.bandwidth_spin.setSuffix(" MHz przechwytu")
-        self.bandwidth_spin.setToolTip(
-            "Szerokosc pasma jednorazowo przechwytywanego przez SDR (np. 2.4 MHz dla RTL-SDR).\n"
-            "Skaner grupuje caly zakres/liste kanalow w jak najmniej takich okien zamiast\n"
-            "przestrajac sie kanal-po-kanale."
-        )
+        self.bandwidth_spin.setSuffix(tr(" MHz capture"))
+        self.bandwidth_spin.setToolTip(tr(
+            "Bandwidth captured by the SDR in one shot (e.g. 2.4 MHz for RTL-SDR).\n"
+            "The scanner groups the whole range/channel list into as few such windows\n"
+            "as possible instead of retuning channel by channel."
+        ))
         self.bandwidth_spin.valueChanged.connect(self._push_settings)
         top_row.addWidget(self.bandwidth_spin)
         root.addLayout(top_row)
 
-        # Pasma (VFO) i Lista pamieci sa zawsze skanowane razem, w jednej
-        # sesji - ulozone jedno pod drugim (jak strona do przewijania), a nie
-        # w splitterze: kazda sekcja dostaje tyle miejsca, ile faktycznie
-        # potrzebuje, zamiast musiec byc sciskana zeby zrobic miejsce
-        # sasiadowi. Caly Nasluch zyje w jednym QScrollArea (patrz
-        # MainWindow), wiec przewijanie w dol po wiecej jest zawsze dostepne.
+        # Bands (VFO) and the Memory List are always scanned together, in one
+        # session - stacked one under the other (like a page to scroll)
+        # rather than in a splitter: each section gets exactly as much room
+        # as it actually needs, instead of having to be squeezed to make
+        # room for its neighbor. The whole Listen tab lives in one
+        # QScrollArea (see MainWindow), so scrolling down for more is always
+        # available.
         root.addWidget(self._build_vfo_form())
         root.addWidget(self._build_operate_area())
 
@@ -424,46 +431,46 @@ class ScannerPanel(QGroupBox):
         timing_form = QFormLayout()
         self.tuning_slider = SliderSpin(0, 5000, 60, decimals=0, suffix="ms")
         self.tuning_slider.valueChanged.connect(self._push_settings)
-        timing_form.addRow("Tuning Time:", self.tuning_slider)
+        timing_form.addRow(tr("Tuning Time:"), self.tuning_slider)
 
         self.linger_slider = SliderSpin(0, 30000, 1500, decimals=0, suffix="ms")
         self.linger_slider.valueChanged.connect(self._push_settings)
-        timing_form.addRow("Linger Time:", self.linger_slider)
+        timing_form.addRow(tr("Linger Time:"), self.linger_slider)
 
         self.trigger_slider = SliderSpin(-90, 0, -30, decimals=0, suffix="dBFS")
         self.trigger_slider.valueChanged.connect(self._on_trigger_changed)
-        timing_form.addRow("Trigger Level:", self.trigger_slider)
+        timing_form.addRow(tr("Trigger Level:"), self.trigger_slider)
 
-        timing_form.addRow("Squelch (wyciszanie szumu):", self._build_squelch_row())
-        timing_form.addRow("Gain:", self._build_gain_row())
-        timing_form.addRow("Redukcja szumow:", self._build_noise_reduction_row())
+        timing_form.addRow(tr("Squelch (mute noise):"), self._build_squelch_row())
+        timing_form.addRow(tr("Gain:"), self._build_gain_row())
+        timing_form.addRow(tr("Noise reduction:"), self._build_noise_reduction_row())
 
-        self.wfm_stereo_check = QCheckBox("Stereo (FM WFM)")
-        self.wfm_stereo_check.setToolTip(
-            "Dekoduje stereo (pilot 19 kHz) przy nasluchu na zywo pasma radia\n"
-            "FM (WFM) - nie ma znaczenia dla AM/NFM. Nagrania zawsze zostaja mono."
-        )
+        self.wfm_stereo_check = QCheckBox(tr("Stereo (FM WFM)"))
+        self.wfm_stereo_check.setToolTip(tr(
+            "Decodes stereo (19 kHz pilot) for live monitoring of FM broadcast\n"
+            "radio (WFM) - has no effect on AM/NFM. Recordings always stay mono."
+        ))
         self.wfm_stereo_check.toggled.connect(self._on_wfm_stereo_toggled)
         timing_form.addRow("", self.wfm_stereo_check)
 
         root.addLayout(timing_form)
 
-        # Tylko widoczne w trakcie edycji "zaawansowanych" ustawien jednego
-        # pasma (patrz _BandRow.advanced_btn / _start_editing_band) - suwaki
-        # powyzej w tym trybie kontroluja to jedno pasmo (na amber, patrz
-        # BAND_OVERRIDE_ACCENT) zamiast globalnych ustawien.
+        # Only visible while editing a band's own "advanced" settings (see
+        # _BandRow.advanced_btn / _start_editing_band) - the sliders above
+        # then control that one band (in amber, see BAND_OVERRIDE_ACCENT)
+        # instead of the global settings.
         band_edit_row = QHBoxLayout()
-        self.save_band_btn = QPushButton("Zapisz")
-        self.save_band_btn.setToolTip(
-            "Zapisuje biezace ustawienia (trigger/timing/gain/redukcja szumow)\n"
-            "jako wlasne dla edytowanego pasma i wraca do zwyklej edycji."
-        )
+        self.save_band_btn = QPushButton(tr("Save"))
+        self.save_band_btn.setToolTip(tr(
+            "Saves the current settings (trigger/timing/gain/noise reduction)\n"
+            "as this band's own and returns to normal editing."
+        ))
         self.save_band_btn.clicked.connect(self._on_save_band_clicked)
-        self.reset_band_btn = QPushButton("Przywróć domyślne")
-        self.reset_band_btn.setToolTip(
-            "Usuwa wszystkie zaawansowane ustawienia tego pasma (wraca do\n"
-            "globalnych) i od razu zapisuje."
-        )
+        self.reset_band_btn = QPushButton(tr("Reset to defaults"))
+        self.reset_band_btn.setToolTip(tr(
+            "Removes every advanced setting from this band (reverts to the\n"
+            "global ones) and saves right away."
+        ))
         self.reset_band_btn.clicked.connect(self._on_reset_band_clicked)
         band_edit_row.addWidget(self.save_band_btn)
         band_edit_row.addWidget(self.reset_band_btn)
@@ -503,12 +510,11 @@ class ScannerPanel(QGroupBox):
         self.freq_label = QLabel("--- MHz")
         self.freq_label.setStyleSheet("font-size: 14px; color: #9aa0a6;")
         status_col.addWidget(self.freq_label)
-        # Jednoczesnie aktywne kanaly poza tym pierwszym (patrz _Slot w
-        # scanner_engine.py - jedno okno przechwytu moze obslugiwac dowolnie
-        # wiele transmisji naraz, bez sztywnego limitu) - pokazujemy do 2
-        # kolejnych tutaj, a przy wiecej niz 3 lacznie ostatni wiersz dostaje
-        # dopisek "(+N wiecej)" zamiast dorzucania kolejnych wierszy w
-        # nieskonczonosc. Oba ukryte dopoki nie ma czego pokazac.
+        # Simultaneously active channels besides this first one (see _Slot in
+        # scanner_engine.py - one capture window can service any number of
+        # transmissions at once, no hard limit) - we show up to 2 more here,
+        # and past 3 total the last row gets a "(+N more)" suffix instead of
+        # piling on more rows forever. Both hidden until there's something to show.
         self.name_label2 = QLabel("")
         self.name_label2.setStyleSheet("font-size: 15px; font-weight: bold; color: #c9c9cf;")
         self.name_label2.setWordWrap(True)
@@ -531,39 +537,41 @@ class ScannerPanel(QGroupBox):
         root.addLayout(status_row)
 
         btn_row = QHBoxLayout()
-        self.start_stop_btn = QPushButton("START")
+        self.start_stop_btn = QPushButton(tr("START"))
         self.start_stop_btn.setCheckable(True)
         self.start_stop_btn.setMinimumHeight(40)
         self.start_stop_btn.clicked.connect(self._on_start_stop)
-        self.skip_btn = QPushButton("SKIP")
+        self.skip_btn = QPushButton(tr("SKIP"))
         self.skip_btn.setMinimumHeight(40)
         self.skip_btn.setEnabled(False)
-        self.skip_btn.setToolTip(
-            "Przechodzi natychmiast do kolejnej czestotliwosci/kanalu, bez\n"
-            "czekania na koniec transmisji/linger. NIE dodaje do czarnej listy -\n"
-            "ta czestotliwosc zostanie odwiedzona ponownie w kolejnym przebiegu\n"
-            "skanowania. Uzyj tego, gdy cos ciekawego dzieje sie na biezacym\n"
-            "kanale i chcesz go zostawic w spokoju na przyszlosc, ale isc dalej."
-        )
+        self.skip_btn.setToolTip(tr(
+            "Moves on to the next frequency/channel immediately, without\n"
+            "waiting for the transmission/linger to end. Does NOT add it to\n"
+            "the blacklist - this frequency will be visited again on the\n"
+            "next scan pass. Use this when something interesting is\n"
+            "happening on the current channel and you want to leave it alone\n"
+            "for later, but move on."
+        ))
         self.skip_btn.clicked.connect(self.skip_requested.emit)
-        self.skip_blacklist_btn = QPushButton("SKIP + BLACKLIST")
+        self.skip_blacklist_btn = QPushButton(tr("SKIP + BLACKLIST"))
         self.skip_blacklist_btn.setMinimumHeight(40)
         self.skip_blacklist_btn.setEnabled(False)
-        self.skip_blacklist_btn.setToolTip(
-            "Jak SKIP, ale dodatkowo trwale blokuje biezaca czestotliwosc\n"
-            "(dodaje do czarnej listy) - skaner juz jej nie odwiedzi. Dziala od\n"
-            "razu, bez potwierdzenia; cofniesz to kasujac wpis w zakladce\n"
-            "Czarna lista."
-        )
+        self.skip_blacklist_btn.setToolTip(tr(
+            "Like SKIP, but also permanently blocks the current frequency\n"
+            "(adds it to the blacklist) - the scanner won't visit it again.\n"
+            "Takes effect immediately, with no confirmation; undo it by\n"
+            "deleting the entry in the Blacklist tab."
+        ))
         self.skip_blacklist_btn.clicked.connect(self.skip_blacklist_requested.emit)
-        self.mute_btn = QPushButton("WYCISZ")
+        self.mute_btn = QPushButton(tr("MUTE"))
         self.mute_btn.setCheckable(True)
         self.mute_btn.setMinimumHeight(40)
-        self.mute_btn.setToolTip(
-            "Wycisza tylko dzwiek na zywo w sluchawkach/glosnikach - nagrywanie na\n"
-            "dysk (jesli wlaczone) dziala dalej w tle, wiec mozna nadrobic zaleglosci\n"
-            "odsluchujac nagrania z zakladki Nagrania podczas gdy skaner pracuje po cichu."
-        )
+        self.mute_btn.setToolTip(tr(
+            "Mutes only the live audio in your headphones/speakers -\n"
+            "recording to disk (if enabled) keeps running in the background,\n"
+            "so you can catch up later by listening to recordings from the\n"
+            "Recordings tab while the scanner keeps working quietly."
+        ))
         self.mute_btn.toggled.connect(self._on_mute_toggled)
         btn_row.addWidget(self.start_stop_btn, 2)
         btn_row.addWidget(self.skip_btn, 1)
@@ -576,7 +584,7 @@ class ScannerPanel(QGroupBox):
         w = QWidget()
         lay = QHBoxLayout(w)
         lay.setContentsMargins(0, 0, 0, 0)
-        self.agc_check = QCheckBox("Auto (AGC)")
+        self.agc_check = QCheckBox(tr("Auto (AGC)"))
         self.agc_check.toggled.connect(self._on_agc_toggled)
         lo, hi = DEFAULT_GAIN_RANGE_DB
         self.gain_slider = SliderSpin(lo, hi, 30.0, decimals=1, suffix="dB")
@@ -589,24 +597,25 @@ class ScannerPanel(QGroupBox):
         w = QWidget()
         lay = QHBoxLayout(w)
         lay.setContentsMargins(0, 0, 0, 0)
-        self.squelch_check = QCheckBox("Wlacz")
-        self.squelch_check.setToolTip(
-            "Wycisza dzwiek na zywo ORAZ pomija zapis do nagrania, gdy poziom\n"
-            "spadnie o co najmniej ten offset PONIZEJ Trigger Level - wylacznie\n"
-            "w LINGER (po zakonczeniu transmisji, przed zamknieciem kanalu).\n"
-            "Naprawia typowe \"wybuchajace uszy\" po puszczeniu PTT przy NFM: gdy\n"
-            "nosna znika, demodulator FM dostaje sam szum odbiornika, a szum bez\n"
-            "nosnej brzmi bardzo glosno mimo niskiej mocy RF (efekt progowy FM) -\n"
-            "to nie jest usterka. Dzieki temu nagranie konczy sie tam, gdzie\n"
-            "faktycznie skonczyl sie sygnal, bez glosnego \"ogona\" szumu.\n"
-            "Offset zostaje ZAWSZE ponizej triggera (nigdy nad nim), wiec nigdy\n"
-            "nie wyciszy/nie ucina dzwieku, gdy skaner uznaje kanal za aktywny\n"
-            "(SIGNAL_DETECTED). Zostaw margines (np. -6 dB), zeby to co jeszcze\n"
-            "slychac/nagrywa sie w LINGER ponizej triggera (dzieki niemu wlasnie)\n"
-            "nie zostalo od razu ucinane."
-        )
+        self.squelch_check = QCheckBox(tr("Enable"))
+        self.squelch_check.setToolTip(tr(
+            "Mutes the live audio AND skips writing to the recording, once the\n"
+            "level drops at least this offset BELOW Trigger Level - only\n"
+            "during LINGER (after the transmission ends, before the channel\n"
+            "closes). Fixes the typical \"ear-blasting\" burst after releasing\n"
+            "PTT on NFM: once the carrier disappears, the FM demodulator gets\n"
+            "pure receiver noise, and noise without a carrier sounds very\n"
+            "loud despite low RF power (the FM threshold effect) - this isn't\n"
+            "a bug. Thanks to this, a recording ends where the signal actually\n"
+            "ended, without a loud noise \"tail\". The offset always stays\n"
+            "below the trigger (never above it), so it can never mute/cut\n"
+            "audio while the scanner considers the channel active\n"
+            "(SIGNAL_DETECTED). Leave a margin (e.g. -6 dB) so whatever's\n"
+            "still audible/recorded during LINGER below the trigger (thanks\n"
+            "to it) isn't cut off immediately."
+        ))
         self.squelch_check.toggled.connect(self._on_squelch_toggled)
-        self.squelch_offset_slider = SliderSpin(-40, 0, -6, decimals=0, suffix="dB od triggera")
+        self.squelch_offset_slider = SliderSpin(-40, 0, -6, decimals=0, suffix=tr("dB from trigger"))
         self.squelch_offset_slider.valueChanged.connect(self._on_squelch_offset_changed)
         lay.addWidget(self.squelch_check)
         lay.addWidget(self.squelch_offset_slider, 1)
@@ -616,13 +625,14 @@ class ScannerPanel(QGroupBox):
         w = QWidget()
         lay = QHBoxLayout(w)
         lay.setContentsMargins(0, 0, 0, 0)
-        self.nr_check = QCheckBox("Wlacz (inteligentna, adaptacyjna)")
-        self.nr_check.setToolTip(
-            "Sledzi na biezaco poziom szumu tla w widmie dzwieku i wycisza pasma\n"
-            "bliskie temu poziomowi (spectral gating), zostawiajac pasma z mowa\n"
-            "wzglednie nietkniete. Pomaga przy slabej antenie/niskim SNR, ale przy\n"
-            "bardzo silnym szumie kosztem lekko \"cyfrowego\" brzmienia audio."
-        )
+        self.nr_check = QCheckBox(tr("Enable (adaptive, intelligent)"))
+        self.nr_check.setToolTip(tr(
+            "Continuously tracks the background noise level in the audio\n"
+            "spectrum and attenuates bands close to that level (spectral\n"
+            "gating), leaving speech bands relatively untouched. Helps with a\n"
+            "weak antenna/low SNR, but at very high noise levels costs a\n"
+            "slightly \"digital\" sound."
+        ))
         self.nr_check.toggled.connect(self._on_nr_toggled)
         self.nr_strength_slider = SliderSpin(0, 100, 60, decimals=0, suffix="%")
         self.nr_strength_slider.valueChanged.connect(self._on_nr_strength_changed)
@@ -635,13 +645,13 @@ class ScannerPanel(QGroupBox):
         root = QVBoxLayout(w)
         root.setContentsMargins(0, 0, 0, 0)
 
-        hint = QLabel(
-            "Źródła do skanowania - dodawaj presety, wlasne zakresy (z wlasnym "
-            "start/stop/step) lub pojedyncze czestotliwosci, np. 121.500 MHz "
-            "obok skanowanego pasma. Wszystkie wlaczone pozycje ponizej sa "
-            "skanowane razem, w jednej sesji, wraz z kazdym wlaczonym kanalem "
-            "z Listy pamieci ponizej - nie trzeba miedzy nimi przelaczac."
-        )
+        hint = QLabel(tr(
+            "Sources to scan - add presets, custom ranges (with your own "
+            "start/stop/step) or single frequencies, e.g. 121.500 MHz "
+            "alongside the scanned band. Every entry enabled below is "
+            "scanned together, in one session, along with every enabled "
+            "channel from the Memory List below - no need to switch between them."
+        ))
         hint.setWordWrap(True)
         hint.setStyleSheet("color: #9aa0a6;")
         root.addWidget(hint)
@@ -657,10 +667,10 @@ class ScannerPanel(QGroupBox):
         scroll.setMinimumHeight(190)
         root.addWidget(scroll, 1)
 
-        # Lista pamieci jest tu, tuz pod wybranymi pasmami/kanalami i nad
-        # "Dodaj preset" - jest tak samo "zrodlem" do skanowania jak kazde
-        # pasmo powyzej, wiec logicznie nalezy do tej samej listy, nie na
-        # koncu za formularzami dodawania.
+        # The Memory List sits here, right below the selected bands/channels
+        # and above "Add preset" - it's just as much a scan "source" as any
+        # band above, so it logically belongs in the same list, not at the
+        # end past the add-forms.
         self.memory_list_row = _MemoryListRow(
             self.config,
             on_master_toggled=self.settings_changed.emit,
@@ -675,36 +685,36 @@ class ScannerPanel(QGroupBox):
             self.preset_combo.setItemData(
                 self.preset_combo.count() - 1, preset.tooltip, Qt.ItemDataRole.ToolTipRole
             )
-        add_preset_btn = QPushButton("Dodaj preset")
+        add_preset_btn = QPushButton(tr("Add preset"))
         add_preset_btn.clicked.connect(self._on_add_preset)
         preset_row.addWidget(self.preset_combo, 1)
         preset_row.addWidget(add_preset_btn)
-        add_custom_btn = QPushButton("Dodaj wlasny zakres")
+        add_custom_btn = QPushButton(tr("Add custom range"))
         add_custom_btn.clicked.connect(self._on_add_custom_range)
         preset_row.addWidget(add_custom_btn)
-        memory_list_btn = QPushButton("Lista pamieci (kanaly)")
-        memory_list_btn.setToolTip(
-            "Przelacz na zakladke Kanaly, gdzie mozna zarzadzac pojedynczymi\n"
-            "czestotliwosciami/folderami. Sa one zawsze skanowane razem z\n"
-            "pasmami powyzej, w jednej sesji."
-        )
+        memory_list_btn = QPushButton(tr("Memory list (channels)"))
+        memory_list_btn.setToolTip(tr(
+            "Switch to the Channels tab, where individual\n"
+            "frequencies/folders can be managed. They're always scanned\n"
+            "together with the bands above, in one session."
+        ))
         memory_list_btn.clicked.connect(self.memory_list_requested.emit)
         preset_row.addWidget(memory_list_btn)
         root.addLayout(preset_row)
 
         freq_row = QHBoxLayout()
-        freq_row.addWidget(QLabel("Szybkie dodanie czestotliwosci:"))
+        freq_row.addWidget(QLabel(tr("Quick-add a frequency:")))
         self.quick_freq_spin = QDoubleSpinBox()
         self.quick_freq_spin.setRange(0.01, 6000.0)
         self.quick_freq_spin.setDecimals(4)
         self.quick_freq_spin.setSuffix(" MHz")
         self.quick_freq_spin.setValue(121.500)
         freq_row.addWidget(self.quick_freq_spin)
-        add_freq_btn = QPushButton("Dodaj")
-        add_freq_btn.setToolTip(
-            "Dodaje pojedynczy kanal do listy, np. 121.500 MHz (guard)\n"
-            "obok skanowanego pasma."
-        )
+        add_freq_btn = QPushButton(tr("Add"))
+        add_freq_btn.setToolTip(tr(
+            "Adds a single channel to the list, e.g. 121.500 MHz (guard)\n"
+            "alongside the scanned band."
+        ))
         add_freq_btn.clicked.connect(self._on_add_frequency)
         freq_row.addWidget(add_freq_btn)
         freq_row.addStretch(1)
@@ -713,12 +723,12 @@ class ScannerPanel(QGroupBox):
         return w
 
     def _populate_devices(self) -> None:
-        self.device_combo.addItem("Automatycznie (pierwsze wykryte)", ("auto", ""))
+        self.device_combo.addItem(tr("Automatic (first detected)"), ("auto", ""))
         for dev in SoapyBackend.enumerate_devices():
             label = dev.get("label") or dev.get("driver", "device")
             args = ",".join(f"{k}={v}" for k, v in dev.items())
             self.device_combo.addItem(label, (dev.get("driver", "auto"), args))
-        self.device_combo.addItem("Symulacja (brak sprzetu)", ("simulated", ""))
+        self.device_combo.addItem(tr("Simulation (no hardware)"), ("simulated", ""))
 
     def _load_from_config(self) -> None:
         self.bandwidth_spin.setValue(self.config.device.sample_rate_hz / 1e6)
@@ -777,7 +787,7 @@ class ScannerPanel(QGroupBox):
             # VfoRangeConfig's dataclass equality compares *values*, so two
             # bands with identical settings would otherwise look
             # interchangeable) to the fresh row for that same band, or - if
-            # it's simply gone (e.g. "Usun") - stop editing cleanly.
+            # it's simply gone (e.g. "Remove") - stop editing cleanly.
             self._editing_row = next((r for r in self._band_rows if r.entry is self._editing_band), None)
             if self._editing_row is None:
                 self._stop_editing_band()
@@ -906,7 +916,7 @@ class ScannerPanel(QGroupBox):
 
     def _on_add_custom_range(self) -> None:
         self.config.bands.append(VfoRangeConfig(
-            start_hz=118_000_000, stop_hz=118_500_000, step_hz=25_000, label="Wlasny zakres",
+            start_hz=118_000_000, stop_hz=118_500_000, step_hz=25_000, label=tr("Custom range"),
         ))
         self._rebuild_band_rows()
         self.settings_changed.emit()
@@ -1008,7 +1018,7 @@ class ScannerPanel(QGroupBox):
     # -- called by MainWindow ------------------------------------------------
     def set_running(self, running: bool) -> None:
         self.start_stop_btn.setChecked(running)
-        self.start_stop_btn.setText("STOP" if running else "START")
+        self.start_stop_btn.setText(tr("STOP") if running else tr("START"))
         self.skip_btn.setEnabled(running)
         self.skip_blacklist_btn.setEnabled(running)
         self.device_combo.setEnabled(not running)
@@ -1017,7 +1027,7 @@ class ScannerPanel(QGroupBox):
             self.cycle_time_label.setText("")
 
     def _on_mute_toggled(self, checked: bool) -> None:
-        self.mute_btn.setText("WYCISZONE" if checked else "WYCISZ")
+        self.mute_btn.setText(tr("MUTED") if checked else tr("MUTE"))
         self.mute_toggled.emit(checked)
 
     def _on_start_stop(self, checked: bool) -> None:
@@ -1031,16 +1041,15 @@ class ScannerPanel(QGroupBox):
         self.level_meter.set_level(db)
 
     def update_freq(self, entries: list) -> None:
-        """Aktualizuje wyswietlana czestotliwosc/czestotliwosci. ``entries``
-        to lista (freq_hz, name) - jeden wpis na kazdy aktualnie aktywny
-        kanal (nie ma sztywnego limitu ile naraz - patrz _Slot w
-        scanner_engine.py); pierwszy wpis to zawsze ten aktualnie slyszalny
-        na zywo. Wyswietlacz pokazuje najwyzej 3 wiersze - przy wiecej niz 3
-        aktywnych kanalach ostatni wiersz dostaje dopisek "(+N wiecej)"
-        zamiast dorzucania kolejnych wierszy w nieskonczonosc. Jesli nazwa
-        jest znana (np. z Listy pamieci), wyswietlamy ja w duzej,
-        wytluszczonej czcionce - czytelniej niz samej liczby - a
-        czestotliwosc mniejszym drugorzednym tekstem obok/pod nia."""
+        """Updates the displayed frequency/frequencies. ``entries`` is a
+        list of (freq_hz, name) - one entry per currently active channel (no
+        hard limit on how many at once - see _Slot in scanner_engine.py); the
+        first entry is always whichever one is currently audible live. The
+        display shows at most 3 rows - past 3 active channels the last row
+        gets a "(+N more)" suffix instead of piling on more rows forever. If
+        the name is known (e.g. from the Memory List), we show it in a
+        large, bold font - more readable than just the number - with the
+        frequency in smaller, secondary text next to/below it."""
         if not entries:
             self.name_label.setText("--- MHz")
             self.freq_label.setVisible(False)
@@ -1070,7 +1079,10 @@ class ScannerPanel(QGroupBox):
                 continue
             freq_hz_r, name_r = secondary_rows[idx]
             freq_text_r = f"{freq_hz_r / 1e6:.4f} MHz"
-            suffix = f"  (+{overflow} wiecej)" if idx == len(secondary_rows) - 1 and overflow > 0 else ""
+            suffix = (
+                "  " + tr("(+{count} more)").format(count=overflow)
+                if idx == len(secondary_rows) - 1 and overflow > 0 else ""
+            )
             name_label.setText(f"+ {(name_r or freq_text_r)}{suffix}")
             freq_label.setText(freq_text_r)
             name_label.setVisible(True)
@@ -1089,7 +1101,7 @@ class ScannerPanel(QGroupBox):
     def update_cycle_time(self, seconds: float) -> None:
         """Real, measured interval since this same capture window was last
         tuned to - see ScannerSignals.cycle_time_changed."""
-        self.cycle_time_label.setText(f"Powrót do tego okna: {seconds:.2f}s temu")
+        self.cycle_time_label.setText(tr("Back to this window: {seconds:.2f}s ago").format(seconds=seconds))
 
     def update_gain_range(self, lo: float, hi: float) -> None:
         self.gain_slider.set_range(lo, hi)

@@ -1,5 +1,5 @@
-"""Menedzer Czestotliwosci: Memory List tab (drzewo z folderami, checkboxy,
-przeciaganie) + Blacklist Manager tab (spec 4.4/6)."""
+"""Frequency Manager: Memory List tab (tree with folders, checkboxes,
+drag-and-drop) + Blacklist Manager tab (spec 4.4/6)."""
 from __future__ import annotations
 
 import datetime as dt
@@ -14,6 +14,7 @@ from PySide6.QtWidgets import (
     QTreeWidgetItem, QVBoxLayout, QWidget,
 )
 
+from ...i18n import tr
 from ...military_presets import FIRE_CHANNELS, MILITARY_CHANNELS
 from ...models import BlacklistEntry, Channel, Modulation
 from ..widgets import apply_emoji_font
@@ -30,7 +31,7 @@ _FOLDER_BG = QColor(70, 110, 170, 130)
 
 class _DeletableTable(QTableWidget):
     """QTableWidget that also triggers deletion via the Delete key, not just
-    the "Usun" button - deleting a channel/blacklist entry is not a
+    the "Delete" button - deleting a channel/blacklist entry isn't a
     destructive-enough action here to need a confirmation dialog (unlike
     recordings), so this just needs to be fast.
     """
@@ -65,45 +66,45 @@ class _ChannelTree(QTreeWidget):
 class _ChannelDialog(QDialog):
     def __init__(self, folders: list[str], channel: Channel | None = None, parent=None):
         super().__init__(parent)
-        self.setWindowTitle("Kanal")
+        self.setWindowTitle(tr("Channel"))
         form = QFormLayout(self)
 
         self.freq_spin = QDoubleSpinBox()
         self.freq_spin.setRange(0.01, 6000.0)
         self.freq_spin.setDecimals(4)
         self.freq_spin.setSuffix(" MHz")
-        form.addRow("Czestotliwosc:", self.freq_spin)
+        form.addRow(tr("Frequency:"), self.freq_spin)
 
         self.name_edit = QLineEdit()
-        apply_emoji_font(self.name_edit)  # np. "🚒 KRG 1" - patrz apply_emoji_font()
-        form.addRow("Nazwa:", self.name_edit)
+        apply_emoji_font(self.name_edit)  # e.g. "🚒 KRG 1" - see apply_emoji_font()
+        form.addRow(tr("Name:"), self.name_edit)
 
         self.mod_combo = QComboBox()
         for m in Modulation:
             self.mod_combo.addItem(m.value, m)
-        form.addRow("Modulacja:", self.mod_combo)
+        form.addRow(tr("Modulation:"), self.mod_combo)
 
         self.folder_combo = QComboBox()
         self.folder_combo.setEditable(True)
-        self.folder_combo.setToolTip(
-            "Folder w Liscie pamieci (do organizacji/grupowego wlaczania-wylaczania).\n"
-            "Wybierz istniejacy albo wpisz nowa nazwe, zeby go od razu utworzyc."
-        )
-        self.folder_combo.addItem("(brak folderu)", "")
+        self.folder_combo.setToolTip(tr(
+            "Folder in the Memory List (for organizing/bulk enable-disable).\n"
+            "Pick an existing one or type a new name to create it right away."
+        ))
+        self.folder_combo.addItem(tr("(no folder)"), "")
         for f in folders:
             self.folder_combo.addItem(f, f)
-        form.addRow("Folder:", self.folder_combo)
+        form.addRow(tr("Folder:"), self.folder_combo)
 
         self.weight_spin = QDoubleSpinBox()
         self.weight_spin.setRange(0.0, 20.0)
         self.weight_spin.setDecimals(2)
         self.weight_spin.setSingleStep(0.5)
-        self.weight_spin.setToolTip(
-            "Waga priorytetu skanowania (0 = domyslna, bez wyroznienia). Mozna ja\n"
-            "tez ustawic/podejrzec wygodniej w zakladce Skaner, w rozwijanej\n"
-            "Liscie pamieci obok kazdego kanalu."
-        )
-        form.addRow("Waga:", self.weight_spin)
+        self.weight_spin.setToolTip(tr(
+            "Scan priority weight (0 = default, no special treatment). You "
+            "can\nalso set/preview it more conveniently in the Scanner tab, "
+            "in the\nexpandable Memory List next to each channel."
+        ))
+        form.addRow(tr("Weight:"), self.weight_spin)
 
         self._existing_enabled = True
         if channel is not None:
@@ -126,7 +127,7 @@ class _ChannelDialog(QDialog):
 
     def result_channel(self) -> Channel:
         folder = self.folder_combo.currentText().strip()
-        if folder == "(brak folderu)":
+        if folder == tr("(no folder)"):
             folder = ""
         return Channel(
             freq_hz=int(round(self.freq_spin.value() * 1e6)),
@@ -141,25 +142,25 @@ class _ChannelDialog(QDialog):
 class _BlacklistDialog(QDialog):
     def __init__(self, default_margin_hz: int, parent=None):
         super().__init__(parent)
-        self.setWindowTitle("Dodaj do czarnej listy")
+        self.setWindowTitle(tr("Add to blacklist"))
         form = QFormLayout(self)
 
         self.freq_spin = QDoubleSpinBox()
         self.freq_spin.setRange(0.01, 6000.0)
         self.freq_spin.setDecimals(4)
         self.freq_spin.setSuffix(" MHz")
-        form.addRow("Czestotliwosc:", self.freq_spin)
+        form.addRow(tr("Frequency:"), self.freq_spin)
 
         self.margin_spin = QDoubleSpinBox()
         self.margin_spin.setRange(0.1, 5000.0)
         self.margin_spin.setDecimals(2)
         self.margin_spin.setSuffix(" kHz")
         self.margin_spin.setValue(default_margin_hz / 1000)
-        form.addRow("Margines (+/-):", self.margin_spin)
+        form.addRow(tr("Margin (+/-):"), self.margin_spin)
 
         self.label_edit = QLineEdit()
         apply_emoji_font(self.label_edit)
-        form.addRow("Opis:", self.label_edit)
+        form.addRow(tr("Description:"), self.label_edit)
 
         buttons = QDialogButtonBox(QDialogButtonBox.StandardButton.Ok | QDialogButtonBox.StandardButton.Cancel)
         buttons.accepted.connect(self.accept)
@@ -198,16 +199,16 @@ class FrequencyManager(QTabWidget):
         self.reveal_channels()
 
     def reveal_channels(self) -> None:
-        """Przewija do zakladki Kanaly i ustawia fokus na wyszukiwarce - wolane
-        z zakladki Skaner (przycisk "Lista pamieci") oraz ze skrotu Ctrl+F."""
+        """Switches to the Channels tab and focuses the search box - called
+        from the Scanner tab ("Memory list" button) and the Ctrl+F shortcut."""
         self.setCurrentIndex(0)
         self.channel_search.setFocus()
         self.channel_search.selectAll()
 
     def _sync_folders_from_channels(self) -> None:
-        """Dopisuje do self.folders kazdy folder, na ktory wskazuje jakis
-        kanal, ale ktorego jeszcze nie znamy (np. wczytany ze starszego pliku
-        konfiguracji) - tak zeby zawsze byl widoczny jako wezel w drzewie."""
+        """Appends to self.folders every folder some channel points to but
+        that we don't know about yet (e.g. loaded from an older config file)
+        - so it's always visible as a node in the tree."""
         known = set(self.folders)
         for c in self.channels:
             if c.folder and c.folder not in known:
@@ -220,13 +221,15 @@ class FrequencyManager(QTabWidget):
         lay = QVBoxLayout(w)
 
         self.channel_search = QLineEdit()
-        self.channel_search.setPlaceholderText("Szukaj (czestotliwosc, nazwa, modulacja, folder)... [Ctrl+F]")
+        self.channel_search.setPlaceholderText(tr("Search (frequency, name, modulation, folder)... [Ctrl+F]"))
         self.channel_search.textChanged.connect(self._apply_channel_filter)
         lay.addWidget(self.channel_search)
 
         self.channel_tree = _ChannelTree()
         self.channel_tree.setColumnCount(5)
-        self.channel_tree.setHeaderLabels(["Nazwa / Folder", "Czestotliwosc (MHz)", "Modulacja", "Waga", "Wlaczony"])
+        self.channel_tree.setHeaderLabels([
+            tr("Name / Folder"), tr("Frequency (MHz)"), tr("Modulation"), tr("Weight"), tr("Enabled"),
+        ])
         header = self.channel_tree.header()
         header.setSectionResizeMode(COL_NAME, QHeaderView.ResizeMode.Stretch)
         header.setSectionResizeMode(COL_FREQ, QHeaderView.ResizeMode.ResizeToContents)
@@ -246,30 +249,31 @@ class FrequencyManager(QTabWidget):
         lay.addWidget(self.channel_tree)
 
         btn_row = QHBoxLayout()
-        add_btn = QPushButton("Dodaj")
-        edit_btn = QPushButton("Edytuj")
-        edit_btn.setToolTip("Edytuj zaznaczony kanal, albo zmien nazwe zaznaczonego folderu.")
-        del_btn = QPushButton("Usun")
-        new_folder_btn = QPushButton("Nowy folder")
-        new_folder_btn.setToolTip(
-            "Tworzy pusty folder, do ktorego mozna od razu przeciagac czestotliwosci\n"
-            "z listy ponizej (albo wybrac go przy dodawaniu/edycji kanalu)."
-        )
-        military_btn = QPushButton("Wczytaj wojskowe (znane czestotliwosci)")
-        military_btn.setToolTip(
-            "Dopisuje sprawdzone, publicznie znane czestotliwosci wojskowe: guard,\n"
-            "tankowanie w powietrzu (cysterny), sektory OAT Warszawa oraz wieze/\n"
-            "podejscia baz QRA/Baltic Air Policing (Malbork, Lask, Minsk Mazowiecki,\n"
-            "Powidz, Swidwin, Miroslawiec). Nie nadpisuje istniejacej listy."
-        )
+        add_btn = QPushButton(tr("Add"))
+        edit_btn = QPushButton(tr("Edit"))
+        edit_btn.setToolTip(tr("Edit the selected channel, or rename the selected folder."))
+        del_btn = QPushButton(tr("Delete"))
+        new_folder_btn = QPushButton(tr("New folder"))
+        new_folder_btn.setToolTip(tr(
+            "Creates an empty folder, to which frequencies can be dragged\n"
+            "right away from the list below (or picked when adding/editing a channel)."
+        ))
+        military_btn = QPushButton(tr("Load military (known frequencies)"))
+        military_btn.setToolTip(tr(
+            "Appends verified, publicly known military frequencies: guard,\n"
+            "air-to-air refueling (tankers), Warsaw OAT sectors, and\n"
+            "tower/approach frequencies of QRA/Baltic Air Policing bases\n"
+            "(Malbork, Łask, Mińsk Mazowiecki, Powidz, Świdwin, Mirosławiec).\n"
+            "Poland-specific - doesn't overwrite the existing list."
+        ))
         military_btn.clicked.connect(self._load_military_channels)
-        fire_btn = QPushButton("Wczytaj straz pozarna (znane czestotliwosci)")
-        fire_btn.setToolTip(
-            "Dopisuje ogolnopolskie kanaly ratowniczo-gasnicze PSP (KRG 1-8) oraz\n"
-            "czestotliwosci alarmowania syren OSP (148.6625-149.3375 MHz, NFM).\n"
-            "Wiele OSP nadal pracuje analogowo mimo migracji PSP do DMR. Nie\n"
-            "nadpisuje istniejacej listy."
-        )
+        fire_btn = QPushButton(tr("Load fire brigade (known frequencies)"))
+        fire_btn.setToolTip(tr(
+            "Appends the nationwide PSP rescue-firefighting channels (KRG 1-8)\n"
+            "and OSP siren-alerting frequencies (148.6625-149.3375 MHz, NFM).\n"
+            "Many volunteer fire brigades still operate on analog despite PSP's\n"
+            "migration to DMR. Poland-specific - doesn't overwrite the existing list."
+        ))
         fire_btn.clicked.connect(self._load_fire_channels)
         add_btn.clicked.connect(self._add_channel)
         edit_btn.clicked.connect(self._edit_channel)
@@ -279,7 +283,7 @@ class FrequencyManager(QTabWidget):
             btn_row.addWidget(b)
         lay.addLayout(btn_row)
 
-        self.addTab(w, "Kanaly (Memory List)")
+        self.addTab(w, tr("Channels (Memory List)"))
         self._refresh_channel_tree()
 
     def _refresh_channel_tree(self) -> None:
@@ -321,7 +325,7 @@ class FrequencyManager(QTabWidget):
         for ch in self.channels:
             weight_text = "" if ch.weight <= 0 else f"{ch.weight:g}"
             item = QTreeWidgetItem(["", f"{ch.freq_hz / 1e6:.4f}", ch.modulation.value, weight_text, ""])
-            item.setText(COL_NAME, ch.name or "(bez nazwy)")
+            item.setText(COL_NAME, ch.name or tr("(unnamed)"))
             item.setTextAlignment(COL_FREQ, Qt.AlignmentFlag.AlignRight | Qt.AlignmentFlag.AlignVCenter)
             item.setTextAlignment(COL_WEIGHT, Qt.AlignmentFlag.AlignRight | Qt.AlignmentFlag.AlignVCenter)
             item.setData(0, ROLE_CHANNEL, ch)
@@ -485,12 +489,12 @@ class FrequencyManager(QTabWidget):
 
     def _rename_folder(self, folder_item: QTreeWidgetItem) -> None:
         old_name = folder_item.data(0, ROLE_FOLDER_NAME)
-        new_name, ok = QInputDialog.getText(self, "Zmien nazwe folderu", "Nazwa folderu:", text=old_name)
+        new_name, ok = QInputDialog.getText(self, tr("Rename folder"), tr("Folder name:"), text=old_name)
         new_name = new_name.strip()
         if not ok or not new_name or new_name == old_name:
             return
         if new_name in self.folders:
-            QMessageBox.information(self, "Zmien nazwe folderu", f"Folder „{new_name}” juz istnieje.")
+            QMessageBox.information(self, tr("Rename folder"), tr("Folder “{name}” already exists.").format(name=new_name))
             return
         if old_name in self.folders:
             self.folders[self.folders.index(old_name)] = new_name
@@ -534,12 +538,12 @@ class FrequencyManager(QTabWidget):
         self.channels_changed.emit(self.channels)
 
     def _add_folder(self) -> None:
-        name, ok = QInputDialog.getText(self, "Nowy folder", "Nazwa folderu:")
+        name, ok = QInputDialog.getText(self, tr("New folder"), tr("Folder name:"))
         name = name.strip()
         if not ok or not name:
             return
         if name in self.folders:
-            QMessageBox.information(self, "Nowy folder", f"Folder „{name}” juz istnieje.")
+            QMessageBox.information(self, tr("New folder"), tr("Folder “{name}” already exists.").format(name=name))
             return
         self.folders.append(name)
         self._refresh_channel_tree()
@@ -564,7 +568,7 @@ class FrequencyManager(QTabWidget):
             self._refresh_channel_tree()
             self.channels_changed.emit(self.channels)
 
-    # -- external sync (called by MainWindow, e.g. after "Zapisz czestotliwosc"
+    # -- external sync (called by MainWindow, e.g. after "Save frequency"
     # in the Odtwarzacz tab, or on load) ------------------------------------
     def set_channels(self, channels: list[Channel]) -> None:
         self.channels = list(channels)
@@ -579,7 +583,9 @@ class FrequencyManager(QTabWidget):
         w = QWidget()
         lay = QVBoxLayout(w)
         self.blacklist_table = _DeletableTable(0, 4)
-        self.blacklist_table.setHorizontalHeaderLabels(["Czestotliwosc (MHz)", "Margines (kHz)", "Opis", "Dodano"])
+        self.blacklist_table.setHorizontalHeaderLabels([
+            tr("Frequency (MHz)"), tr("Margin (kHz)"), tr("Description"), tr("Added"),
+        ])
         self.blacklist_table.horizontalHeader().setSectionResizeMode(2, QHeaderView.ResizeMode.Stretch)
         self.blacklist_table.setSelectionBehavior(QAbstractItemView.SelectionBehavior.SelectRows)
         self.blacklist_table.setEditTriggers(QAbstractItemView.EditTrigger.NoEditTriggers)
@@ -587,15 +593,15 @@ class FrequencyManager(QTabWidget):
         lay.addWidget(self.blacklist_table)
 
         btn_row = QHBoxLayout()
-        add_btn = QPushButton("Dodaj recznie")
-        del_btn = QPushButton("Usun")
+        add_btn = QPushButton(tr("Add manually"))
+        del_btn = QPushButton(tr("Delete"))
         add_btn.clicked.connect(self._add_blacklist_entry)
         del_btn.clicked.connect(self._delete_blacklist_entry)
         btn_row.addWidget(add_btn)
         btn_row.addWidget(del_btn)
         lay.addLayout(btn_row)
 
-        self.addTab(w, "Czarna lista (Blacklist)")
+        self.addTab(w, tr("Blacklist"))
         self._refresh_blacklist_table()
 
     def _refresh_blacklist_table(self) -> None:
