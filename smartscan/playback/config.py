@@ -46,6 +46,10 @@ DATE_DIR_FORMAT = "%Y-%m-%d"
 # dropped it) despite being a perfectly real, playable recording on disk -
 # a real bug a user hit (manual Record "did nothing" - it did, the file just
 # never showed up anywhere).
-FILENAME_REGEX = r"^(\d{4})-(\d{2})-(\d{2})_(\d{2})-(\d{2})-(\d{2})(?:-(\d{6}))?_(?:(\d+)|session)\.wav$"
+#
+# Also matches .mp3 (audio_transcode.py, gotcha 14) - the extension carries
+# no meaning for parsing beyond "which player/decoder to use", so it's a
+# plain alternative here, not a separate capture group.
+FILENAME_REGEX = r"^(\d{4})-(\d{2})-(\d{2})_(\d{2})-(\d{2})-(\d{2})(?:-(\d{6}))?_(?:(\d+)|session)\.(?:wav|mp3)$"
 
 APP_DATA_DIR.mkdir(parents=True, exist_ok=True)

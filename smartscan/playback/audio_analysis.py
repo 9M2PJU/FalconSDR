@@ -9,7 +9,9 @@ clipping and suspiciously short squelch "bursts".
 """
 from __future__ import annotations
 
+import io
 import math
+import subprocess
 import wave
 from pathlib import Path
 
@@ -27,15 +29,49 @@ SHORT_RECORDING_SEC = 1.0
 SHORT_RECORDING_PENALTY = 15.0
 
 
+def _mp3_to_wav_bytes(path: Path) -> bytes:
+    """Decodes an mp3 to an in-memory WAV via a system `ffmpeg` - the stdlib
+    `wave` module used below can't read mp3 at all. Reuses the exact same
+    ffmpeg dependency this project already requires for *writing* mp3
+    (audio_transcode.py, gotcha 14) rather than pulling in a decoder
+    library (e.g. PyAV) into this core, non-optional playback path - PyAV
+    is only ever installed as part of the *optional* transcription extra
+    (gotcha 18), and this module must work without it. Raises on any
+    failure (no ffmpeg, corrupt file, ...) - the caller
+    (_read_samples(), always reached through analyze_wav()'s/
+    compute_waveform_peaks()'s own try/except) treats that exactly like any
+    other unreadable file, same as a truncated/corrupt WAV would."""
+    proc = subprocess.run(
+        ["ffmpeg", "-v", "error", "-i", str(path), "-f", "wav", "-"],
+        stdout=subprocess.PIPE, stderr=subprocess.PIPE, check=True,
+    )
+    return proc.stdout
+
+
 def _read_samples(path: Path) -> tuple[np.ndarray, int, float]:
-    with wave.open(str(path), "rb") as wf:
+    # ffmpeg's WAV muxer writes a normal RIFF header (correct sample rate/
+    # channels/bit depth) - decoding to an in-memory WAV and handing it to
+    # the exact same `wave` parsing below means mp3 needs no separate
+    # sample-width/channel-averaging logic of its own.
+    source = io.BytesIO(_mp3_to_wav_bytes(path)) if path.suffix.lower() == ".mp3" else str(path)
+    with wave.open(source, "rb") as wf:
         n_channels = wf.getnchannels()
         sampwidth = wf.getsampwidth()
         framerate = wf.getframerate() or 1
         n_frames = wf.getnframes()
         raw = wf.readframes(n_frames)
 
-    duration_sec = n_frames / framerate
+    # Duration from the *actual* bytes read, not the header's declared frame
+    # count: ffmpeg's WAV muxer can't know the final size in advance when
+    # writing to a non-seekable pipe (the mp3-decode path above) and writes
+    # a sentinel placeholder (observed: 0x7FFFFFFF) for it instead - taken
+    # literally, that gave a "recording" tens of thousands of seconds long.
+    # readframes() itself is correctly bounded by the real data actually
+    # available regardless, so deriving duration from len(raw) is accurate
+    # for both a real WAV file (matches its true frame count exactly) and a
+    # piped one (the only case where the two would ever disagree).
+    actual_n_frames = len(raw) // max(1, sampwidth * n_channels)
+    duration_sec = actual_n_frames / framerate
 
     if sampwidth == 2:
         data = np.frombuffer(raw, dtype=np.int16).astype(np.float64)

@@ -58,7 +58,7 @@ def organize(root: Path = SMARTSCAN_DIR) -> List[Path]:
 
     moved: List[Path] = []
 
-    loose_files = [p for p in root.iterdir() if p.is_file() and p.suffix.lower() == ".wav"]
+    loose_files = [p for p in root.iterdir() if p.is_file() and p.suffix.lower() in (".wav", ".mp3")]
 
     for path in sorted(loose_files):
         parsed = parse_filename(path.name)
@@ -91,9 +91,9 @@ def organize(root: Path = SMARTSCAN_DIR) -> List[Path]:
 
 
 def iter_all_recordings(root: Path = SMARTSCAN_DIR):
-    """Returns the paths of every .wav file in the root directory and every
-    date subfolder (sorted by name, i.e. chronologically)."""
+    """Returns the paths of every .wav/.mp3 file in the root directory and
+    every date subfolder (sorted by name, i.e. chronologically)."""
     root = Path(root)
     if not root.is_dir():
         return []
-    return sorted(root.glob("**/*.wav"))
+    return sorted(list(root.glob("**/*.wav")) + list(root.glob("**/*.mp3")))

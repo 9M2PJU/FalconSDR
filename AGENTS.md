@@ -721,27 +721,43 @@ for exactly this reason. Add a new language by dropping one `.po` file — see
     change, not one per consumer, which is exactly how this bug happened in
     the first place (the "single" mode naming existed before any of those
     consumers accounted for it).
-    **Still open, found while fixing this, deliberately not fixed here:**
-    an MP3-transcoded recording (gotcha 14) has the exact same invisibility
-    problem one layer further down - `FILENAME_REGEX` only ever matched
-    `\.wav$`, and `organizer.iter_all_recordings()`/`organize()`'s loose-file
-    scan both only look for `.wav`, so a `.mp3` file (auto/split, single, or
-    manual - any of them, once `output_format == "mp3"`) would currently
-    never appear in Odtwarzacz at all, exactly like the bug above. Unlike
-    the bug above, this one is *not* just a filename-parsing gap:
-    `audio_analysis.py`'s `analyze_wav()`/`compute_waveform_peaks()` use
-    Python's stdlib `wave` module, which cannot decode mp3 at all - it
-    would land on `analyze_wav()`'s existing `except Exception: readable=False`
-    fallback rather than crash (verified: that fallback already exists for
-    exactly this kind of unreadable-file case), so an mp3 recording *could*
-    be made visible without an immediate crash, but would show a permanent
-    "unreadable"/zero quality score and no waveform preview - a real,
-    user-visible correctness gap of its own, not just a smaller version of
-    the bug above. Properly supporting mp3 quality analysis needs an actual
-    mp3-capable decoder, which raises a real question this session
-    deliberately left open rather than silently deciding: pull in a decoder
-    dependency for the *core* (non-optional) playback path just for this,
-    or accept degraded quality metrics for mp3 recordings specifically.
+    **Follow-up, same session, by explicit request ("napraw widoczność +
+    dodaj prawdziwy dekoder MP3 do analizy"):** an MP3-transcoded recording
+    (gotcha 14) had the exact same invisibility problem one layer further
+    down - `FILENAME_REGEX` only ever matched `\.wav$`, and
+    `organizer.iter_all_recordings()`/`organize()`'s loose-file scan both
+    only looked for `.wav`. Fixed the same way (extend `FILENAME_REGEX` to
+    `\.(?:wav|mp3)$`, both loose-file scans check both suffixes). But unlike
+    the manual-recording bug above, this one was never just a filename-
+    parsing gap: `audio_analysis.py`'s `analyze_wav()`/
+    `compute_waveform_peaks()` are built on Python's stdlib `wave` module,
+    which cannot decode mp3 at all. Fixed by decoding through a system
+    `ffmpeg` (`_mp3_to_wav_bytes()`) to an **in-memory WAV** first, then
+    handing that to the exact same `wave`-based parsing - not a new decoder
+    library (e.g. PyAV): mp3 output already requires ffmpeg to exist as a
+    system binary (gotcha 14), so this reuses that same dependency instead
+    of adding a new one to the *core* (non-optional) playback path - PyAV
+    only ever gets installed as part of the *optional* transcription extra
+    (gotcha 18), which this module must keep working without.
+    **Real bug hit and fixed while verifying this, not before**: ffmpeg's
+    WAV muxer can't know the final file size in advance when writing to a
+    *non-seekable* pipe (exactly what decoding to stdout for this in-memory
+    path does), so it writes a sentinel placeholder for the data chunk size
+    (observed: `0x7FFFFFFF`) instead of the real one. Python's `wave`
+    module takes that literally as `getnframes()` - taken at face value for
+    `duration_sec = n_frames / framerate` as the code originally did, a
+    genuinely ~0.8-second recording came back reporting a duration of
+    **178956 seconds** (~2 days). `readframes()` itself is *not* fooled -
+    it's correctly bounded by the real bytes actually available in the
+    stream regardless of the header's claim, so the fix is deriving
+    `duration_sec` from `len(raw) // (sampwidth * n_channels)` (the actual
+    data read) instead of the declared frame count - correct for a real WAV
+    file too (the two only ever disagree for the piped/mp3 case), so
+    nothing about the plain-WAV path needed to change. Verified end-to-end:
+    a real recording transcoded to mp3 and back through this whole path
+    reports the same duration/SNR as its original WAV (within lossy-codec
+    rounding), `readable=True`, a real non-flat waveform - not just "didn't
+    crash".
 
 ## Testing without touching the user's real config/recordings
 
