@@ -38,7 +38,7 @@ from .channelizer import (
     USABLE_FRACTION, ScanWindow, channel_powers_dbfs, channel_powers_from_spectrum, extend_boundary_window,
     plan_windows, spectrum_cumsum, spectrum_snapshot,
 )
-from .config import AppConfig, CONFIG_DIR, VfoRangeConfig
+from .config import AppConfig, CONFIG_DIR, RecordingConfig, VfoRangeConfig
 from .dsp import Demodulator, NoiseReducer
 from .i18n import tr
 from .models import BlacklistEntry, Channel, Modulation, ScannerState
@@ -341,6 +341,11 @@ class ScannerSignals(QObject):
     freq_changed = Signal(object)
     recording_changed = Signal(bool, str)
     recording_finished = Signal(str)  # path of a just-closed per-transmission file (split mode)
+    # Manual, trigger-independent continuous recording (see
+    # start_manual_recording()) - (active, path). Separate from
+    # recording_changed, which reflects only the automatic, per-transmission
+    # recording driven by the trigger/signal-detection state machine.
+    manual_recording_changed = Signal(bool, str)
     blacklisted = Signal(int)
     # freqs_hz, db, trigger_dbfs, custom (True = this window's band has its
     # own "advanced" overrides - see ScannerPanel/SpectrumView's accent color)
@@ -423,6 +428,16 @@ class ScannerEngine(threading.Thread):
         self._applied_gain_db = None
         self._had_real_hardware = False
 
+        # Manual, trigger-independent continuous recording - see
+        # start_manual_recording()/stop_manual_recording(). None while
+        # inactive. Guarded by its own lock (not self._lock, which is about
+        # scheduling state) since it's written from the GUI thread
+        # (start/stop) and read/written from both the main loop thread
+        # (idle-tick silence) and slot-processing worker threads (mirroring
+        # the primary slot's audio) - see _feed_manual_recording().
+        self._manual_recorder: Recorder | None = None
+        self._manual_recorder_lock = threading.Lock()
+
         # Demod/noise-reduction/file-write for every simultaneously active
         # slot runs on this pool instead of one after another on this
         # thread - see _service_active_slots/AGENTS.md gotcha 12. Sized
@@ -487,6 +502,61 @@ class ScannerEngine(threading.Thread):
             self._muted_evt.set()
         else:
             self._muted_evt.clear()
+
+    # -- manual, trigger-independent continuous recording -----------------
+    # A completely separate mechanism from the automatic per-transmission
+    # recording above (config.recording.enabled + each _Slot's own
+    # Recorder): this one is user-initiated, records continuously for as
+    # long as it's on (silence included), and is fed from two places -
+    # _play_and_record_slot() (mirrors the primary slot's actual audio,
+    # squelched blocks included as silence, independent of mute) and
+    # _main_loop()'s SCANNING branch (feeds silence on a tick where nothing
+    # was active at all) - see _feed_manual_recording(). Always writes one
+    # continuous file (forced "single" mode, regardless of the global
+    # Single/Split setting, which only applies to the automatic recording -
+    # "continuous" wouldn't mean anything split across files), and never
+    # trims a trailing tail the way squelch-aware auto-recording does
+    # (Recorder.write_audio(..., real=True) unconditionally) - the whole
+    # point of this mode is to capture literally everything that elapsed
+    # while it was on, not to make an editorial judgment about what's worth
+    # keeping.
+    def start_manual_recording(self) -> None:
+        with self._manual_recorder_lock:
+            if self._manual_recorder is not None:
+                return
+            manual_config = RecordingConfig(
+                enabled=True, mode="single",
+                output_dir=self.config.recording.output_dir, insert_marker=False,
+            )
+            recorder = Recorder(manual_config, AUDIO_RATE)
+            recorder.start_session()
+            self._manual_recorder = recorder
+        self.signals.manual_recording_changed.emit(True, recorder.current_path)
+
+    def stop_manual_recording(self) -> None:
+        with self._manual_recorder_lock:
+            recorder = self._manual_recorder
+            if recorder is None:
+                return
+            self._manual_recorder = None
+        path = recorder.current_path
+        recorder.stop_session()
+        self.signals.manual_recording_changed.emit(False, "")
+        if path:
+            self.signals.recording_finished.emit(path)
+
+    def is_manual_recording(self) -> bool:
+        with self._manual_recorder_lock:
+            return self._manual_recorder is not None
+
+    def _feed_manual_recording(self, audio: np.ndarray) -> None:
+        """Mirrors ``audio`` (AUDIO_RATE-domain, mono) into an in-progress
+        manual recording, if any - a cheap no-op (one lock check) otherwise,
+        safe to call unconditionally from every tick."""
+        with self._manual_recorder_lock:
+            recorder = self._manual_recorder
+        if recorder is not None:
+            recorder.write_audio(audio, real=True)
 
     def update_channels(self, channels: list[Channel]) -> None:
         self.channels = channels
@@ -719,6 +789,12 @@ class ScannerEngine(threading.Thread):
                     time.sleep(0.1)
 
     def _teardown(self) -> None:
+        # A manual recording only makes sense while there's live audio to
+        # mirror - can't outlive the engine that feeds it. Stopping it here
+        # (rather than leaving it dangling) both finalizes the WAV file
+        # properly and gets it into the Odtwarzacz library via the usual
+        # recording_finished signal.
+        self.stop_manual_recording()
         for freq_hz in list(self._slots.keys()):
             self._close_slot(freq_hz, reason="stopped")
         if self._audio_out is not None:
@@ -1168,6 +1244,17 @@ class ScannerEngine(threading.Thread):
                 # decide continue/linger/close) - see _service_active_slots.
                 primary_level = self._service_active_slots(iq, spectrum, sample_rate, window)
                 any_active = bool(self._slots)
+                if not any_active:
+                    # Nothing was serviced this tick at all, so
+                    # _play_and_record_slot() (the other place manual
+                    # recording gets fed) never ran - keep a manual
+                    # recording's timeline continuous through pure idle
+                    # scanning by feeding it one tick's worth of silence
+                    # directly. A no-op (one lock check) if no manual
+                    # recording is running.
+                    self._feed_manual_recording(
+                        np.zeros(max(1, round(AUDIO_RATE * CHUNK_SECONDS)), dtype=np.float32)
+                    )
 
                 # 2. Look for new activity - either the very first detection
                 # in this window, or an *additional* channel while something
@@ -1625,6 +1712,12 @@ class ScannerEngine(threading.Thread):
         # the LINGER tail, once level has already dropped below trigger.
         if squelched:
             slot.was_squelched = True
+            if slot.freq_hz == self._primary_freq:
+                # Mirrors what the live speaker would have heard (nothing -
+                # squelch mutes it) into a manual recording, if one is
+                # running - see start_manual_recording(). Independent of
+                # self._muted_evt, same as the speaker-mute line below.
+                self._feed_manual_recording(np.zeros(audio.shape[0], dtype=np.float32))
             if self.config.recording.enabled:
                 # real=False: silence substituted for a squelched block
                 # doesn't count as "this transmission had anything worth
@@ -1663,6 +1756,12 @@ class ScannerEngine(threading.Thread):
             mono = audio.mean(axis=1).astype(np.float32)
         if slot.freq_hz == self._primary_freq and not self._muted_evt.is_set():
             self._audio_out.write(audio)
+        if slot.freq_hz == self._primary_freq:
+            # Manual recording mirrors the primary slot's real audio
+            # regardless of mute - like the automatic recording below, it's
+            # meant to capture what's actually happening, not just what's
+            # currently being listened to live.
+            self._feed_manual_recording(mono)
         if self.config.recording.enabled:
             slot.recorder.write_audio(mono)
 

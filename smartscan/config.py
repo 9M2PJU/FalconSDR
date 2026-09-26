@@ -77,7 +77,11 @@ class TimingConfig:
 
 @dataclass
 class RecordingConfig:
-    enabled: bool = True
+    # Off by default: a fresh install shouldn't start writing audio to disk
+    # before the user has deliberately opted in - see RecordingPanel/
+    # ScannerPanel's "Auto-recording" toggle (both control this same field,
+    # kept in sync - see MainWindow) and PlaybackPanel's notice when it's off.
+    enabled: bool = False
     mode: str = "split"          # "single" or "split"
     output_dir: str = DEFAULT_RECORDINGS_DIR
     insert_marker: bool = True

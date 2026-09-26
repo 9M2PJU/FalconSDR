@@ -98,6 +98,9 @@ class MainWindow(QMainWindow):
         self.scanner_panel.skip_requested.connect(self._on_skip)
         self.scanner_panel.skip_blacklist_requested.connect(self._on_skip_blacklist)
         self.scanner_panel.mute_toggled.connect(self._on_mute_toggled)
+        self.scanner_panel.manual_record_toggled.connect(self._on_manual_record_toggled)
+        self.scanner_panel.auto_recording_toggled.connect(self._on_scanner_auto_recording_toggled)
+        self.recording_panel.enabled_changed.connect(self._on_options_auto_recording_toggled)
         self.scanner_panel.settings_changed.connect(self._save_config)
         self.scanner_panel.settings_changed.connect(self._maybe_live_rebuild)
         self.scanner_panel.memory_list_requested.connect(self._reveal_memory_list)
@@ -224,6 +227,7 @@ class MainWindow(QMainWindow):
         s.freq_changed.connect(self.scanner_panel.update_freq)
         s.recording_changed.connect(self.recording_panel.set_recording)
         s.recording_finished.connect(self.playback_panel.ingest_finished_recording)
+        s.manual_recording_changed.connect(self._on_manual_recording_changed)
         s.blacklisted.connect(self._on_auto_lockout)
         s.spectrum_ready.connect(self.scanner_panel.update_spectrum)
         s.cycle_time_changed.connect(self.scanner_panel.update_cycle_time)
@@ -258,6 +262,43 @@ class MainWindow(QMainWindow):
     def _on_mute_toggled(self, muted: bool) -> None:
         if self.engine is not None:
             self.engine.set_live_muted(muted)
+
+    def _on_manual_record_toggled(self, checked: bool) -> None:
+        """Record/Stop recording in the Listen tab - see
+        ScannerEngine.start_manual_recording()'s docstring for what this
+        actually does (continuous, trigger-independent recording of the
+        live channel). Can't work without a running engine to feed it -
+        the button itself is disabled then too (see ScannerPanel.set_running()),
+        this is just the defensive fallback for the click reaching here anyway."""
+        if self.engine is None:
+            self.scanner_panel.set_manual_recording_active(False)
+            return
+        if checked:
+            self.engine.start_manual_recording()
+        else:
+            self.engine.stop_manual_recording()
+
+    def _on_manual_recording_changed(self, active: bool, _path: str) -> None:
+        """ScannerEngine stopped (or started) a manual recording on its own
+        side - e.g. _teardown() force-stopping it when the scanner stops.
+        Keeps the button in sync without it being the one that initiated
+        the change."""
+        self.scanner_panel.set_manual_recording_active(active)
+
+    def _on_scanner_auto_recording_toggled(self, checked: bool) -> None:
+        """The Auto-recording checkbox in the Listen tab changed - keep
+        config and the Options-tab copy of the same setting in sync (see
+        RecordingPanel.enabled_changed for the reverse direction)."""
+        self.config.recording.enabled = checked
+        self.recording_panel.set_enabled(checked)
+        self.playback_panel.update_recording_notice()
+        self._save_config()
+
+    def _on_options_auto_recording_toggled(self, checked: bool) -> None:
+        self.config.recording.enabled = checked
+        self.scanner_panel.set_auto_recording(checked)
+        self.playback_panel.update_recording_notice()
+        self._save_config()
 
     def _on_auto_lockout(self, freq_hz: int) -> None:
         self.freq_manager.add_lockout(freq_hz)

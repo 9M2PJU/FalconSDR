@@ -1029,3 +1029,30 @@ msgstr "Restart nie powiódł się"
 msgid "Couldn't restart automatically ({error}). Please close and reopen the app by hand."
 msgstr "Nie udało się zrestartować automatycznie ({error}). Zamknij i otwórz program ponownie ręcznie."
 
+
+# --- manual recording feature (scanner_panel/recording_panel/playback_panel) ---
+
+msgid "Auto-recording (record automatically while a signal is detected)"
+msgstr "Auto-nagrywanie (nagrywaj automatycznie, gdy wykryto sygnał)"
+
+msgid "Off by default - a fresh install doesn't write anything to disk until you turn this on. The same toggle is also available in the Listen tab, right next to the manual Record button."
+msgstr "Domyślnie wyłączone - świeża instalacja nic nie zapisuje na dysk, dopóki tego nie włączysz. Ten sam przełącznik jest też dostępny w zakładce Nasłuch, tuż obok ręcznego przycisku Record."
+
+msgid "● Record"
+msgstr "● Record"
+
+msgid "■ Stop recording"
+msgstr "■ Zatrzymaj nagrywanie"
+
+msgid "Continuously records everything audible on the current live\nchannel - silence included - independent of whether the scanner\ncurrently considers a signal detected. Starts a new file now,\nstops it when you click again (or when the scanner itself stops)."
+msgstr "Nagrywa w sposób ciągły wszystko, co słychać na bieżącym kanale na żywo - łącznie z ciszą - niezależnie od tego, czy skaner uznaje aktualnie sygnał za wykryty. Rozpoczyna nowy plik od razu, kończy go po ponownym kliknięciu (albo gdy sam skaner się zatrzyma)."
+
+msgid "Auto-recording"
+msgstr "Auto-nagrywanie"
+
+msgid "Automatically records every transmission the scanner detects -\nthe same setting as in the Options tab. Off by default."
+msgstr "Automatycznie nagrywa każdą transmisję wykrytą przez skaner - to samo ustawienie co w zakładce Opcje. Domyślnie wyłączone."
+
+msgid "Auto-recording is currently off - the scanner is listening but not saving anything to disk. Turn it on from the Listen tab or Options to start building this library."
+msgstr "Auto-nagrywanie jest obecnie wyłączone - skaner nasłuchuje, ale nic nie zapisuje na dysk. Włącz je w zakładce Nasłuch albo w Opcjach, żeby zacząć budować tę bibliotekę."
+

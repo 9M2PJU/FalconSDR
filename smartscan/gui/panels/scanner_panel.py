@@ -354,6 +354,15 @@ class ScannerPanel(QGroupBox):
     skip_requested = Signal()
     skip_blacklist_requested = Signal()
     mute_toggled = Signal(bool)
+    # Manual, trigger-independent continuous recording - see
+    # ScannerEngine.start_manual_recording()/stop_manual_recording(). True =
+    # start, False = stop. Only enabled while the scanner is running (see
+    # set_running()).
+    manual_record_toggled = Signal(bool)
+    # Same underlying config.recording.enabled as RecordingPanel's own
+    # checkbox (Options tab) - MainWindow keeps the two in sync so either
+    # one reflects a change made in the other.
+    auto_recording_toggled = Signal(bool)
     settings_changed = Signal()
     memory_list_requested = Signal()  # "Memory list" shortcut - handled by MainWindow
     channel_weight_changed = Signal()  # a channel's weight was edited inline - MainWindow persists/rebuilds
@@ -578,6 +587,29 @@ class ScannerPanel(QGroupBox):
         btn_row.addWidget(self.skip_blacklist_btn, 1)
         btn_row.addWidget(self.mute_btn, 1)
         root.addLayout(btn_row)
+
+        record_row = QHBoxLayout()
+        self.manual_record_btn = QPushButton(tr("● Record"))
+        self.manual_record_btn.setCheckable(True)
+        self.manual_record_btn.setMinimumHeight(36)
+        self.manual_record_btn.setEnabled(False)  # only while the scanner is running - see set_running()
+        self.manual_record_btn.setToolTip(tr(
+            "Continuously records everything audible on the current live\n"
+            "channel - silence included - independent of whether the scanner\n"
+            "currently considers a signal detected. Starts a new file now,\n"
+            "stops it when you click again (or when the scanner itself stops)."
+        ))
+        self.manual_record_btn.toggled.connect(self._on_manual_record_toggled)
+        record_row.addWidget(self.manual_record_btn, 1)
+
+        self.auto_recording_check = QCheckBox(tr("Auto-recording"))
+        self.auto_recording_check.setToolTip(tr(
+            "Automatically records every transmission the scanner detects -\n"
+            "the same setting as in the Options tab. Off by default."
+        ))
+        self.auto_recording_check.toggled.connect(self._on_auto_recording_toggled)
+        record_row.addWidget(self.auto_recording_check, 1)
+        root.addLayout(record_row)
         return w
 
     def _build_gain_row(self) -> QWidget:
@@ -734,6 +766,7 @@ class ScannerPanel(QGroupBox):
         self.bandwidth_spin.setValue(self.config.device.sample_rate_hz / 1e6)
         self._load_global_sliders()
         self.wfm_stereo_check.setChecked(self.config.wfm_stereo_enabled)
+        self.auto_recording_check.setChecked(self.config.recording.enabled)
         # Global-only, unlike trigger_slider above - never swapped for a
         # per-band value during "advanced" band editing (see
         # _band_edit_sliders()), so it's loaded here rather than in
@@ -1025,8 +1058,41 @@ class ScannerPanel(QGroupBox):
         self.skip_blacklist_btn.setEnabled(running)
         self.device_combo.setEnabled(not running)
         self.bandwidth_spin.setEnabled(not running)
+        self.manual_record_btn.setEnabled(running)
         if not running:
             self.cycle_time_label.setText("")
+            # A manual recording can't outlive the scanner that feeds it -
+            # ScannerEngine._teardown() already stops it on its own side,
+            # this just makes sure the button reflects that instead of
+            # staying stuck showing "Stop recording" for a scanner that no
+            # longer exists.
+            self.set_manual_recording_active(False)
+
+    def set_manual_recording_active(self, active: bool) -> None:
+        """Syncs the Record button's checked state/label without re-emitting
+        manual_record_toggled - called both from set_running() above and
+        from MainWindow in response to ScannerEngine's own
+        manual_recording_changed signal (e.g. a recording that was stopped
+        from the engine side, not by clicking this button)."""
+        self.manual_record_btn.blockSignals(True)
+        self.manual_record_btn.setChecked(active)
+        self.manual_record_btn.blockSignals(False)
+        self.manual_record_btn.setText(tr("■ Stop recording") if active else tr("● Record"))
+
+    def set_auto_recording(self, enabled: bool) -> None:
+        """Syncs state after the Auto-recording toggle changes in the Options tab."""
+        self.auto_recording_check.blockSignals(True)
+        self.auto_recording_check.setChecked(enabled)
+        self.auto_recording_check.blockSignals(False)
+
+    def _on_manual_record_toggled(self, checked: bool) -> None:
+        self.manual_record_btn.setText(tr("■ Stop recording") if checked else tr("● Record"))
+        self.manual_record_toggled.emit(checked)
+
+    def _on_auto_recording_toggled(self, checked: bool) -> None:
+        if self._loading:
+            return
+        self.auto_recording_toggled.emit(checked)
 
     def _on_mute_toggled(self, checked: bool) -> None:
         self.mute_btn.setText(tr("MUTED") if checked else tr("MUTE"))

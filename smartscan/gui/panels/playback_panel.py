@@ -212,6 +212,7 @@ class PlaybackPanel(QWidget):
 
         self._build_ui()
         self._connect_signals()
+        self.update_recording_notice()
 
         # New recordings are added to the library on the fly via
         # ingest_finished_recording() (see MainWindow), so there's no more
@@ -229,6 +230,19 @@ class PlaybackPanel(QWidget):
         outer.setContentsMargins(8, 8, 8, 8)
 
         outer.addWidget(self._build_toolbar())
+
+        # Shown/hidden by _update_recording_notice() - purely informational,
+        # so a user staring at an empty (or not-growing) library understands
+        # why instead of wondering if something's broken. Auto-recording is
+        # off by default (see RecordingConfig.enabled), so this is the
+        # common first-run state, not an edge case.
+        self.recording_disabled_label = QLabel()
+        self.recording_disabled_label.setWordWrap(True)
+        self.recording_disabled_label.setStyleSheet(
+            "background: #3a2f12; color: #ffb454; padding: 6px 10px; border-radius: 4px;"
+        )
+        self.recording_disabled_label.setVisible(False)
+        outer.addWidget(self.recording_disabled_label)
 
         outer.addWidget(self._build_browser_tab(), stretch=1)
         # Statistics lives as its own top-level tab (see MainWindow), but is
@@ -1343,6 +1357,22 @@ class PlaybackPanel(QWidget):
 
     def set_known_folders(self, folders: List[str]) -> None:
         self._known_folders = list(folders)
+
+    def update_recording_notice(self) -> None:
+        """Shows/hides the "auto-recording is off" banner - called once at
+        construction and again by MainWindow whenever config.recording.enabled
+        changes (from either the Listen tab's or the Options tab's copy of
+        that same toggle - see MainWindow._on_scanner_auto_recording_toggled/
+        _on_options_auto_recording_toggled)."""
+        if self.config.recording.enabled:
+            self.recording_disabled_label.setVisible(False)
+            return
+        self.recording_disabled_label.setText(tr(
+            "Auto-recording is currently off - the scanner is listening but "
+            "not saving anything to disk. Turn it on from the Listen tab or "
+            "Options to start building this library."
+        ))
+        self.recording_disabled_label.setVisible(True)
 
     def shutdown(self) -> None:
         """Waits for background workers - called from the main window's closeEvent."""

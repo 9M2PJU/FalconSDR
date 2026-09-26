@@ -14,6 +14,12 @@ from ..widgets import RecIndicator
 
 class RecordingPanel(QGroupBox):
     settings_changed = Signal()
+    # Emitted only when the Auto-recording checkbox itself changes (not the
+    # Single/Split mode or output folder) - mirrors TranscriptionPanel's
+    # enabled_changed, so ScannerPanel's own copy of this same toggle (in
+    # the Listen tab) can stay in sync without a signal loop - see
+    # MainWindow.
+    enabled_changed = Signal(bool)
 
     def __init__(self, config: RecordingConfig, parent=None):
         super().__init__(tr("Recording"), parent)
@@ -26,7 +32,12 @@ class RecordingPanel(QGroupBox):
     def _build_ui(self) -> None:
         root = QVBoxLayout(self)
 
-        self.enable_check = QCheckBox(tr("Record Only On Signal (only record while a signal is detected)"))
+        self.enable_check = QCheckBox(tr("Auto-recording (record automatically while a signal is detected)"))
+        self.enable_check.setToolTip(tr(
+            "Off by default - a fresh install doesn't write anything to disk "
+            "until you turn this on. The same toggle is also available in "
+            "the Listen tab, right next to the manual Record button."
+        ))
         self.enable_check.toggled.connect(self._push_settings)
         root.addWidget(self.enable_check)
 
@@ -74,9 +85,20 @@ class RecordingPanel(QGroupBox):
     def _push_settings(self, *_args) -> None:
         if self._loading:
             return
-        self.config.enabled = self.enable_check.isChecked()
+        enabled = self.enable_check.isChecked()
+        changed = enabled != self.config.enabled
+        self.config.enabled = enabled
         self.config.mode = "single" if self.single_radio.isChecked() else "split"
         self.settings_changed.emit()
+        if changed:
+            self.enabled_changed.emit(enabled)
+
+    def set_enabled(self, enabled: bool) -> None:
+        """Syncs state after the Auto-recording toggle changes in the Listen tab."""
+        self.enable_check.blockSignals(True)
+        self.enable_check.setChecked(enabled)
+        self.enable_check.blockSignals(False)
+        self.config.enabled = enabled
 
     def set_running(self, running: bool) -> None:
         self.enable_check.setEnabled(not running)
