@@ -4,9 +4,9 @@ from __future__ import annotations
 from pathlib import Path
 from typing import Callable
 
-from PyQt6.QtCore import Qt, pyqtSignal
-from PyQt6.QtGui import QColor, QIcon
-from PyQt6.QtWidgets import (
+from PySide6.QtCore import Qt, Signal
+from PySide6.QtGui import QColor, QIcon
+from PySide6.QtWidgets import (
     QCheckBox, QComboBox, QDoubleSpinBox, QFormLayout, QGroupBox, QHBoxLayout,
     QHeaderView, QLabel, QLineEdit, QPushButton, QScrollArea, QToolButton,
     QTreeWidget, QTreeWidgetItem, QVBoxLayout, QWidget,
@@ -343,19 +343,19 @@ class _MemoryListRow(QWidget):
 
 
 class ScannerPanel(QGroupBox):
-    start_requested = pyqtSignal()
-    stop_requested = pyqtSignal()
-    skip_requested = pyqtSignal()
-    skip_blacklist_requested = pyqtSignal()
-    mute_toggled = pyqtSignal(bool)
-    settings_changed = pyqtSignal()
-    memory_list_requested = pyqtSignal()  # "Lista pamieci" shortcut - handled by MainWindow
-    channel_weight_changed = pyqtSignal()  # a channel's weight was edited inline - MainWindow persists/rebuilds
+    start_requested = Signal()
+    stop_requested = Signal()
+    skip_requested = Signal()
+    skip_blacklist_requested = Signal()
+    mute_toggled = Signal(bool)
+    settings_changed = Signal()
+    memory_list_requested = Signal()  # "Lista pamieci" shortcut - handled by MainWindow
+    channel_weight_changed = Signal()  # a channel's weight was edited inline - MainWindow persists/rebuilds
     # Emitted (VfoRangeConfig or None) when a band's "advanced" edit mode
     # starts/stops - MainWindow forwards this straight to
     # ScannerEngine.set_solo_band() so a running scan restricts itself to
     # just that band while it's being tuned in isolation.
-    solo_band_changed = pyqtSignal(object)
+    solo_band_changed = Signal(object)
 
     def __init__(self, config: AppConfig, channels: list[Channel] | None = None, parent=None):
         super().__init__("Skaner", parent)

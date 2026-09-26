@@ -1,8 +1,8 @@
 """Ustawienia automatycznej transkrypcji nagrań."""
 from __future__ import annotations
 
-from PyQt6.QtCore import pyqtSignal
-from PyQt6.QtWidgets import QCheckBox, QGroupBox, QLabel, QVBoxLayout
+from PySide6.QtCore import Signal
+from PySide6.QtWidgets import QCheckBox, QGroupBox, QLabel, QVBoxLayout
 
 from ...config import TranscriptionConfig
 
@@ -10,8 +10,8 @@ from ...config import TranscriptionConfig
 class TranscriptionPanel(QGroupBox):
     """Przełącznik automatycznej kolejki Whispera w zakładce Opcje."""
 
-    settings_changed = pyqtSignal()
-    enabled_changed = pyqtSignal(bool)
+    settings_changed = Signal()
+    enabled_changed = Signal(bool)
 
     def __init__(self, config: TranscriptionConfig, parent=None):
         super().__init__("Transkrypcja", parent)

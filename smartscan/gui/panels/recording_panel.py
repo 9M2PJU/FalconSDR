@@ -1,8 +1,8 @@
 """Modul Nagrywania: Record Only On Signal toggle, Single/Split mode, REC lamp, output dir."""
 from __future__ import annotations
 
-from PyQt6.QtCore import pyqtSignal
-from PyQt6.QtWidgets import (
+from PySide6.QtCore import Signal
+from PySide6.QtWidgets import (
     QCheckBox, QFileDialog, QGroupBox, QHBoxLayout, QLabel, QLineEdit,
     QPushButton, QRadioButton, QVBoxLayout,
 )
@@ -12,7 +12,7 @@ from ..widgets import RecIndicator
 
 
 class RecordingPanel(QGroupBox):
-    settings_changed = pyqtSignal()
+    settings_changed = Signal()
 
     def __init__(self, config: RecordingConfig, parent=None):
         super().__init__("Nagrywanie", parent)

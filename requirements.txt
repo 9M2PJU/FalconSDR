@@ -1,18 +1,23 @@
-# Installed via apt on Ubuntu 24.04:
-#   sudo apt install python3-pyqt6 python3-pyqt6.qtmultimedia python3-numpy python3-scipy \
-#                     python3-pyqtgraph python3-soapysdr python3-pyaudio
-#
-# Listed here for reference / pip-based environments:
-PyQt6>=6.6
+# PySide6, numpy, scipy and pyqtgraph all have reliable prebuilt wheels on
+# every platform (Linux/Windows/macOS) - pip install these directly, no need
+# for apt/system packages:
+PySide6>=6.6
 numpy>=1.26
 scipy>=1.11
 pyqtgraph>=0.13
-# SoapySDR and PyAudio have no reliable prebuilt wheels on most platforms;
-# install the system packages above instead of pip installing these two.
 #
-# python3-pyqt6.qtmultimedia (QtMultimedia bindings, used by the Odtwarzacz
-# tab's audio player) is a separate apt package on Ubuntu even though it's
-# bundled in the pip PyQt6 wheel.
+# SoapySDR (+ device drivers, e.g. SoapySDRRTLSDR) and PyAudio/PortAudio are
+# the two exceptions - they need system-level installation:
+#   Linux (Ubuntu/Debian):  sudo apt install python3-soapysdr soapysdr0.8-module-rtlsdr python3-pyaudio
+#   Windows:                install the PothosSDR bundle (ships SoapySDR + drivers
+#                           + Python bindings prebuilt), and `pip install PyAudio`
+#   macOS:                  brew install soapysdr soapyrtlsdr portaudio, then
+#                           `pip install PyAudio`
+# If SoapySDR isn't available at all, the app still starts and falls back to
+# the built-in Simulated backend rather than failing.
+#
+# QtMultimedia (used by the Odtwarzacz tab's audio player) is bundled in the
+# single PySide6 wheel - no separate package needed, unlike PyQt6/apt.
 #
 # --- Transkrypcja (zakładka Odtwarzacz) -------------------------------------
 # faster-whisper (i jego zależności: ctranslate2, av, tokenizers...) NIE jest
@@ -24,7 +29,7 @@ pyqtgraph>=0.13
 #   # opcjonalnie, jeśli chcesz transkrypcję na GPU (NVIDIA/CUDA):
 #   .venv/bin/pip install nvidia-cublas-cu12 nvidia-cudnn-cu12
 #
-# --system-site-packages sprawia, że venv nadal widzi systemowe PyQt6/numpy,
+# --system-site-packages sprawia, że venv nadal widzi PySide6/numpy,
 # więc reszta programu działa tak samo. main.py sam przełącza się w ten venv
 # przy starcie (jeśli istnieje), więc uruchamianie "python3 main.py" się nie
 # zmienia. Modele Whisper (duże, ~1.5 GB + ~0.8 GB) pobierają się same z

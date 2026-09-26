@@ -2,9 +2,9 @@
 from __future__ import annotations
 
 import numpy as np
-from PyQt6.QtCore import Qt, QRectF, pyqtSignal
-from PyQt6.QtGui import QColor, QFont, QFontDatabase, QLinearGradient, QPainter, QPen, QPixmap
-from PyQt6.QtWidgets import (
+from PySide6.QtCore import Qt, QRectF, Signal
+from PySide6.QtGui import QColor, QFont, QFontDatabase, QLinearGradient, QPainter, QPen, QPixmap
+from PySide6.QtWidgets import (
     QDoubleSpinBox,
     QHBoxLayout,
     QSlider,
@@ -174,7 +174,7 @@ class SliderSpin(QWidget):
     to release or press Enter) - used for Trigger Level/Squelch, Gain, Tuning
     Time and Linger Time so they're all easy to nudge by ear while scanning.
     """
-    valueChanged = pyqtSignal(float)
+    valueChanged = Signal(float)
 
     def __init__(self, minimum: float, maximum: float, value: float, decimals: int = 0,
                  suffix: str = "", parent=None):
@@ -299,7 +299,7 @@ class SpectrumView(QWidget):
             self._plot.addItem(self._trigger_line)
             layout.addWidget(self._plot)
         else:
-            from PyQt6.QtWidgets import QLabel
+            from PySide6.QtWidgets import QLabel
             layout.addWidget(QLabel("pyqtgraph niedostepny - podglad widma wylaczony"))
 
     @property
@@ -376,7 +376,7 @@ class WaveformView(QWidget):
     zamiast rysować setki prostokątów od nowa przy każdej klatce.
     """
 
-    seekRequested = pyqtSignal(int)  # nowa pozycja w ms
+    seekRequested = Signal(int)  # nowa pozycja w ms
 
     _BG = QColor("#12141a")
     _CENTER_LINE = QColor(255, 255, 255, 22)

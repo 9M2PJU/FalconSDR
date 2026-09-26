@@ -8,7 +8,7 @@ from pathlib import Path
 # faster-whisper, którego nie instalujemy do systemowego Pythona (PEP 668).
 # Żeby "python3 main.py" dalej działało bez pamiętania o aktywacji venv,
 # przekierowujemy się raz na start do interpretera z .venv (który widzi też
-# systemowe PyQt6 dzięki --system-site-packages). Jeśli .venv nie istnieje,
+# systemowe PySide6 dzięki --system-site-packages). Jeśli .venv nie istnieje,
 # program po prostu wystartuje na systemowym Pythonie bez transkrypcji.
 _VENV_DIR = Path(__file__).resolve().parent / ".venv"
 _VENV_PYTHON = _VENV_DIR / "bin" / "python3"
@@ -39,8 +39,8 @@ CONFIG_DIR.mkdir(parents=True, exist_ok=True)
 _crash_log = (CONFIG_DIR / "crash.log").open("a", buffering=1)
 faulthandler.enable(file=_crash_log, all_threads=True)
 
-from PyQt6.QtGui import QIcon
-from PyQt6.QtWidgets import QApplication
+from PySide6.QtGui import QIcon
+from PySide6.QtWidgets import QApplication
 
 from smartscan.gui.main_window import MainWindow
 from smartscan.gui.theme import DARK_STYLESHEET

@@ -7,7 +7,7 @@ import logging
 import time
 from typing import List, Optional
 
-from PyQt6.QtCore import QThread, pyqtSignal
+from PySide6.QtCore import QThread, Signal
 
 from smartscan.config import TranscriptionConfig
 from smartscan.playback.models import Recording, TranscriptionResult
@@ -36,9 +36,9 @@ _SAVE_INTERVAL_S = 5.0
 
 
 class TranscriptionWorker(QThread):
-    item_done = pyqtSignal(str, object)   # ścieżka pliku (str), TranscriptionResult
-    progress = pyqtSignal(int, int)       # zrobione, razem (tylko z tego przebiegu)
-    finished_batch = pyqtSignal()
+    item_done = Signal(str, object)   # ścieżka pliku (str), TranscriptionResult
+    progress = Signal(int, int)       # zrobione, razem (tylko z tego przebiegu)
+    finished_batch = Signal()
 
     def __init__(
         self,
@@ -121,7 +121,7 @@ class TranscriptionWorker(QThread):
                 # już łapie własne błędy (patrz jego docstring), więc to co
                 # tu ucieka to zawsze coś poza jego kontrolą. Bez tego
                 # try/except wyjątek uciekał z QThread.run() nieobsłużony -
-                # a PyQt6 domyślnie ubija wtedy CAŁY proces, nie tylko ten
+                # a PySide6 domyślnie ubija wtedy CAŁY proces, nie tylko ten
                 # wątek (potwierdzone: crash zawsze tuż po takim tracebacku
                 # w logu, żadnego innego śladu błędu) - jeden zniknięty plik
                 # nie może już zabijać reszty programu.

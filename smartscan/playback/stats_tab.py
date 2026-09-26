@@ -7,8 +7,8 @@ from __future__ import annotations
 from typing import List, Optional
 
 import pyqtgraph as pg
-from PyQt6.QtCore import Qt, pyqtSignal
-from PyQt6.QtWidgets import (
+from PySide6.QtCore import Qt, Signal
+from PySide6.QtWidgets import (
     QGridLayout,
     QGroupBox,
     QHBoxLayout,
@@ -60,7 +60,7 @@ def _bar_chart(categories: List[str], values: List[float], color="#4f9cff", rota
 
 
 class StatsTab(QWidget):
-    frequencySelected = pyqtSignal(int)  # dwuklik w wiersz - "przejdz do Przegladarki"
+    frequencySelected = Signal(int)  # dwuklik w wiersz - "przejdz do Przegladarki"
 
     def __init__(self, parent=None):
         super().__init__(parent)

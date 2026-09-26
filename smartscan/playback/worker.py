@@ -4,7 +4,7 @@ from __future__ import annotations
 from pathlib import Path
 from typing import List
 
-from PyQt6.QtCore import QThread, pyqtSignal
+from PySide6.QtCore import QThread, Signal
 
 from smartscan.playback.config import SMARTSCAN_DIR
 from smartscan.playback.library import attach_quality, scan_recordings
@@ -14,9 +14,9 @@ from smartscan.playback.quality_cache import QualityCache
 
 
 class RefreshWorker(QThread):
-    progress = pyqtSignal(int, int)
-    finished_ok = pyqtSignal(list, int)
-    failed = pyqtSignal(str)
+    progress = Signal(int, int)
+    finished_ok = Signal(list, int)
+    failed = Signal(str)
 
     def __init__(self, root: Path = SMARTSCAN_DIR, parent=None):
         super().__init__(parent)

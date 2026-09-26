@@ -6,8 +6,8 @@ from datetime import datetime, timedelta
 from pathlib import Path
 from typing import List, Optional
 
-from PyQt6.QtCore import QModelIndex, QSortFilterProxyModel, Qt, QAbstractTableModel
-from PyQt6.QtGui import QColor
+from PySide6.QtCore import QModelIndex, QSortFilterProxyModel, Qt, QAbstractTableModel
+from PySide6.QtGui import QColor
 
 from smartscan.playback.models import Recording, TranscriptionResult
 

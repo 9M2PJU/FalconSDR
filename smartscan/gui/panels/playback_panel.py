@@ -9,10 +9,10 @@ from datetime import datetime, time, timedelta, timezone
 from pathlib import Path
 from typing import List, Optional
 
-from PyQt6.QtCore import QModelIndex, QPoint, QTimer, QUrl, Qt, pyqtSignal
-from PyQt6.QtGui import QDesktopServices, QGuiApplication, QIcon, QKeySequence, QShortcut
-from PyQt6.QtMultimedia import QMediaPlayer
-from PyQt6.QtWidgets import (
+from PySide6.QtCore import QModelIndex, QPoint, QTimer, QUrl, Qt, Signal
+from PySide6.QtGui import QDesktopServices, QGuiApplication, QIcon, QKeySequence, QShortcut
+from PySide6.QtMultimedia import QMediaPlayer
+from PySide6.QtWidgets import (
     QAbstractItemView,
     QCheckBox,
     QComboBox,
@@ -69,8 +69,8 @@ NAV_KEYS = {
 class RecordingsTableView(QTableView):
     """QTableView, który sygnalizuje nawigację klawiaturą (do auto-odtwarzania) i Delete (do usuwania)."""
 
-    navigated = pyqtSignal()
-    deleteRequested = pyqtSignal()
+    navigated = Signal()
+    deleteRequested = Signal()
 
     def keyPressEvent(self, event) -> None:
         if event.key() == Qt.Key.Key_Delete:
@@ -135,9 +135,9 @@ class PlaybackPanel(QWidget):
     synchronizować dwóch osobnych konfiguracji jak w dawnych dwóch programach.
     """
 
-    status_message = pyqtSignal(str, int)  # (tekst, czas wyświetlania w ms; 0 = bez limitu)
-    channel_saved = pyqtSignal(object)  # Channel - "Zapisz częstotliwość"; MainWindow scala z Listą pamięci
-    transcription_enabled_changed = pyqtSignal(bool)
+    status_message = Signal(str, int)  # (tekst, czas wyświetlania w ms; 0 = bez limitu)
+    channel_saved = Signal(object)  # Channel - "Zapisz częstotliwość"; MainWindow scala z Listą pamięci
+    transcription_enabled_changed = Signal(bool)
 
     def __init__(self, config: AppConfig, parent=None):
         super().__init__(parent)

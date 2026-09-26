@@ -9,14 +9,14 @@ normalnie krazy po innych kanalach.
 """
 from __future__ import annotations
 
-from PyQt6.QtCore import pyqtSignal
-from PyQt6.QtWidgets import QCheckBox, QDoubleSpinBox, QFormLayout, QGroupBox, QLabel, QVBoxLayout
+from PySide6.QtCore import Signal
+from PySide6.QtWidgets import QCheckBox, QDoubleSpinBox, QFormLayout, QGroupBox, QLabel, QVBoxLayout
 
 from ...config import RecencyBoostConfig
 
 
 class RecencyBoostPanel(QGroupBox):
-    settings_changed = pyqtSignal()
+    settings_changed = Signal()
 
     def __init__(self, config: RecencyBoostConfig, parent=None):
         super().__init__("Recency boost (czestsze powroty po transmisji)", parent)

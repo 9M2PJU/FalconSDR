@@ -5,9 +5,9 @@ from __future__ import annotations
 import datetime as dt
 from pathlib import Path
 
-from PyQt6.QtCore import Qt, pyqtSignal
-from PyQt6.QtGui import QColor, QIcon, QKeySequence, QShortcut
-from PyQt6.QtWidgets import (
+from PySide6.QtCore import Qt, Signal
+from PySide6.QtGui import QColor, QIcon, QKeySequence, QShortcut
+from PySide6.QtWidgets import (
     QAbstractItemView, QComboBox, QDoubleSpinBox, QDialog, QDialogButtonBox,
     QFormLayout, QHBoxLayout, QHeaderView, QInputDialog, QLineEdit, QMessageBox,
     QPushButton, QTableWidget, QTableWidgetItem, QTabWidget, QTreeWidget,
@@ -34,7 +34,7 @@ class _DeletableTable(QTableWidget):
     destructive-enough action here to need a confirmation dialog (unlike
     recordings), so this just needs to be fast.
     """
-    deleteRequested = pyqtSignal()
+    deleteRequested = Signal()
 
     def keyPressEvent(self, event) -> None:
         if event.key() in (Qt.Key.Key_Delete, Qt.Key.Key_Backspace):
@@ -48,8 +48,8 @@ class _ChannelTree(QTreeWidget):
     enable/disable via a tri-state checkbox), channels as draggable leaves.
     Also triggers deletion via the Delete key, same rationale as _DeletableTable.
     """
-    deleteRequested = pyqtSignal()
-    dropped = pyqtSignal()
+    deleteRequested = Signal()
+    dropped = Signal()
 
     def keyPressEvent(self, event) -> None:
         if event.key() in (Qt.Key.Key_Delete, Qt.Key.Key_Backspace):
@@ -176,9 +176,9 @@ class _BlacklistDialog(QDialog):
 
 
 class FrequencyManager(QTabWidget):
-    channels_changed = pyqtSignal(list)
-    blacklist_changed = pyqtSignal(list)
-    folders_changed = pyqtSignal(list)
+    channels_changed = Signal(list)
+    blacklist_changed = Signal(list)
+    folders_changed = Signal(list)
 
     def __init__(self, channels: list[Channel], blacklist: list[BlacklistEntry], default_margin_hz: int,
                  folders: list[str] | None = None, parent=None):

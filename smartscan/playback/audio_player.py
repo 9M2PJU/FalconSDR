@@ -3,13 +3,13 @@ from __future__ import annotations
 
 from pathlib import Path
 
-from PyQt6.QtCore import QObject, QUrl, pyqtSignal
-from PyQt6.QtMultimedia import QAudioOutput, QMediaPlayer
+from PySide6.QtCore import QObject, QUrl, Signal
+from PySide6.QtMultimedia import QAudioOutput, QMediaPlayer
 
 
 class AudioPlayer(QObject):
-    started = pyqtSignal(Path)
-    stateChanged = pyqtSignal(QMediaPlayer.PlaybackState)
+    started = Signal(Path)
+    stateChanged = Signal(QMediaPlayer.PlaybackState)
 
     def __init__(self, parent=None):
         super().__init__(parent)

@@ -29,7 +29,7 @@ from concurrent.futures import ThreadPoolExecutor
 from pathlib import Path
 
 import numpy as np
-from PyQt6.QtCore import QObject, pyqtSignal
+from PySide6.QtCore import QObject, Signal
 
 from .audio_output import AudioOutput
 from .calibration_log import CalibrationLogger
@@ -332,27 +332,27 @@ class _Slot:
 
 
 class ScannerSignals(QObject):
-    state_changed = pyqtSignal(str)
-    level_changed = pyqtSignal(float)
+    state_changed = Signal(str)
+    level_changed = Signal(float)
     # list[tuple[freq_hz, name]] - one entry per currently active channel,
     # primary (the one actually audible live) first, or a single placeholder
     # entry for the tuned window while nothing's active yet.
-    freq_changed = pyqtSignal(object)
-    recording_changed = pyqtSignal(bool, str)
-    recording_finished = pyqtSignal(str)  # path of a just-closed per-transmission file (split mode)
-    blacklisted = pyqtSignal(int)
+    freq_changed = Signal(object)
+    recording_changed = Signal(bool, str)
+    recording_finished = Signal(str)  # path of a just-closed per-transmission file (split mode)
+    blacklisted = Signal(int)
     # freqs_hz, db, trigger_dbfs, custom (True = this window's band has its
     # own "advanced" overrides - see ScannerPanel/SpectrumView's accent color)
-    spectrum_ready = pyqtSignal(object, object, float, bool)
+    spectrum_ready = Signal(object, object, float, bool)
     # Real, *measured* seconds since this same window (by center_hz) was
     # last tuned to - not a theoretical estimate (weighted scheduling makes
     # that dishonest - different windows get visited at very different real
     # rates). Only emitted from the second visit onward (nothing to compare
     # the first time).
-    cycle_time_changed = pyqtSignal(float)
-    gain_range_changed = pyqtSignal(float, float)
-    log = pyqtSignal(str)
-    finished = pyqtSignal()
+    cycle_time_changed = Signal(float)
+    gain_range_changed = Signal(float, float)
+    log = Signal(str)
+    finished = Signal()
 
 
 class ScannerEngine(threading.Thread):

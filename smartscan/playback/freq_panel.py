@@ -11,8 +11,8 @@ from __future__ import annotations
 
 from typing import List, Optional
 
-from PyQt6.QtCore import Qt, pyqtSignal
-from PyQt6.QtWidgets import (
+from PySide6.QtCore import Qt, Signal
+from PySide6.QtWidgets import (
     QButtonGroup,
     QComboBox,
     QHBoxLayout,
@@ -39,8 +39,8 @@ _LANG_SORT_OPTIONS = ["Sortuj: liczba transmisji", "Sortuj: jakość", "Sortuj: 
 
 
 class FrequencyPanel(QWidget):
-    frequencySelected = pyqtSignal(object)  # int (kHz), None = wszystkie, albo FAVORITES_ITEM
-    languageSelected = pyqtSignal(object)   # kod ISO, "" (NO_LANGUAGE) = bez transkrypcji, None = wszystkie
+    frequencySelected = Signal(object)  # int (kHz), None = wszystkie, albo FAVORITES_ITEM
+    languageSelected = Signal(object)   # kod ISO, "" (NO_LANGUAGE) = bez transkrypcji, None = wszystkie
 
     def __init__(self, parent=None):
         super().__init__(parent)
