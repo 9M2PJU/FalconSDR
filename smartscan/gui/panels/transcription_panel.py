@@ -1,35 +1,36 @@
-"""Ustawienia automatycznej transkrypcji nagrań."""
+"""Automatic transcription settings."""
 from __future__ import annotations
 
 from PySide6.QtCore import Signal
 from PySide6.QtWidgets import QCheckBox, QGroupBox, QLabel, QVBoxLayout
 
 from ...config import TranscriptionConfig
+from ...i18n import tr
 
 
 class TranscriptionPanel(QGroupBox):
-    """Przełącznik automatycznej kolejki Whispera w zakładce Opcje."""
+    """Automatic Whisper queue toggle in the Options tab."""
 
     settings_changed = Signal()
     enabled_changed = Signal(bool)
 
     def __init__(self, config: TranscriptionConfig, parent=None):
-        super().__init__("Transkrypcja", parent)
+        super().__init__(tr("Transcription"), parent)
         self.config = config
         self._loading = True
 
         root = QVBoxLayout(self)
-        self.enable_check = QCheckBox("Automatycznie transkrybuj nagrania")
-        self.enable_check.setToolTip(
-            "Wyłącza kolejkę transkrypcji w tle. Po ponownym włączeniu "
-            "program przetworzy także nagrania oczekujące z czasu wyłączenia."
-        )
+        self.enable_check = QCheckBox(tr("Automatically transcribe recordings"))
+        self.enable_check.setToolTip(tr(
+            "Turns off the background transcription queue. Re-enabling it "
+            "also processes recordings that piled up while it was off."
+        ))
         self.enable_check.toggled.connect(self._push_settings)
         root.addWidget(self.enable_check)
-        root.addWidget(QLabel(
-            "Po włączeniu zaległe nagrania bez wyniku transkrypcji zostaną "
-            "dodane do kolejki."
-        ))
+        root.addWidget(QLabel(tr(
+            "Once enabled, any backlog of recordings with no transcription "
+            "result yet will be queued."
+        )))
 
         self.enable_check.setChecked(self.config.enabled)
         self._loading = False
@@ -42,7 +43,7 @@ class TranscriptionPanel(QGroupBox):
         self.enabled_changed.emit(enabled)
 
     def set_enabled(self, enabled: bool) -> None:
-        """Synchronizuje stan po zmianie przełącznika w Odtwarzaczu."""
+        """Syncs state after the toggle in Odtwarzacz changes."""
         self.enable_check.blockSignals(True)
         self.enable_check.setChecked(enabled)
         self.enable_check.blockSignals(False)

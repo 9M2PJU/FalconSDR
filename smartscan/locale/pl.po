@@ -1,0 +1,422 @@
+msgid ""
+msgstr ""
+"Content-Type: text/plain; charset=UTF-8\n"
+"Language: pl\n"
+
+# --- gui/panels/location_panel.py ---
+
+msgid "Location"
+msgstr "Lokalizacja"
+
+msgid "Approximate coordinates of the receiver - used only to build "
+"the FlightRadar24/ADSBExchange playback links in Odtwarzacz "
+"(“what was flying near here at this recording's time”). "
+"Nothing is sent anywhere else; this never leaves your machine "
+"except when you click one of those two buttons, which opens "
+"your browser at that flight-tracker site. A nearby town/city is "
+"plenty precise - you don't need your exact address."
+msgstr "Przybliżone współrzędne odbiornika - używane wyłącznie do zbudowania "
+"linków playbacku FlightRadar24/ADSBExchange w Odtwarzaczu "
+"(“co leciało tędy w czasie tego nagrania”). "
+"Nic nigdzie indziej nie jest wysyłane; to nigdy nie opuszcza Twojego komputera "
+"poza chwilą kliknięcia jednego z tych dwóch przycisków, co otwiera "
+"przeglądarkę na stronie danego serwisu. Pobliskie miasto/miejscowość jest "
+"wystarczająco dokładne - nie musisz podawać dokładnego adresu."
+
+msgid "(not set)"
+msgstr "(nie ustawiono)"
+
+msgid "Latitude:"
+msgstr "Szerokość geograficzna:"
+
+msgid "Longitude:"
+msgstr "Długość geograficzna:"
+
+# --- gui/panels/language_panel.py ---
+
+msgid "Language"
+msgstr "Język"
+
+msgid "Language:"
+msgstr "Język:"
+
+msgid "Takes effect after restarting the app. Missing your language? "
+"Adding one is just a text file - no programming needed, see "
+"smartscan/locale/README.md in the source for the three-step "
+"guide."
+msgstr "Zaczyna działać po ponownym uruchomieniu programu. Brakuje Twojego "
+"języka? Dodanie go to tylko plik tekstowy - bez programowania, zobacz "
+"smartscan/locale/README.md w źródłach programu, gdzie jest trzykrokowa "
+"instrukcja."
+
+# --- gui/panels/recording_panel.py ---
+
+msgid "Recording"
+msgstr "Nagrywanie"
+
+msgid "Record Only On Signal (only record while a signal is detected)"
+msgstr "Nagrywaj tylko przy sygnale (nagrywaj tylko, gdy wykryto sygnał)"
+
+msgid "Single File (one continuous file)"
+msgstr "Jeden plik (jeden ciągły plik)"
+
+msgid "Split Files (a separate file per transmission)"
+msgstr "Osobne pliki (osobny plik na transmisję)"
+
+msgid "Choose folder..."
+msgstr "Wybierz katalog..."
+
+msgid "Output folder:"
+msgstr "Katalog docelowy:"
+
+msgid "Recordings output folder"
+msgstr "Katalog docelowy nagrań"
+
+# --- gui/panels/recency_boost_panel.py ---
+
+msgid "Recency boost (more frequent revisits after a transmission)"
+msgstr "Recency boost (częstsze powroty po transmisji)"
+
+msgid "After a transmission ends naturally (not via a manual Skip), its "
+"window is visited more often than usual for a while - in case "
+"another message follows within the next several/dozens of "
+"seconds on the same frequency. The scanner still keeps circling "
+"the other channels normally the whole time, so a conversation "
+"moving to a different frequency is still detected - unlike "
+"simply raising the linger time."
+msgstr "Po naturalnym zakończeniu transmisji (nie przez ręczny Skip) jej okno "
+"jest przez chwilę odwiedzane częściej niż zwykle - w razie gdyby za "
+"kilkanaście/kilkadziesiąt sekund pojawił się kolejny komunikat na tej "
+"samej częstotliwości. Skaner nadal normalnie krąży po innych kanałach "
+"przez cały ten czas, więc przejście rozmowy na inną częstotliwość "
+"wciąż zostanie wykryte - w odróżnieniu od zwykłego wydłużania czasu lingera."
+
+msgid "Enable recency boost"
+msgstr "Włącz recency boost"
+
+msgid "How long to boost after a transmission:"
+msgstr "Jak długo wzmagać po transmisji:"
+
+msgid "How often to revisit during the boost:"
+msgstr "Jak często odwiedzać w trakcie wzmożenia:"
+
+# --- gui/panels/transcription_panel.py ---
+
+msgid "Transcription"
+msgstr "Transkrypcja"
+
+msgid "Automatically transcribe recordings"
+msgstr "Automatycznie transkrybuj nagrania"
+
+msgid "Turns off the background transcription queue. Re-enabling it "
+"also processes recordings that piled up while it was off."
+msgstr "Wyłącza kolejkę transkrypcji w tle. Po ponownym włączeniu "
+"program przetworzy też nagrania, które nazbierały się w tym czasie."
+
+msgid "Once enabled, any backlog of recordings with no transcription "
+"result yet will be queued."
+msgstr "Po włączeniu zaległe nagrania bez wyniku transkrypcji zostaną "
+"dodane do kolejki."
+
+# --- gui/panels/playback_panel.py ---
+
+msgid "Save frequency"
+msgstr "Zapisz częstotliwość"
+
+msgid "Frequency:"
+msgstr "Częstotliwość:"
+
+msgid "e.g. Downtown Tower"
+msgstr "np. Rzeszów Wieża"
+
+msgid "Name:"
+msgstr "Nazwa:"
+
+msgid "Folder in the Memory List. Pick an existing one or type a new "
+"name to create it right away."
+msgstr "Folder w Liście pamięci. Wybierz istniejący albo wpisz nową nazwę, "
+"żeby go od razu utworzyć."
+
+msgid "(no folder)"
+msgstr "(brak folderu)"
+
+msgid "Folder:"
+msgstr "Folder:"
+
+msgid "⟳ Refresh"
+msgstr "⟳ Odśwież"
+
+msgid "Sort new recordings and refresh the list (F5)"
+msgstr "Posegreguj nowe nagrania i odśwież listę (F5)"
+
+msgid "UTC time"
+msgstr "Czas UTC"
+
+msgid "Toggle displayed time: local / UTC"
+msgstr "Przełącz wyświetlanie czasu: polski (lokalny) / UTC"
+
+msgid "Date:"
+msgstr "Data:"
+
+msgid "All"
+msgstr "Wszystkie"
+
+msgid "Today"
+msgstr "Dzisiaj"
+
+msgid "Last 24h"
+msgstr "Ostatnie 24h"
+
+msgid "Last 7 days"
+msgstr "Ostatnie 7 dni"
+
+msgid "Last 30 days"
+msgstr "Ostatnie 30 dni"
+
+msgid "Min. quality:"
+msgstr "Min. jakość:"
+
+msgid "Auto-transcribe"
+msgstr "Transkrypcja auto"
+
+msgid "Automatic background transcription of recordings (Whisper, "
+"pilot-ATC). The main switch is also in the Options tab; "
+"re-enabling it processes any backlog."
+msgstr "Automatyczna transkrypcja nagrań w tle (Whisper, pilot-ATC). "
+"Główny przełącznik jest też w zakładce Opcje; po ponownym włączeniu "
+"przetwarzane są zaległe nagrania."
+
+msgid "Search (frequency, date, file, transcript)… [Ctrl+F]"
+msgstr "Szukaj (częstotliwość, data, plik, transkrypcja)… [Ctrl+F]"
+
+msgid "Newest"
+msgstr "Najnowsze"
+
+msgid "Best quality"
+msgstr "Najlepsza jakość"
+
+msgid "Transcript: select a recording from the list…"
+msgstr "Transkrypcja: wybierz nagranie z listy…"
+
+msgid "Open FlightRadar24 playback in your browser, at this recording's "
+"time (UTC), around the configured receiver location"
+msgstr "Otwórz playback FlightRadar24 w przeglądarce, o godzinie tego "
+"nagrania (UTC), w okolicy skonfigurowanej lokalizacji odbiornika"
+
+msgid "Open ADSBExchange playback in your browser, at this recording's "
+"time (UTC), around the configured receiver location"
+msgstr "Otwórz playback ADSBExchange w przeglądarce, o godzinie tego "
+"nagrania (UTC), w okolicy skonfigurowanej lokalizacji odbiornika"
+
+msgid "Save this frequency to the Memory List (Listen → Channels), "
+"with a name and optional folder - if it's already saved, this "
+"overwrites its name/folder instead of creating a duplicate."
+msgstr "Zapisz tę częstotliwość w Liście pamięci (Nasłuch → Kanały), "
+"z nazwą i opcjonalnym folderem - jeśli jest już tam zapisana, nadpisuje "
+"jej nazwę/folder zamiast tworzyć duplikat."
+
+msgid "☆ Add to favorites"
+msgstr "☆ Dodaj do ulubionych"
+
+msgid "Mark this recording as a favorite (shows up under "
+"“★ Favorites” in the frequency panel on the left)"
+msgstr "Oznacz to nagranie jako ulubione (widoczne potem pod "
+"“★ Ulubione” w panelu częstotliwości po lewej)"
+
+msgid "Language used for the next “Re-transcribe” click on "
+"this recording. “Auto (detect)” is the normal behavior "
+"(and what the background auto-transcription queue always uses "
+"- this setting doesn't affect it). Useful when weak audio "
+"confuses language detection and Whisper picks an exotic "
+"language instead of the real one - you can also type any other "
+"ISO code (e.g. \"de\")."
+msgstr "Język użyty przy następnym kliknięciu “Transkrybuj ponownie” "
+"dla tego nagrania. “Auto (wykryj)” to zwykłe zachowanie (i to, "
+"czego zawsze używa automatyczna transkrypcja w tle - to ustawienie jej "
+"nie dotyczy). Przydatne, gdy słabe audio myli detekcję języka i "
+"Whisper wybiera egzotyczny język zamiast polskiego/angielskiego - "
+"można też wpisać dowolny inny kod ISO (np. \"de\")."
+
+msgid "Auto (detect)"
+msgstr "Auto (wykryj)"
+
+msgid "Polish"
+msgstr "Polski"
+
+msgid "Re-transcribe"
+msgstr "Transkrybuj ponownie"
+
+msgid "Force re-transcription of the selected recording (bypasses the "
+"cache), with the language selected on the left. Also overwrites "
+"any manually typed text below, if there is any."
+msgstr "Wymuś ponowną transkrypcję zaznaczonego nagrania (pomija cache), z "
+"językiem wybranym po lewej. Nadpisuje też ręcznie wpisany tekst poniżej, "
+"jeśli jakiś jest."
+
+msgid "(no transcript - you can also type text by hand)"
+msgstr "(brak transkrypcji - można też wpisać tekst ręcznie)"
+
+msgid "You can edit this directly - a change is saved automatically "
+"when you move to another recording. “Re-transcribe” "
+"overwrites whatever's typed here with a fresh Whisper result."
+msgstr "Można edytować bezpośrednio - zmiana zapisuje się automatycznie po "
+"przejściu do innego nagrania. “Transkrybuj ponownie” nadpisze to, "
+"co tu wpisano, świeżym wynikiem Whisper."
+
+msgid "Select a recording from the list…"
+msgstr "Wybierz nagranie z listy…"
+
+msgid "Auto-play next"
+msgstr "Auto-odtwarzanie kolejnych"
+
+msgid "Automatically play the next recording in the list when one "
+"finishes - for quickly reviewing traffic"
+msgstr "Po zakończeniu nagrania automatycznie odtwórz następne z listy - "
+"do szybkiego przeglądu ruchu"
+
+msgid "Sorting new recordings and analyzing quality…"
+msgstr "Segregowanie nowych nagrań i analiza jakości…"
+
+msgid "Loaded {count} recordings"
+msgstr "Załadowano {count} nagrań"
+
+msgid "({count} new, sorted)"
+msgstr "(posegregowano {count} nowych)"
+
+msgid "Refresh failed"
+msgstr "Błąd odświeżania"
+
+msgid "disabled"
+msgstr "wyłączona"
+
+msgid "done"
+msgstr "gotowe"
+
+msgid "★ In favorites"
+msgstr "★ W ulubionych"
+
+msgid "Transcript:"
+msgstr "Transkrypcja:"
+
+msgid "waiting in the queue…"
+msgstr "oczekuje w kolejce…"
+
+msgid "disabled (click “Re-transcribe” to try manually)"
+msgstr "wyłączona (kliknij “Transkrybuj ponownie”, by spróbować ręcznie)"
+
+msgid "Transcript: recording too short, skipped"
+msgstr "Transkrypcja: nagranie zbyt krótkie, pominięte"
+
+msgid "Transcript: no speech detected (just noise/squelch crackle)"
+msgstr "Transkrypcja: nie wykryto mowy (sam szum/trzask squelchu)"
+
+msgid "Transcript: error (try again)"
+msgstr "Transkrypcja: błąd (spróbuj ponownie)"
+
+msgid "Transcript (manually edited):"
+msgstr "Transkrypcja (edytowana ręcznie):"
+
+msgid "— low confidence, take with a grain of salt"
+msgstr "— niska pewność, traktuj z rezerwą"
+
+msgid "Transcript"
+msgstr "Transkrypcja"
+
+msgid "Transcript: re-processing…"
+msgstr "Transkrypcja: trwa ponowne przetwarzanie…"
+
+msgid "Permanently delete this file?"
+msgstr "Trwale usunąć plik?"
+
+msgid "… and {count} more"
+msgstr "… i {count} więcej"
+
+msgid "Permanently delete {count} files?"
+msgstr "Trwale usunąć {count} plików?"
+
+msgid "Delete recordings"
+msgstr "Usuń nagrania"
+
+msgid "Delete recording"
+msgstr "Usuń nagranie"
+
+msgid "Deleted: {name}"
+msgstr "Usunięto: {name}"
+
+msgid "Deleted {count} file(s)"
+msgstr "Usunięto {count} plik(ów)"
+
+msgid "Delete failed"
+msgstr "Błąd usuwania"
+
+msgid "Failed to delete:"
+msgstr "Nie udało się usunąć:"
+
+msgid "Location not set"
+msgstr "Nie ustawiono lokalizacji"
+
+msgid "Set your receiver's approximate location in Options first "
+"- FlightRadar24/ADSBExchange need it to know where on the "
+"map to jump to."
+msgstr "Ustaw najpierw przybliżoną lokalizację odbiornika w Opcjach "
+"- FlightRadar24/ADSBExchange potrzebują jej, żeby wiedzieć, dokąd "
+"przeskoczyć na mapie."
+
+msgid "▶ Play"
+msgstr "▶ Odtwórz"
+
+msgid "Show in file manager"
+msgstr "Pokaż w folderze"
+
+msgid "Copy file path"
+msgstr "Kopiuj ścieżkę pliku"
+
+msgid "★ Remove from favorites"
+msgstr "★ Usuń z ulubionych"
+
+msgid "Save frequency…"
+msgstr "Zapisz częstotliwość…"
+
+msgid "Delete"
+msgstr "Usuń"
+
+msgid "Copy file paths ({count})"
+msgstr "Kopiuj ścieżki plików ({count})"
+
+msgid "Delete selected ({count})"
+msgstr "Usuń zaznaczone ({count})"
+
+msgid "Copied file path"
+msgstr "Skopiowano ścieżkę pliku"
+
+msgid "Copied {count} file paths"
+msgstr "Skopiowano {count} ścieżek plików"
+
+# --- gui/main_window.py ---
+
+msgid "Listen"
+msgstr "Nasłuch"
+
+msgid "Playback"
+msgstr "Odtwarzacz"
+
+msgid "Channels"
+msgstr "Kanały"
+
+msgid "Statistics"
+msgstr "Statystyki"
+
+msgid "Options"
+msgstr "Opcje"
+
+msgid "Ready."
+msgstr "Gotowy."
+
+msgid " as “{name}”."
+msgstr " jako “{name}”."
+
+msgid "Saved {freq:.4f} MHz to the Memory List"
+msgstr "Zapisano {freq:.4f} MHz w Liście pamięci"
+
+msgid "Blacklisted {freq:.4f} MHz (lockout)."
+msgstr "Zablokowano {freq:.4f} MHz (lockout)."

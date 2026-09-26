@@ -1,7 +1,7 @@
-"""Zakładka Odtwarzacz: przeglądarka nagrań, statystyki i pasek odtwarzania,
-przeniesione z osobnego programu ATC Scanner Browser. Działa równolegle do
-zakładki Nasłuch - silnik skanera i nagrywanie żyją w MainWindow niezależnie
-od tego, która zakładka jest aktualnie widoczna."""
+"""Odtwarzacz tab: recording browser, statistics and player bar, carried over
+from a separate ATC Scanner Browser program. Runs alongside the Listen tab -
+the scanner engine and recording live in MainWindow independently of which
+tab is currently visible."""
 from __future__ import annotations
 
 import subprocess
@@ -37,6 +37,7 @@ from PySide6.QtWidgets import (
 )
 
 from ...config import AppConfig
+from ...i18n import tr
 from ...models import Channel, Modulation
 from ...playback.audio_analysis import analyze_wav, compute_waveform_peaks
 from ...playback.audio_player import AudioPlayer
@@ -67,7 +68,7 @@ NAV_KEYS = {
 
 
 class RecordingsTableView(QTableView):
-    """QTableView, który sygnalizuje nawigację klawiaturą (do auto-odtwarzania) i Delete (do usuwania)."""
+    """QTableView that also signals keyboard navigation (for auto-play) and Delete (for deletion)."""
 
     navigated = Signal()
     deleteRequested = Signal()
@@ -88,32 +89,32 @@ def _format_time(ms: int) -> str:
 
 
 class _SaveFrequencyDialog(QDialog):
-    """Zapisuje biezaco wybrana czestotliwosc w Liscie pamieci (zakladka
-    Nasluch → Kanaly): nazwa + opcjonalny folder. Jesli czestotliwosc jest
-    juz znana, MainWindow nadpisuje jej wpis (patrz PlaybackPanel.channel_saved)
-    zamiast tworzyc duplikat."""
+    """Saves the currently selected frequency to the Memory List (Listen ->
+    Channels tab): name + optional folder. If the frequency is already
+    known, MainWindow overwrites its entry (see PlaybackPanel.channel_saved)
+    instead of creating a duplicate."""
 
     def __init__(self, freq_khz: int, current_name: str, folders: list[str], parent=None):
         super().__init__(parent)
-        self.setWindowTitle("Zapisz częstotliwość")
+        self.setWindowTitle(tr("Save frequency"))
         form = QFormLayout(self)
-        form.addRow("Częstotliwość:", QLabel(f"{freq_khz / 1000:.3f} MHz"))
+        form.addRow(tr("Frequency:"), QLabel(f"{freq_khz / 1000:.3f} MHz"))
 
         self.name_edit = QLineEdit(current_name)
-        self.name_edit.setPlaceholderText("np. Rzeszów Wieża")
-        apply_emoji_font(self.name_edit)  # np. "🚒 KRG 1" - patrz apply_emoji_font()
-        form.addRow("Nazwa:", self.name_edit)
+        self.name_edit.setPlaceholderText(tr("e.g. Downtown Tower"))
+        apply_emoji_font(self.name_edit)  # e.g. "🚒 KRG 1" - see apply_emoji_font()
+        form.addRow(tr("Name:"), self.name_edit)
 
         self.folder_combo = QComboBox()
         self.folder_combo.setEditable(True)
-        self.folder_combo.setToolTip(
-            "Folder w Liscie pamieci. Wybierz istniejacy albo wpisz nowa nazwe,\n"
-            "zeby go od razu utworzyc."
-        )
-        self.folder_combo.addItem("(brak folderu)", "")
+        self.folder_combo.setToolTip(tr(
+            "Folder in the Memory List. Pick an existing one or type a new "
+            "name to create it right away."
+        ))
+        self.folder_combo.addItem(tr("(no folder)"), "")
         for f in folders:
             self.folder_combo.addItem(f, f)
-        form.addRow("Folder:", self.folder_combo)
+        form.addRow(tr("Folder:"), self.folder_combo)
 
         buttons = QDialogButtonBox(QDialogButtonBox.StandardButton.Ok | QDialogButtonBox.StandardButton.Cancel)
         buttons.accepted.connect(self.accept)
@@ -122,22 +123,27 @@ class _SaveFrequencyDialog(QDialog):
 
     def values(self) -> tuple[str, str]:
         folder = self.folder_combo.currentText().strip()
-        if folder == "(brak folderu)":
+        if folder == tr("(no folder)"):
             folder = ""
         return self.name_edit.text().strip(), folder
 
 
 class PlaybackPanel(QWidget):
-    """Zakładka 'Odtwarzacz': przeglądarka nagrań + statystyki + pasek odtwarzania.
+    """The "Odtwarzacz" tab: recording browser + statistics + player bar.
 
-    Katalog nagrań jest odczytywany za każdym odświeżeniem z ``AppConfig.recording.output_dir``,
-    czyli tego samego ustawienia, którego używa zakładka Nasłuch do zapisu - nie trzeba więc
-    synchronizować dwóch osobnych konfiguracji jak w dawnych dwóch programach.
+    The recordings folder is re-read from ``AppConfig.recording.output_dir``
+    on every refresh - the same setting the Listen tab uses for writing - so
+    there's no need to keep two separate configs in sync like the old,
+    separate two-program setup required.
     """
 
-    status_message = Signal(str, int)  # (tekst, czas wyświetlania w ms; 0 = bez limitu)
-    channel_saved = Signal(object)  # Channel - "Zapisz częstotliwość"; MainWindow scala z Listą pamięci
+    status_message = Signal(str, int)  # (text, display duration in ms; 0 = no limit)
+    channel_saved = Signal(object)  # Channel - "Save frequency"; MainWindow merges it into the Memory List
     transcription_enabled_changed = Signal(bool)
+    # Emitted when the user clicks FlightRadar24/ADSBExchange with no
+    # receiver location configured yet - MainWindow switches to Options and
+    # focuses the field that needs filling in (see LocationPanel).
+    location_setup_requested = Signal()
 
     def __init__(self, config: AppConfig, parent=None):
         super().__init__(parent)
@@ -147,18 +153,18 @@ class PlaybackPanel(QWidget):
         self._suppress_autoplay = True
         self._worker: Optional[RefreshWorker] = None
         self._last_selected_path = None
-        self._waveform_path = None  # ostatnia ścieżka dla ktorej policzono fale - patrz _on_playback_started
+        self._waveform_path = None  # last path the waveform was computed for - see _on_playback_started
         self._selected_recording: Optional[Recording] = None
-        # Śledzi ręczną edycję pola transkrypcji - patrz _flush_transcript_edit().
-        # "target" to Recording, do którego aktualnie odnosi się zawartość
-        # transcript_text_edit; "baseline" to tekst jaki tam wstawiliśmy
-        # programowo (z transkrypcji/cache), żeby odróżnić "user coś zmienił"
-        # od "to wciąż to samo, nic do zapisania".
+        # Tracks a manual edit of the transcript field - see _flush_transcript_edit().
+        # "target" is the Recording transcript_text_edit's contents currently
+        # refer to; "baseline" is the text we last put there programmatically
+        # (from a transcription result/cache), to tell "the user changed
+        # something" apart from "still the same, nothing to save".
         self._transcript_edit_target: Optional[Recording] = None
         self._transcript_edit_baseline: str = ""
 
-        # freq_khz -> nazwa z Listy pamieci (zakladka Nasluch/Kanaly) - patrz
-        # set_known_frequencies()/set_known_folders(), wolane z MainWindow.
+        # freq_khz -> name from the Memory List (Listen/Channels tab) - see
+        # set_known_frequencies()/set_known_folders(), called from MainWindow.
         self._freq_names: dict[int, str] = {}
         self._known_folders: List[str] = []
 
@@ -174,7 +180,7 @@ class PlaybackPanel(QWidget):
         # cache file (grows with the whole recording archive, unbounded),
         # that's a full JSON load+parse+dump+write measured at ~55-60ms of
         # GUI-thread stall, on every transmission end, getting slower as the
-        # archive grows - a direct, reproducible cause of "laguje" spikes
+        # archive grows - a direct, reproducible cause of stutter spikes
         # timed with scanner activity. See _flush_quality_cache() and
         # ingest_finished_recording() below.
         self._quality_cache = QualityCache()
@@ -190,11 +196,11 @@ class PlaybackPanel(QWidget):
         # stats_tab.update_stats() alone (two pyqtgraph PlotWidgets rebuilt from
         # scratch, plus the frequency table) measured ~60-75ms of GUI-thread
         # stall every single time a channel finished, on top of the frequency
-        # list/date combo rebuilds - a second, separate cause of "laguje"
+        # list/date combo rebuilds - a second, separate cause of stutter
         # spikes timed with scanner activity. Debounced the same way, except
         # capped (started only if not already pending, never pushed back) so
         # a continuously-busy scan can't defer it forever while someone's
-        # actually looking at Statystyki.
+        # actually looking at Statistics.
         self._stats_dirty = False
         self._stats_refresh_timer = QTimer(self)
         self._stats_refresh_timer.setSingleShot(True)
@@ -207,11 +213,11 @@ class PlaybackPanel(QWidget):
         self._build_ui()
         self._connect_signals()
 
-        # Nowe nagrania trafiają do biblioteki na bieżąco przez
-        # ingest_finished_recording() (patrz MainWindow), więc nie ma już
-        # potrzeby okresowego pełnego przeskanowania katalogu - to
-        # jednorazowe odświeżenie tylko wczytuje to, co już jest na dysku
-        # (i posegregowuje ewentualne luźne pliki sprzed tej zmiany).
+        # New recordings are added to the library on the fly via
+        # ingest_finished_recording() (see MainWindow), so there's no more
+        # need for a periodic full directory rescan - this one-time refresh
+        # just loads whatever's already on disk (and sorts any stray loose
+        # files left over from before this change).
         self.trigger_refresh()
 
     def _recordings_root(self) -> Path:
@@ -225,10 +231,10 @@ class PlaybackPanel(QWidget):
         outer.addWidget(self._build_toolbar())
 
         outer.addWidget(self._build_browser_tab(), stretch=1)
-        # Statystyki zyje jako wlasna gorna zakladka (patrz MainWindow), ale
-        # nadal jest zbudowana i aktualizowana tutaj razem z reszta stanu
-        # biblioteki - MainWindow tylko wyciaga ten widget i umieszcza go
-        # gdzie indziej, zadne inne okablowanie sie nie zmienia.
+        # Statistics lives as its own top-level tab (see MainWindow), but is
+        # still built and updated here alongside the rest of the library
+        # state - MainWindow just pulls this widget out and places it
+        # elsewhere, no other wiring changes.
         self.stats_tab = StatsTab()
 
         outer.addWidget(self._build_transcript_panel())
@@ -239,8 +245,8 @@ class PlaybackPanel(QWidget):
         layout = QHBoxLayout(bar)
         layout.setContentsMargins(0, 0, 0, 0)
 
-        self.refresh_btn = QPushButton("⟳ Odśwież")
-        self.refresh_btn.setToolTip("Posegreguj nowe nagrania i odśwież listę (F5)")
+        self.refresh_btn = QPushButton(tr("⟳ Refresh"))
+        self.refresh_btn.setToolTip(tr("Sort new recordings and refresh the list (F5)"))
         layout.addWidget(self.refresh_btn)
 
         self.progress_bar = QProgressBar()
@@ -249,19 +255,21 @@ class PlaybackPanel(QWidget):
         layout.addWidget(self.progress_bar)
 
         layout.addSpacing(12)
-        self.utc_checkbox = QCheckBox("Czas UTC")
-        self.utc_checkbox.setToolTip("Przełącz wyświetlanie czasu: polski (lokalny) / UTC")
+        self.utc_checkbox = QCheckBox(tr("UTC time"))
+        self.utc_checkbox.setToolTip(tr("Toggle displayed time: local / UTC"))
         layout.addWidget(self.utc_checkbox)
 
         layout.addSpacing(12)
-        layout.addWidget(QLabel("Data:"))
+        layout.addWidget(QLabel(tr("Date:")))
         self.date_combo = QComboBox()
-        self.date_combo.addItems(["Wszystkie", "Dzisiaj", "Ostatnie 24h", "Ostatnie 7 dni", "Ostatnie 30 dni"])
+        self.date_combo.addItems([
+            tr("All"), tr("Today"), tr("Last 24h"), tr("Last 7 days"), tr("Last 30 days"),
+        ])
         self.date_combo.insertSeparator(5)
         layout.addWidget(self.date_combo)
 
         layout.addSpacing(12)
-        layout.addWidget(QLabel("Min. jakość:"))
+        layout.addWidget(QLabel(tr("Min. quality:")))
         self.quality_slider = QSlider(Qt.Orientation.Horizontal)
         self.quality_slider.setRange(0, 100)
         self.quality_slider.setFixedWidth(120)
@@ -271,12 +279,12 @@ class PlaybackPanel(QWidget):
         layout.addWidget(self.quality_value_label)
 
         layout.addSpacing(12)
-        self.transcription_checkbox = QCheckBox("Transkrypcja auto")
-        self.transcription_checkbox.setToolTip(
-            "Automatyczna transkrypcja nagrań w tle (Whisper, pilot-ATC). "
-            "Główny przełącznik jest też w zakładce Opcje; po ponownym włączeniu "
-            "przetwarzane są zaległe nagrania."
-        )
+        self.transcription_checkbox = QCheckBox(tr("Auto-transcribe"))
+        self.transcription_checkbox.setToolTip(tr(
+            "Automatic background transcription of recordings (Whisper, "
+            "pilot-ATC). The main switch is also in the Options tab; "
+            "re-enabling it processes any backlog."
+        ))
         layout.addWidget(self.transcription_checkbox)
         self.transcription_progress_label = QLabel("")
         self.transcription_progress_label.setMinimumWidth(100)
@@ -284,11 +292,11 @@ class PlaybackPanel(QWidget):
 
         layout.addSpacing(12)
         self.search_edit = QLineEdit()
-        self.search_edit.setPlaceholderText("Szukaj (częstotliwość, data, plik, transkrypcja)… [Ctrl+F]")
+        self.search_edit.setPlaceholderText(tr("Search (frequency, date, file, transcript)… [Ctrl+F]"))
         layout.addWidget(self.search_edit, stretch=1)
 
-        self.sort_newest_btn = QPushButton("Najnowsze")
-        self.sort_quality_btn = QPushButton("Najlepsza jakość")
+        self.sort_newest_btn = QPushButton(tr("Newest"))
+        self.sort_quality_btn = QPushButton(tr("Best quality"))
         layout.addWidget(self.sort_newest_btn)
         layout.addWidget(self.sort_quality_btn)
 
@@ -304,11 +312,11 @@ class PlaybackPanel(QWidget):
 
         self.freq_panel = FrequencyPanel()
         self.freq_panel.setMinimumWidth(220)
-        # Celowo bez setMaximumWidth: użytkownik może chcieć rozciągnąć ten
-        # panel szerzej (np. dla widoku języków z dłuższymi etykietami) -
-        # QSplitter i tak nie pozwoli mu przejąć więcej niż całą dostępną
-        # szerokość, więc górny limit nie był tu potrzebny do niczego poza
-        # ograniczaniem użytkownika.
+        # Deliberately no setMaximumWidth: the user may want to stretch this
+        # panel wider (e.g. for the language view's longer labels) -
+        # QSplitter won't let it take more than the whole available width
+        # anyway, so an upper limit here only ever restricted the user, never
+        # did anything useful.
         splitter.addWidget(self.freq_panel)
 
         self.table_model = RecordingsTableModel()
@@ -339,16 +347,17 @@ class PlaybackPanel(QWidget):
         layout.setContentsMargins(6, 4, 6, 4)
 
         header_row = QHBoxLayout()
-        self.transcript_header_label = QLabel("Transkrypcja: wybierz nagranie z listy…")
+        self.transcript_header_label = QLabel(tr("Transcript: select a recording from the list…"))
         header_row.addWidget(self.transcript_header_label, stretch=1)
 
         self.fr24_btn = QPushButton(" FlightRadar24")
         fr24_icon_path = RESOURCES_DIR / "fr24.svg"
         if fr24_icon_path.exists():
             self.fr24_btn.setIcon(QIcon(str(fr24_icon_path)))
-        self.fr24_btn.setToolTip(
-            "Otwórz playback FlightRadar24 w przeglądarce, o godzinie tego nagrania (UTC), w okolicy domu"
-        )
+        self.fr24_btn.setToolTip(tr(
+            "Open FlightRadar24 playback in your browser, at this recording's "
+            "time (UTC), around the configured receiver location"
+        ))
         self.fr24_btn.setEnabled(False)
         header_row.addWidget(self.fr24_btn)
 
@@ -356,69 +365,72 @@ class PlaybackPanel(QWidget):
         adsbx_icon_path = RESOURCES_DIR / "adsbexchange.png"
         if adsbx_icon_path.exists():
             self.adsbx_btn.setIcon(QIcon(str(adsbx_icon_path)))
-        self.adsbx_btn.setToolTip(
-            "Otwórz playback ADSBExchange w przeglądarce, o godzinie tego nagrania (UTC), w okolicy domu"
-        )
+        self.adsbx_btn.setToolTip(tr(
+            "Open ADSBExchange playback in your browser, at this recording's "
+            "time (UTC), around the configured receiver location"
+        ))
         self.adsbx_btn.setEnabled(False)
         header_row.addWidget(self.adsbx_btn)
 
-        # Zwykly tekst, bez emoji: Qt/fontconfig na tym systemie nie
-        # wyswietla wiekszosci kolorowych emoji (NotoColorEmoji jest
-        # zainstalowane, ale Qt nie renderuje z niego wielu glifow -
-        # zaobserwowane realnie, patrz historia tej zmiany) - wychodzi
-        # pusty kwadracik zamiast ikony, gorzej niz brak ikony w ogole.
-        self.save_freq_btn = QPushButton("Zapisz częstotliwość")
-        self.save_freq_btn.setToolTip(
-            "Zapisz tę częstotliwość w Liście pamięci (zakładka Nasłuch → Kanały),\n"
-            "z nazwą i opcjonalnym folderem - jeśli jest już tam zapisana, nadpisuje\n"
-            "jej nazwę/folder zamiast tworzyć duplikat."
-        )
+        # Plain text, no emoji: Qt/fontconfig on some systems doesn't render
+        # most color emoji even with NotoColorEmoji installed (observed
+        # for real, see this change's history) - it comes out as an empty
+        # box instead of an icon, worse than no icon at all.
+        self.save_freq_btn = QPushButton(tr("Save frequency"))
+        self.save_freq_btn.setToolTip(tr(
+            "Save this frequency to the Memory List (Listen → Channels), "
+            "with a name and optional folder - if it's already saved, this "
+            "overwrites its name/folder instead of creating a duplicate."
+        ))
         self.save_freq_btn.setEnabled(False)
         header_row.addWidget(self.save_freq_btn)
 
-        self.favorite_btn = QPushButton("☆ Dodaj do ulubionych")
-        self.favorite_btn.setToolTip("Oznacz to nagranie jako ulubione (widoczne potem pod „★ Ulubione” w panelu częstotliwości po lewej)")
+        self.favorite_btn = QPushButton(tr("☆ Add to favorites"))
+        self.favorite_btn.setToolTip(tr(
+            "Mark this recording as a favorite (shows up under "
+            "“★ Favorites” in the frequency panel on the left)"
+        ))
         self.favorite_btn.setEnabled(False)
         header_row.addWidget(self.favorite_btn)
 
-        header_row.addWidget(QLabel("Język:"))
+        header_row.addWidget(QLabel(tr("Language:")))
         self.transcribe_language_combo = QComboBox()
         self.transcribe_language_combo.setEditable(True)
-        # Nie wstawiaj ręcznie wpisanych kodów na stałe do listy - to
-        # jednorazowy, doraźny override dla tego kliknięcia, nie coś co
-        # powinno zaśmiecać rozwijaną listę kolejnymi jednorazowymi wpisami.
+        # Don't permanently insert manually-typed codes into the list - this
+        # is a one-off, ad-hoc override for this one click, not something
+        # that should clutter the dropdown with one-time entries.
         self.transcribe_language_combo.setInsertPolicy(QComboBox.InsertPolicy.NoInsert)
-        self.transcribe_language_combo.setToolTip(
-            "Język użyty przy następnym kliknięciu „Transkrybuj ponownie” dla\n"
-            "tego nagrania. „Auto (wykryj)” to zwykłe zachowanie (i to, czego\n"
-            "zawsze używa automatyczna transkrypcja w tle - to ustawienie jej\n"
-            "nie dotyczy). Przydatne, gdy słabe audio myli detekcję języka i\n"
-            "Whisper wybiera egzotyczny język zamiast polskiego/angielskiego -\n"
-            "można też wpisać dowolny inny kod ISO (np. \"de\")."
-        )
-        for label, code in (("Auto (wykryj)", None), ("Polski", "pl"), ("English", "en")):
+        self.transcribe_language_combo.setToolTip(tr(
+            "Language used for the next “Re-transcribe” click on "
+            "this recording. “Auto (detect)” is the normal behavior "
+            "(and what the background auto-transcription queue always uses "
+            "- this setting doesn't affect it). Useful when weak audio "
+            "confuses language detection and Whisper picks an exotic "
+            "language instead of the real one - you can also type any other "
+            "ISO code (e.g. \"de\")."
+        ))
+        for label, code in ((tr("Auto (detect)"), None), (tr("Polish"), "pl"), ("English", "en")):
             self.transcribe_language_combo.addItem(label, code)
         header_row.addWidget(self.transcribe_language_combo)
 
-        self.transcribe_now_btn = QPushButton("Transkrybuj ponownie")
-        self.transcribe_now_btn.setToolTip(
-            "Wymuś ponowną transkrypcję zaznaczonego nagrania (pomija cache), z językiem\n"
-            "wybranym po lewej. Nadpisuje też ręcznie wpisany tekst poniżej, jeśli jakiś jest."
-        )
+        self.transcribe_now_btn = QPushButton(tr("Re-transcribe"))
+        self.transcribe_now_btn.setToolTip(tr(
+            "Force re-transcription of the selected recording (bypasses the "
+            "cache), with the language selected on the left. Also overwrites "
+            "any manually typed text below, if there is any."
+        ))
         self.transcribe_now_btn.setEnabled(False)
         header_row.addWidget(self.transcribe_now_btn)
         layout.addLayout(header_row)
 
         self.transcript_text_edit = QPlainTextEdit()
         self.transcript_text_edit.setMaximumHeight(70)
-        self.transcript_text_edit.setPlaceholderText(
-            "(brak transkrypcji - można też wpisać tekst ręcznie)"
-        )
-        self.transcript_text_edit.setToolTip(
-            "Można edytować bezpośrednio - zmiana zapisuje się automatycznie po\n"
-            "przejściu do innego nagrania. „Transkrybuj ponownie” nadpisze to,\n"
-            "co tu wpisano, świeżym wynikiem Whisper."
-        )
+        self.transcript_text_edit.setPlaceholderText(tr("(no transcript - you can also type text by hand)"))
+        self.transcript_text_edit.setToolTip(tr(
+            "You can edit this directly - a change is saved automatically "
+            "when you move to another recording. “Re-transcribe” "
+            "overwrites whatever's typed here with a fresh Whisper result."
+        ))
         layout.addWidget(self.transcript_text_edit)
 
         return frame
@@ -428,13 +440,13 @@ class PlaybackPanel(QWidget):
         bar.setFrameShape(QFrame.Shape.StyledPanel)
         outer = QVBoxLayout(bar)
 
-        # Fala dźwiękowa zastępuje zwykły pasek postępu (patrz WaveformView) -
-        # ta sama rola (klik/przeciągnięcie = przewijanie), plus od razu widać
-        # gdzie w nagraniu jest cisza (np. przerwa wycięta przez squelch -
-        # patrz ScannerEngine._play_and_record_slot) a gdzie realna treść.
-        # Osobny wiersz na całą szerokość, bo przy wysokości potrzebnej żeby
-        # słupki cokolwiek pokazywały, wciśnięcie jej w ten sam rząd co
-        # 40px-owe przyciski wygladałoby niechlujnie.
+        # The waveform replaces a plain progress bar (see WaveformView) -
+        # same role (click/drag = seek), plus it immediately shows where in
+        # the recording there's silence (e.g. a gap trimmed by squelch - see
+        # ScannerEngine._play_and_record_slot) versus real content. A
+        # separate full-width row, because at the height needed for the bars
+        # to show anything meaningful, squeezing it into the same row as the
+        # 40px buttons would look cluttered.
         self.waveform_view = WaveformView()
         outer.addWidget(self.waveform_view)
 
@@ -447,7 +459,7 @@ class PlaybackPanel(QWidget):
             b.setFixedWidth(40)
             controls.addWidget(b)
 
-        self.now_playing_label = QLabel("Wybierz nagranie z listy…")
+        self.now_playing_label = QLabel(tr("Select a recording from the list…"))
         self.now_playing_label.setMinimumWidth(280)
         controls.addWidget(self.now_playing_label, stretch=1)
 
@@ -455,24 +467,25 @@ class PlaybackPanel(QWidget):
         self.time_label.setFixedWidth(90)
         controls.addWidget(self.time_label)
 
-        controls.addWidget(QLabel("🔊"))
+        controls.addWidget(QLabel("\U0001f50a"))
         self.volume_slider = QSlider(Qt.Orientation.Horizontal)
         self.volume_slider.setRange(0, 100)
         self.volume_slider.setValue(90)
         self.volume_slider.setFixedWidth(90)
         controls.addWidget(self.volume_slider)
 
-        self.autoplay_checkbox = QCheckBox("Auto-odtwarzanie kolejnych")
+        self.autoplay_checkbox = QCheckBox(tr("Auto-play next"))
         self.autoplay_checkbox.setChecked(True)
-        self.autoplay_checkbox.setToolTip(
-            "Po zakończeniu nagrania automatycznie odtwórz następne z listy - do szybkiego przeglądu ruchu"
-        )
+        self.autoplay_checkbox.setToolTip(tr(
+            "Automatically play the next recording in the list when one "
+            "finishes - for quickly reviewing traffic"
+        ))
         controls.addWidget(self.autoplay_checkbox)
         outer.addLayout(controls)
 
         return bar
 
-    # ------------------------------------------------------------- sygnały
+    # ------------------------------------------------------------- signals
     def _connect_signals(self) -> None:
         self.refresh_btn.clicked.connect(self.trigger_refresh)
         QShortcut(QKeySequence("F5"), self, activated=self.trigger_refresh)
@@ -525,7 +538,7 @@ class PlaybackPanel(QWidget):
         self.search_edit.setFocus()
         self.search_edit.selectAll()
 
-    # ------------------------------------------------------------ odświeżanie
+    # ------------------------------------------------------------ refreshing
     def trigger_refresh(self) -> None:
         if self._worker is not None and self._worker.isRunning():
             return
@@ -542,7 +555,7 @@ class PlaybackPanel(QWidget):
         self.refresh_btn.setEnabled(False)
         self.progress_bar.setVisible(True)
         self.progress_bar.setRange(0, 0)
-        self.status_message.emit("Segregowanie nowych nagrań i analiza jakości…", 0)
+        self.status_message.emit(tr("Sorting new recordings and analyzing quality…"), 0)
 
         self._worker = RefreshWorker(self._recordings_root(), self)
         self._worker.progress.connect(self._on_refresh_progress)
@@ -566,7 +579,7 @@ class PlaybackPanel(QWidget):
             self._quality_cache_dirty = False
 
     def _schedule_stats_refresh(self) -> None:
-        """Marks the frequency list/date combo/Statystyki tab stale and
+        """Marks the frequency list/date combo/Statistics tab stale and
         arranges for _flush_stats_refresh() to run soon - see the comment on
         self._stats_refresh_timer in __init__. Deliberately doesn't restart
         an already-running timer: that would turn a busy scan into an
@@ -610,9 +623,9 @@ class PlaybackPanel(QWidget):
         self.progress_bar.setVisible(False)
 
         now = datetime.now(POLAND_TZ).strftime("%H:%M:%S")
-        msg = f"Załadowano {len(recordings)} nagrań"
+        msg = tr("Loaded {count} recordings").format(count=len(recordings))
         if moved_count:
-            msg += f" (posegregowano {moved_count} nowych)"
+            msg += " " + tr("({count} new, sorted)").format(count=moved_count)
         msg += f" — {now}"
         self.status_message.emit(msg, 5000)
 
@@ -621,8 +634,8 @@ class PlaybackPanel(QWidget):
     def _on_refresh_failed(self, message: str) -> None:
         self.refresh_btn.setEnabled(True)
         self.progress_bar.setVisible(False)
-        self.status_message.emit("Błąd odświeżania", 5000)
-        QMessageBox.warning(self, "Błąd odświeżania", message)
+        self.status_message.emit(tr("Refresh failed"), 5000)
+        QMessageBox.warning(self, tr("Refresh failed"), message)
 
     def _restore_selection(self) -> None:
         if self._last_selected_path is None:
@@ -638,7 +651,7 @@ class PlaybackPanel(QWidget):
     def _rebuild_date_combo(self, recordings: List[Recording]) -> None:
         current_data = self.date_combo.currentData()
         current_text = self.date_combo.currentText()
-        # usuń poprzednie konkretne daty (za separatorem, indeks 5)
+        # remove previous specific dates (after the separator, index 5)
         while self.date_combo.count() > 6:
             self.date_combo.removeItem(6)
         for day_str, count in sorted(counts_per_day(recordings), reverse=True):
@@ -650,9 +663,10 @@ class PlaybackPanel(QWidget):
             self.date_combo.setCurrentIndex(idx)
 
     def ingest_finished_recording(self, path_str: str) -> None:
-        """Dodaje jedno właśnie zakończone nagranie do biblioteki od razu
-        (wołane z MainWindow, podpięte pod ScannerEngine.signals.recording_finished),
-        zamiast czekać na kolejne pełne przeskanowanie katalogu."""
+        """Adds one just-finished recording to the library right away
+        (called from MainWindow, hooked up to
+        ScannerEngine.signals.recording_finished), instead of waiting for the
+        next full directory rescan."""
         path = Path(path_str)
         parsed = parse_filename(path.name)
         if parsed is None:
@@ -687,7 +701,7 @@ class PlaybackPanel(QWidget):
 
         self._maybe_transcribe_new(rec)
 
-    # ------------------------------------------------------------- filtrowanie
+    # ------------------------------------------------------------- filtering
     def _on_utc_toggled(self, checked: bool) -> None:
         self.table_model.set_use_utc(checked)
         self.stats_tab.set_use_utc(checked)
@@ -702,15 +716,15 @@ class PlaybackPanel(QWidget):
         now = datetime.now(POLAND_TZ)
         today_start = datetime.combine(now.date(), time.min, tzinfo=POLAND_TZ)
 
-        if idx == 0:  # Wszystkie
+        if idx == 0:  # All
             self.proxy.set_date_range(None, None)
-        elif idx == 1:  # Dzisiaj
+        elif idx == 1:  # Today
             self.proxy.set_date_range(today_start, today_start + timedelta(days=1))
-        elif idx == 2:  # Ostatnie 24h
+        elif idx == 2:  # Last 24h
             self.proxy.set_date_range(now - timedelta(hours=24), now)
-        elif idx == 3:  # Ostatnie 7 dni
+        elif idx == 3:  # Last 7 days
             self.proxy.set_date_range(now - timedelta(days=7), now)
-        elif idx == 4:  # Ostatnie 30 dni
+        elif idx == 4:  # Last 30 days
             self.proxy.set_date_range(now - timedelta(days=30), now)
         else:
             day_str = self.date_combo.currentData()
@@ -722,10 +736,10 @@ class PlaybackPanel(QWidget):
             self.proxy.set_date_range(start, start + timedelta(days=1))
 
     def _jump_to_frequency(self, freq_khz: int) -> None:
-        """Wolane z StatsTab.frequencySelected (dwuklik w wiersz) - filtruje
-        Przegladarke do tej czestotliwosci. MainWindow, osobno podpiete pod
-        ten sam sygnal, przelacza na gorna zakladke Odtwarzacz, zeby to
-        bylo w ogole widoczne (Statystyki to teraz osobna zakladka)."""
+        """Called from StatsTab.frequencySelected (double-click on a row) -
+        filters the browser to this frequency. MainWindow, separately hooked
+        to the same signal, switches to the top-level Odtwarzacz tab so this
+        is actually visible (Statistics is now its own tab)."""
         self.freq_panel.switch_to_frequency_mode()
         for row in range(self.freq_panel.list_widget.count()):
             item = self.freq_panel.list_widget.item(row)
@@ -733,20 +747,20 @@ class PlaybackPanel(QWidget):
                 self.freq_panel.list_widget.setCurrentRow(row)
                 break
 
-    # ----------------------------------------------------------- transkrypcja
+    # ----------------------------------------------------------- transcription
     def _hydrate_transcripts(self, recordings: List[Recording]) -> None:
-        """Odtwarza wyniki transkrypcji i status ulubionego z trwałego cache
-        na świeżo sparsowanej liście nagrań (scan_recordings za każdym
-        odświeżeniem tworzy nowe obiekty Recording, więc bez tego liczylibyśmy
-        wszystko od nowa / gubilibyśmy gwiazdki)."""
+        """Restores transcription results and favorite status from the
+        persistent cache onto a freshly-parsed recording list (scan_recordings
+        creates new Recording objects on every refresh, so without this
+        everything would be recomputed from scratch / favorite stars lost)."""
         for rec in recordings:
             rec.transcript = self._transcription_cache.get(rec.cache_key())
             rec.is_favorite = self._favorites_store.is_favorite(rec.cache_key())
 
     def _on_freq_panel_selection(self, value) -> None:
-        # Wybór w trybie Częstotliwości jest niezależny od trybu Języki -
-        # czyścimy ewentualny filtr językowy, żeby oba nigdy się
-        # niespodziewanie nie łączyły (patrz freq_panel.py).
+        # A selection in Frequency mode is independent of Language mode -
+        # clear any language filter so the two never unexpectedly combine
+        # (see freq_panel.py).
         self.proxy.set_language_filter(None)
         if value == FAVORITES_ITEM:
             self.proxy.set_frequency_filter(ALL_ITEM_FREQ)
@@ -768,10 +782,10 @@ class PlaybackPanel(QWidget):
         self._favorites_store.set_favorite(rec.cache_key(), rec.is_favorite)
         self._set_favorite_btn_state(rec.is_favorite)
         self.proxy.refresh()
-        self.freq_panel.set_recordings(self._recordings)  # refresh the "★ Ulubione (N)" count
+        self.freq_panel.set_recordings(self._recordings)  # refresh the "★ Favorites (N)" count
 
     def _set_favorite_btn_state(self, is_favorite: bool) -> None:
-        self.favorite_btn.setText("★ W ulubionych" if is_favorite else "☆ Dodaj do ulubionych")
+        self.favorite_btn.setText(tr("★ In favorites") if is_favorite else tr("☆ Add to favorites"))
 
     def _maybe_start_transcription(self, include_errors: bool = True) -> None:
         """Full catch-up pass: (re)scans *every* recording currently in the
@@ -784,7 +798,7 @@ class PlaybackPanel(QWidget):
         _maybe_transcribe_new() for the single-new-recording fast path that
         avoids paying this on every transmission end."""
         if not self.config.transcription.enabled:
-            self.transcription_progress_label.setText("wyłączona")
+            self.transcription_progress_label.setText(tr("disabled"))
             return
         self._launch_transcription_worker(list(self._recordings), include_errors=include_errors)
 
@@ -822,12 +836,12 @@ class PlaybackPanel(QWidget):
         self._transcription_worker.start()
 
     def set_transcription_enabled(self, enabled: bool) -> None:
-        """Włącza/wyłącza automatyczną kolejkę i synchronizuje oba przełączniki.
+        """Enables/disables the automatic queue and syncs both toggles.
 
-        Zatrzymanie jest kooperacyjne: ewentualnie trwający już pojedynczy
-        Whisper może dobiec końca, ale kolejne pliki nie zostaną podjęte.
-        Po włączeniu ``_maybe_start_transcription`` buduje kolejkę z każdego
-        nagrania, które nadal nie ma wpisu w cache, więc nadrabia zaległości.
+        Stopping is cooperative: a Whisper call already in progress may run
+        to completion, but no further files are picked up. Once re-enabled,
+        ``_maybe_start_transcription`` builds a queue from every recording
+        that still has no cache entry, so it catches up on the backlog.
         """
         self.config.transcription.enabled = enabled
         self.config.save()
@@ -837,7 +851,7 @@ class PlaybackPanel(QWidget):
         if enabled:
             self._maybe_start_transcription()
         else:
-            self.transcription_progress_label.setText("wyłączona")
+            self.transcription_progress_label.setText(tr("disabled"))
             if self._transcription_worker is not None and self._transcription_worker.isRunning():
                 self._transcription_worker.request_stop()
         self.transcription_enabled_changed.emit(enabled)
@@ -847,7 +861,7 @@ class PlaybackPanel(QWidget):
 
     def _on_transcription_progress(self, done: int, total: int) -> None:
         if total == 0:
-            self.transcription_progress_label.setText("gotowe")
+            self.transcription_progress_label.setText(tr("done"))
         else:
             self.transcription_progress_label.setText(f"{done}/{total}")
 
@@ -859,32 +873,33 @@ class PlaybackPanel(QWidget):
 
     def _on_transcription_batch_finished(self) -> None:
         if self.config.transcription.enabled:
-            self.transcription_progress_label.setText("gotowe")
-        # Coś mogło dotrzeć przez ingest_finished_recording() w trakcie tego
-        # batcha - sprawdź jeszcze raz na kolejnym obiegu pętli zdarzeń (po
-        # tym jak wątek na pewno już się zakończył), zamiast czekać na
-        # kolejne ręczne odświeżenie. include_errors=False tu jest istotne:
-        # bez tego, jeśli cokolwiek w tej paczce skończyło się na "error",
-        # ten sam plik natychmiast kwalifikowałby się do kolejnej paczki,
-        # która by natychmiast, w kółko, bez żadnej przerwy między próbami
-        # (kiedyś realnie obserwowane: nieskończona pętla walenia w
-        # GPU/CPU dla tych samych plików). Błędy i tak dostają szansę
-        # ponownie przy następnym ręcznym odświeżeniu (F5) albo nowym nagraniu.
+            self.transcription_progress_label.setText(tr("done"))
+        # Something may have arrived via ingest_finished_recording() while
+        # this batch was running - check again on the next event loop pass
+        # (once the thread has definitely finished), instead of waiting for
+        # the next manual refresh. include_errors=False here matters: without
+        # it, if anything in this batch ended in "error", that same file
+        # would immediately qualify for another batch, which would
+        # immediately, endlessly, with no pause between attempts (once
+        # actually observed: an infinite loop hammering GPU/CPU for the same
+        # files). Errors still get another chance at the next manual refresh
+        # (F5) or new recording.
         QTimer.singleShot(0, lambda: self._maybe_start_transcription(include_errors=False))
 
     def _freq_display(self, freq_khz: int) -> str:
-        """np. "Rzeszów Wieża (128.950 MHz)" gdy czestotliwosc jest znana z
-        Listy pamieci, inaczej po prostu "128.950 MHz"."""
+        """e.g. "Downtown Tower (128.950 MHz)" when the frequency is known
+        from the Memory List, otherwise just "128.950 MHz"."""
         name = self._freq_names.get(freq_khz)
         freq_text = f"{freq_khz / 1000:.3f} MHz"
         return f"{name} ({freq_text})" if name else freq_text
 
     def _update_transcript_panel(self, rec: Recording) -> None:
-        # Zapisz ewentualną ręczną edycję dla POPRZEDNIEGO nagrania zanim
-        # nadpiszemy pole nowym - ale tylko gdy faktycznie zmieniamy cel
-        # (np. re-transkrypcja zakończona dla wciąż wybranego nagrania też
-        # tędy przechodzi, i tam właśnie chcemy nadpisać stary tekst świeżym
-        # wynikiem, nie "ratować" go jako edycję - patrz docstring flush).
+        # Save any pending manual edit for the PREVIOUS recording before we
+        # overwrite the field with the new one - but only when actually
+        # switching targets (e.g. a re-transcription finishing for the still-
+        # selected recording also goes through here, and there we
+        # specifically want to overwrite the old text with the fresh result,
+        # not "rescue" it as an edit - see the flush docstring).
         if self._transcript_edit_target is not None and self._transcript_edit_target is not rec:
             self._flush_transcript_edit()
 
@@ -900,40 +915,42 @@ class PlaybackPanel(QWidget):
         freq_bit = self._freq_display(rec.freq_khz)
         status = rec.transcript_status
         if status == "pending":
-            header = "Transkrypcja: " + (
-                "oczekuje w kolejce…" if self.config.transcription.enabled else "wyłączona (kliknij „Transkrybuj ponownie”, by spróbować ręcznie)"
+            header = tr("Transcript:") + " " + (
+                tr("waiting in the queue…") if self.config.transcription.enabled
+                else tr("disabled (click “Re-transcribe” to try manually)")
             )
             self.transcript_text_edit.setPlainText("")
         elif status == "skipped_short":
-            header = "Transkrypcja: nagranie zbyt krótkie, pominięte"
+            header = tr("Transcript: recording too short, skipped")
             self.transcript_text_edit.setPlainText("")
         elif status == "no_speech":
-            header = "Transkrypcja: nie wykryto mowy (sam szum/trzask squelchu)"
+            header = tr("Transcript: no speech detected (just noise/squelch crackle)")
             self.transcript_text_edit.setPlainText("")
         elif status == "error":
-            header = "Transkrypcja: błąd (spróbuj ponownie)"
+            header = tr("Transcript: error (try again)")
             self.transcript_text_edit.setPlainText("")
         else:
             t = rec.transcript
             if t.engine == "manual":
-                header = "Transkrypcja (edytowana ręcznie):"
+                header = tr("Transcript (manually edited):")
             else:
-                conf_note = " — niska pewność, traktuj z rezerwą" if status == "low_confidence" else ""
-                header = f"Transkrypcja [{t.language}, {t.language_probability * 100:.0f}%]{conf_note}:"
+                conf_note = " " + tr("— low confidence, take with a grain of salt") if status == "low_confidence" else ""
+                header = f"{tr('Transcript')} [{t.language}, {t.language_probability * 100:.0f}%]{conf_note}:"
             self.transcript_text_edit.setPlainText(t.text)
         self.transcript_header_label.setText(f"[{freq_bit}] {header}")
 
-        # Nowy punkt odniesienia: to, co właśnie programowo wstawiliśmy -
-        # patrz _flush_transcript_edit().
+        # New baseline: what we just inserted programmatically - see
+        # _flush_transcript_edit().
         self._transcript_edit_target = rec
         self._transcript_edit_baseline = self.transcript_text_edit.toPlainText()
 
     def _flush_transcript_edit(self) -> None:
-        """Zapisuje ręczną edycję pola transkrypcji do cache/Recording, jeśli
-        coś faktycznie zmieniono względem tego, co tam wstawiliśmy programowo.
-        Puste pole = cofnięcie do "brak transkrypcji" (znów kwalifikuje się
-        do automatycznej kolejki), niepuste = zapisane jako wynik "manual",
-        widoczne od razu w tabeli i w cache jak każda inna transkrypcja."""
+        """Saves a manual edit of the transcript field to the cache/Recording,
+        if anything actually changed relative to what we put there
+        programmatically. An empty field reverts to "no transcript" (once
+        again eligible for the automatic queue); a non-empty one is saved as
+        a "manual" result, visible right away in the table and cache like any
+        other transcription."""
         rec = self._transcript_edit_target
         if rec is None:
             return
@@ -960,9 +977,9 @@ class PlaybackPanel(QWidget):
         self.table_model.update_transcript(rec.path, rec.transcript)
 
     def _selected_transcribe_language(self) -> Optional[str]:
-        """Kod ISO wybrany w transcribe_language_combo, albo None dla "Auto
-        (wykryj)" - patrz jego tooltip. Obsługuje też ręcznie wpisany kod
-        (combo jest edytowalne), nie tylko te trzy gotowe pozycje."""
+        """ISO code selected in transcribe_language_combo, or None for "Auto
+        (detect)" - see its tooltip. Also handles a manually-typed code
+        (the combo is editable), not just the three built-in entries."""
         idx = self.transcribe_language_combo.currentIndex()
         text = self.transcribe_language_combo.currentText().strip()
         if idx >= 0 and self.transcribe_language_combo.itemText(idx) == text:
@@ -974,7 +991,7 @@ class PlaybackPanel(QWidget):
         if rec is None or (self._force_transcribe_worker is not None and self._force_transcribe_worker.isRunning()):
             return
         self.transcribe_now_btn.setEnabled(False)
-        self.transcript_header_label.setText("Transkrypcja: trwa ponowne przetwarzanie…")
+        self.transcript_header_label.setText(tr("Transcript: re-processing…"))
         worker = TranscriptionWorker(
             [rec], self.config.transcription, self._transcription_cache, ignore_cache=True,
             forced_language=self._selected_transcribe_language(), parent=self,
@@ -984,7 +1001,7 @@ class PlaybackPanel(QWidget):
         self._force_transcribe_worker = worker
         worker.start()
 
-    # ------------------------------------------------------------- usuwanie
+    # ------------------------------------------------------------- deletion
     def _delete_selected(self) -> None:
         rows = sorted({idx.row() for idx in self.table_view.selectionModel().selectedRows()})
         if not rows:
@@ -996,18 +1013,18 @@ class PlaybackPanel(QWidget):
 
         if len(recs) == 1:
             rec = recs[0]
-            prompt = (
-                f"Trwale usunąć plik?\n\n{rec.path.name}\n{rec.freq_label} — "
+            prompt = tr("Permanently delete this file?") + (
+                f"\n\n{rec.path.name}\n{rec.freq_label} — "
                 f"{rec.dt_local.strftime('%Y-%m-%d %H:%M:%S')}"
             )
         else:
             shown = "\n".join(r.path.name for r in recs[:10])
-            more = f"\n… i {len(recs) - 10} więcej" if len(recs) > 10 else ""
-            prompt = f"Trwale usunąć {len(recs)} plików?\n\n{shown}{more}"
+            more = "\n" + tr("… and {count} more").format(count=len(recs) - 10) if len(recs) > 10 else ""
+            prompt = tr("Permanently delete {count} files?").format(count=len(recs)) + f"\n\n{shown}{more}"
 
         reply = QMessageBox.question(
             self,
-            "Usuń nagrania" if len(recs) > 1 else "Usuń nagranie",
+            tr("Delete recordings") if len(recs) > 1 else tr("Delete recording"),
             prompt,
             QMessageBox.StandardButton.Yes | QMessageBox.StandardButton.No,
             QMessageBox.StandardButton.No,
@@ -1016,13 +1033,14 @@ class PlaybackPanel(QWidget):
             return
 
         playing_path = self.player.qt_player.source().toLocalFile()
-        # self._quality_cache (nie świeży QualityCache()): usuwane nagranie
-        # może być tym samym, co dopiero co dodał ingest_finished_recording()
-        # i którego zapis na dysk wciąż czeka w debounced _quality_cache_save_timer
-        # (patrz __init__) - świeżo wczytany z dysku cache jeszcze by go nie
-        # widział, więc remove() na nim byłby cichym no-opem, a spóźniony
-        # zapis debounced timera przywróciłby wpis dla już nieistniejącego
-        # pliku. Działając na tej samej instancji w pamięci unikamy tego.
+        # self._quality_cache (not a fresh QualityCache()): the recording
+        # being deleted might be the very one ingest_finished_recording()
+        # just added, whose disk write is still pending in the debounced
+        # _quality_cache_save_timer (see __init__) - a freshly disk-loaded
+        # cache wouldn't know about it yet, so remove() on it would be a
+        # silent no-op, and the timer's later save would then resurrect an
+        # entry for a file that no longer exists. Operating on this same
+        # in-memory instance avoids that.
         deleted_paths = []
         failures = []
         for rec in recs:
@@ -1055,8 +1073,8 @@ class PlaybackPanel(QWidget):
                 self._last_selected_path = None
             if self._selected_recording is not None and self._selected_recording.path in deleted_set:
                 self._selected_recording = None
-                self._transcript_edit_target = None  # plik usunięty - nic tu nie zapisujemy
-                self.transcript_header_label.setText("Transkrypcja: wybierz nagranie z listy…")
+                self._transcript_edit_target = None  # file deleted - nothing to save here
+                self.transcript_header_label.setText(tr("Transcript: select a recording from the list…"))
                 self.transcript_text_edit.setPlainText("")
                 self.transcribe_now_btn.setEnabled(False)
                 self.fr24_btn.setEnabled(False)
@@ -1065,19 +1083,42 @@ class PlaybackPanel(QWidget):
                 self.favorite_btn.setEnabled(False)
 
             if len(deleted_paths) == 1:
-                self.status_message.emit(f"Usunięto: {deleted_paths[0].name}", 4000)
+                self.status_message.emit(tr("Deleted: {name}").format(name=deleted_paths[0].name), 4000)
             else:
-                self.status_message.emit(f"Usunięto {len(deleted_paths)} plik(ów)", 4000)
+                self.status_message.emit(tr("Deleted {count} file(s)").format(count=len(deleted_paths)), 4000)
 
         if failures:
-            QMessageBox.warning(self, "Błąd usuwania", "Nie udało się usunąć:\n" + "\n".join(failures))
+            QMessageBox.warning(self, tr("Delete failed"), tr("Failed to delete:") + "\n" + "\n".join(failures))
 
-    # ---------------------------------------------------- linki zewnętrzne
+    # ---------------------------------------------------- external links
     def _open_fr24_playback(self) -> None:
         self._open_fr24_for(self._selected_recording)
 
-    def _open_fr24_for(self, rec: Optional[Recording]) -> None:
+    def _location_ready(self, rec: Optional[Recording]) -> bool:
+        """Common guard for both flight-tracker buttons: they need a
+        configured receiver location to build a meaningful link (see
+        LocationConfig - deliberately no baked-in default location shipped
+        with the app, see its docstring). Redirects to Options instead of
+        silently opening a link built from nothing (e.g. 0,0)."""
         if rec is None:
+            return False
+        loc = self.config.location
+        if loc.home_lat is None or loc.home_lon is None:
+            QMessageBox.information(
+                self,
+                tr("Location not set"),
+                tr(
+                    "Set your receiver's approximate location in Options first "
+                    "- FlightRadar24/ADSBExchange need it to know where on the "
+                    "map to jump to."
+                ),
+            )
+            self.location_setup_requested.emit()
+            return False
+        return True
+
+    def _open_fr24_for(self, rec: Optional[Recording]) -> None:
+        if not self._location_ready(rec):
             return
         dt = rec.dt_utc
         lat = self.config.location.home_lat
@@ -1089,7 +1130,7 @@ class PlaybackPanel(QWidget):
         self._open_adsbexchange_for(self._selected_recording)
 
     def _open_adsbexchange_for(self, rec: Optional[Recording]) -> None:
-        if rec is None:
+        if not self._location_ready(rec):
             return
         dt = rec.dt_utc
         lat = self.config.location.home_lat
@@ -1112,16 +1153,16 @@ class PlaybackPanel(QWidget):
             )
             self.channel_saved.emit(channel)
 
-    # ------------------------------------------------------- menu kontekstowe
+    # ------------------------------------------------------- context menu
     def _show_table_context_menu(self, pos: QPoint) -> None:
         index = self.table_view.indexAt(pos)
         if not index.isValid():
             return
         selection_model = self.table_view.selectionModel()
         if not selection_model.isRowSelected(index.row(), QModelIndex()):
-            # Prawy klik poza obecnym zaznaczeniem: zaznacz tylko ten wiersz,
-            # jak w typowych przeglądarkach plików, zamiast działać na
-            # jakimś niepowiązanym poprzednim zaznaczeniu.
+            # Right-click outside the current selection: select just this
+            # row, like typical file browsers do, instead of acting on some
+            # unrelated previous selection.
             self.table_view.selectRow(index.row())
 
         rows = sorted({idx.row() for idx in self.table_view.selectionModel().selectedRows()})
@@ -1132,50 +1173,49 @@ class PlaybackPanel(QWidget):
         if not recs:
             return
 
-        # Tylko ▶/☆/★ jako prefiksy - to jedyne symbole potwierdzone jako
-        # poprawnie wyswietlane na tym systemie (patrz zrzut ekranu w
-        # historii tej zmiany); reszta "kolorowych" emoji (📂📋💾🎙🗑...)
-        # wychodzila jako puste kwadraciki mimo zainstalowanego
-        # NotoColorEmoji - Qt nie renderuje z niego wiekszosci glifow.
-        # Zwykly tekst bez ikony wyglada lepiej niz zepsuty prostokat.
+        # Only ▶/☆/★ as prefixes - the only symbols confirmed to
+        # render correctly on every tested system (see this change's
+        # history); the rest of the "colorful" emoji came out as empty boxes
+        # even with NotoColorEmoji installed - Qt doesn't render most of its
+        # glyphs. Plain text without an icon looks better than a broken box.
         menu = QMenu(self)
         if len(recs) == 1:
             rec = recs[0]
-            menu.addAction("▶ Odtwórz", lambda: self._play_proxy_index(index))
-            menu.addAction("Pokaż w folderze", lambda: self._reveal_in_file_manager(rec.path))
-            menu.addAction("Kopiuj ścieżkę pliku", lambda: self._copy_paths_to_clipboard([rec]))
+            menu.addAction(tr("▶ Play"), lambda: self._play_proxy_index(index))
+            menu.addAction(tr("Show in file manager"), lambda: self._reveal_in_file_manager(rec.path))
+            menu.addAction(tr("Copy file path"), lambda: self._copy_paths_to_clipboard([rec]))
             menu.addSeparator()
-            fav_label = "★ Usuń z ulubionych" if rec.is_favorite else "☆ Dodaj do ulubionych"
+            fav_label = tr("★ Remove from favorites") if rec.is_favorite else tr("☆ Add to favorites")
             menu.addAction(fav_label, lambda: self._set_favorites([rec], not rec.is_favorite))
-            menu.addAction("Zapisz częstotliwość…", lambda: self._save_frequency_for(rec))
-            menu.addAction("Transkrybuj ponownie", lambda: self._force_transcribe_for(rec))
+            menu.addAction(tr("Save frequency…"), lambda: self._save_frequency_for(rec))
+            menu.addAction(tr("Re-transcribe"), lambda: self._force_transcribe_for(rec))
             menu.addSeparator()
             menu.addAction("FlightRadar24", lambda: self._open_fr24_for(rec))
             menu.addAction("ADSBExchange", lambda: self._open_adsbexchange_for(rec))
             menu.addSeparator()
-            menu.addAction("Usuń", self._delete_selected)
+            menu.addAction(tr("Delete"), self._delete_selected)
         else:
             n = len(recs)
-            menu.addAction("Pokaż w folderze", lambda: self._reveal_in_file_manager(recs[0].path))
-            menu.addAction(f"Kopiuj ścieżki plików ({n})", lambda: self._copy_paths_to_clipboard(recs))
+            menu.addAction(tr("Show in file manager"), lambda: self._reveal_in_file_manager(recs[0].path))
+            menu.addAction(tr("Copy file paths ({count})").format(count=n), lambda: self._copy_paths_to_clipboard(recs))
             menu.addSeparator()
-            menu.addAction("☆ Dodaj do ulubionych", lambda: self._set_favorites(recs, True))
-            menu.addAction("★ Usuń z ulubionych", lambda: self._set_favorites(recs, False))
+            menu.addAction(tr("☆ Add to favorites"), lambda: self._set_favorites(recs, True))
+            menu.addAction(tr("★ Remove from favorites"), lambda: self._set_favorites(recs, False))
             menu.addSeparator()
-            menu.addAction(f"Usuń zaznaczone ({n})", self._delete_selected)
+            menu.addAction(tr("Delete selected ({count})").format(count=n), self._delete_selected)
 
         menu.exec(self.table_view.viewport().mapToGlobal(pos))
 
     def _reveal_in_file_manager(self, path: Path) -> None:
-        """Otwiera menedżera plików z tym KONKRETNYM plikiem od razu
-        zaznaczonym, przez standardową usługę freedesktop
-        org.freedesktop.FileManager1.ShowItems (D-Bus) - obsługiwaną przez
-        Nautilus (domyślny w GNOME/Ubuntu), Nemo, Dolphin i większość innych
-        menedżerów plików na Linuksie. Qt sam w sobie nie ma przenośnego
-        "zaznacz ten plik" - stąd D-Bus, nie QDesktopServices. Jeśli usługa
-        jest niedostępna (inne środowisko bez tej usługi, brak dbus-send) -
-        spada z powrotem na zwykłe otwarcie samego folderu (stare
-        zachowanie, wciąż działa, tylko bez zaznaczenia)."""
+        """Opens the file manager with this SPECIFIC file already selected,
+        via the standard freedesktop org.freedesktop.FileManager1.ShowItems
+        service (D-Bus) - supported by Nautilus (GNOME/Ubuntu's default),
+        Nemo, Dolphin and most other Linux file managers. Qt itself has no
+        portable "select this file" call - hence D-Bus, not
+        QDesktopServices. If the service isn't available (a different
+        environment without it, dbus-send missing) - falls back to just
+        opening the containing folder (old behavior, still works, just
+        without the selection)."""
         uri = QUrl.fromLocalFile(str(path)).toString()
         try:
             result = subprocess.run(
@@ -1198,7 +1238,7 @@ class PlaybackPanel(QWidget):
         text = "\n".join(str(rec.path) for rec in recs)
         QGuiApplication.clipboard().setText(text)
         self.status_message.emit(
-            "Skopiowano ścieżkę pliku" if len(recs) == 1 else f"Skopiowano {len(recs)} ścieżek plików",
+            tr("Copied file path") if len(recs) == 1 else tr("Copied {count} file paths").format(count=len(recs)),
             3000,
         )
 
@@ -1209,7 +1249,7 @@ class PlaybackPanel(QWidget):
         if self._selected_recording is not None and self._selected_recording in recs:
             self._set_favorite_btn_state(self._selected_recording.is_favorite)
         self.proxy.refresh()
-        self.freq_panel.set_recordings(self._recordings)  # odśwież licznik "★ Ulubione (N)"
+        self.freq_panel.set_recordings(self._recordings)  # refresh the "★ Favorites (N)" count
 
     def _force_transcribe_for(self, rec: Optional[Recording]) -> None:
         if rec is None or (self._force_transcribe_worker is not None and self._force_transcribe_worker.isRunning()):
@@ -1286,11 +1326,11 @@ class PlaybackPanel(QWidget):
         if status == QMediaPlayer.MediaStatus.EndOfMedia and self.autoplay_checkbox.isChecked():
             self._play_next()
 
-    # -- wywoływane z MainWindow ------------------------------------------
+    # -- called from MainWindow ------------------------------------------
     def set_known_frequencies(self, channels) -> None:
-        """Aktualizuje nazwy znanych czestotliwosci (z Listy pamieci) uzywane
-        wszedzie tam, gdzie w tej zakladce pokazujemy czestotliwosc - pasek
-        boczny, tabela, naglowek transkrypcji, etykieta "teraz odtwarzane"."""
+        """Updates the known-frequency names (from the Memory List) used
+        everywhere this tab shows a frequency - the sidebar, the table, the
+        transcript header, the "now playing" label."""
         self._freq_names = {round(c.freq_hz / 1000): c.name for c in channels if c.name}
         self.table_model.set_freq_names(self._freq_names)
         self.freq_panel.set_freq_names(self._freq_names)
@@ -1305,7 +1345,7 @@ class PlaybackPanel(QWidget):
         self._known_folders = list(folders)
 
     def shutdown(self) -> None:
-        """Czeka na wątki robocze - wołane z closeEvent okna głównego."""
+        """Waits for background workers - called from the main window's closeEvent."""
         self._flush_quality_cache()
         self._flush_transcript_edit()
         if self._worker is not None and self._worker.isRunning():

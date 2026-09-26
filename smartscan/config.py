@@ -85,10 +85,16 @@ class RecordingConfig:
 
 @dataclass
 class LocationConfig:
-    # Współrzędne używane do budowania linków playbacku FR24/ADSBExchange
-    # w zakładce Odtwarzacz (przybliżona lokalizacja odbiornika).
-    home_lat: float = 52.123
-    home_lon: float = 21.012
+    """Receiver location - used only to build the FlightRadar24/ADSBExchange
+    playback links in Odtwarzacz (an approximate location is plenty precise
+    for a ~9-zoom flight-tracker map, not exact GPS coordinates). None means
+    "not set yet" - see PlaybackPanel._open_fr24_for/_open_adsbexchange_for,
+    which redirect to Options with an explanatory message instead of opening
+    a link built from nothing. Deliberately no baked-in default location:
+    this used to default to the original developer's own home coordinates,
+    which has no business being anyone else's default in a published app."""
+    home_lat: float | None = None
+    home_lon: float | None = None
 
 
 @dataclass
@@ -181,6 +187,10 @@ class AppConfig:
     # Decode FM broadcast stereo (pilot-tone L/R) for live monitoring only -
     # has no effect on AM/NFM. Recordings stay mono regardless.
     wfm_stereo_enabled: bool = False
+    # UI language - a code with a matching smartscan/locale/<code>.po file,
+    # or "en" (the source language, built into every string, needs no file).
+    # See smartscan/i18n.py. Takes effect on next restart, not live.
+    language: str = "en"
 
     @staticmethod
     def load() -> "AppConfig":
@@ -219,6 +229,7 @@ class AppConfig:
             channel_folders=list(raw.get("channel_folders", [])),
             memory_list_enabled=raw.get("memory_list_enabled", True),
             wfm_stereo_enabled=raw.get("wfm_stereo_enabled", False),
+            language=raw.get("language", "en"),
         )
 
     def save(self) -> None:

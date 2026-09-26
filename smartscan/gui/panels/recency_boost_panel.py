@@ -1,11 +1,11 @@
-"""Recency boost: kontrolki dla RecencyBoostConfig (patrz config.py oraz
-ScannerEngine._due_recency_boost_locked/_register_recency_boost) - po
-naturalnym zakonczeniu transmisji jej okno jest przez chwile odwiedzane
-czesciej niz zwykle, w razie gdyby za kilkanascie/kilkadziesiat sekund byl
-kolejny komunikat na tej samej czestotliwosci (typowe w ATC). W odroznieniu
-od zwyklego wydluzania linger_time_ms, to nigdy nie blokuje wykrycia
-przejscia rozmowy na inna czestotliwosc - skaner cala reszte czasu dalej
-normalnie krazy po innych kanalach.
+"""Recency boost: controls for RecencyBoostConfig (see config.py and
+ScannerEngine._due_recency_boost_locked/_register_recency_boost) - after a
+transmission ends naturally, its window is visited more often than usual for
+a while, in case another message follows on the same frequency within the
+next several/dozens of seconds (typical for ATC). Unlike simply raising
+linger_time_ms, this never blocks noticing the conversation move to a
+different frequency - the scanner keeps circling the rest of the schedule as
+normal the whole time.
 """
 from __future__ import annotations
 
@@ -13,13 +13,14 @@ from PySide6.QtCore import Signal
 from PySide6.QtWidgets import QCheckBox, QDoubleSpinBox, QFormLayout, QGroupBox, QLabel, QVBoxLayout
 
 from ...config import RecencyBoostConfig
+from ...i18n import tr
 
 
 class RecencyBoostPanel(QGroupBox):
     settings_changed = Signal()
 
     def __init__(self, config: RecencyBoostConfig, parent=None):
-        super().__init__("Recency boost (czestsze powroty po transmisji)", parent)
+        super().__init__(tr("Recency boost (more frequent revisits after a transmission)"), parent)
         self.config = config
         self._loading = True
         self._build_ui()
@@ -29,19 +30,20 @@ class RecencyBoostPanel(QGroupBox):
     def _build_ui(self) -> None:
         root = QVBoxLayout(self)
 
-        hint = QLabel(
-            "Po naturalnym zakonczeniu transmisji (nie po recznym Skip) jej okno "
-            "jest przez chwile odwiedzane czesciej niz zwykle - w razie gdyby za "
-            "kilkanascie/kilkadziesiat sekund pojawil sie kolejny komunikat na tej "
-            "samej czestotliwosci. Skaner nadal normalnie krazy po innych kanalach "
-            "przez caly ten czas, wiec przejscie rozmowy na inna czestotliwosc "
-            "wciaz zostanie wykryte - w odroznieniu od zwyklego wydluzania czasu lingera."
-        )
+        hint = QLabel(tr(
+            "After a transmission ends naturally (not via a manual Skip), its "
+            "window is visited more often than usual for a while - in case "
+            "another message follows within the next several/dozens of "
+            "seconds on the same frequency. The scanner still keeps circling "
+            "the other channels normally the whole time, so a conversation "
+            "moving to a different frequency is still detected - unlike "
+            "simply raising the linger time."
+        ))
         hint.setWordWrap(True)
         hint.setStyleSheet("color: #9aa0a6;")
         root.addWidget(hint)
 
-        self.enable_check = QCheckBox("Wlacz recency boost")
+        self.enable_check = QCheckBox(tr("Enable recency boost"))
         self.enable_check.toggled.connect(self._push_settings)
         root.addWidget(self.enable_check)
 
@@ -52,7 +54,7 @@ class RecencyBoostPanel(QGroupBox):
         self.duration_spin.setSuffix(" s")
         self.duration_spin.setSingleStep(5.0)
         self.duration_spin.valueChanged.connect(self._push_settings)
-        form.addRow("Jak dlugo boostowac po transmisji:", self.duration_spin)
+        form.addRow(tr("How long to boost after a transmission:"), self.duration_spin)
 
         self.interval_spin = QDoubleSpinBox()
         self.interval_spin.setRange(1.0, 120.0)
@@ -60,7 +62,7 @@ class RecencyBoostPanel(QGroupBox):
         self.interval_spin.setSuffix(" s")
         self.interval_spin.setSingleStep(1.0)
         self.interval_spin.valueChanged.connect(self._push_settings)
-        form.addRow("Co ile odwiedzac w trakcie boosta:", self.interval_spin)
+        form.addRow(tr("How often to revisit during the boost:"), self.interval_spin)
 
         root.addLayout(form)
 

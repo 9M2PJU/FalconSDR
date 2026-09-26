@@ -1,4 +1,4 @@
-"""Main application window assembling the three panels from spec section 6."""
+"""Main application window assembling the panels from spec section 6."""
 from __future__ import annotations
 
 from pathlib import Path
@@ -10,9 +10,12 @@ from PySide6.QtWidgets import (
 
 from .. import storage
 from ..config import AppConfig
+from ..i18n import tr
 from ..models import Channel
 from ..scanner_engine import ScannerEngine
 from .panels.frequency_manager import FrequencyManager
+from .panels.language_panel import LanguagePanel
+from .panels.location_panel import LocationPanel
 from .panels.playback_panel import PlaybackPanel
 from .panels.recency_boost_panel import RecencyBoostPanel
 from .panels.recording_panel import RecordingPanel
@@ -35,14 +38,13 @@ class MainWindow(QMainWindow):
         self.channel_folders: list[str] = list(self.config.channel_folders)
         self.engine: ScannerEngine | None = None
 
-        # Nasluch dziala jak strona do przewijania (QScrollArea obejmuje
-        # zakladke) zamiast zestawu splitterow do przeciagania - sekcja
-        # dostaje tyle miejsca ile faktycznie potrzebuje. Bez tego, skaner
-        # (widmo + miernik + lista pasm + przyciski) potrafi wymusic
-        # minimalny rozmiar okna wiekszy niz dostepna wysokosc na mniejszym
-        # (np. drugim) monitorze, przez co okno nie moze sie realnie
-        # zmaksymalizowac (isMaximized() zwraca True, a okno i tak zostaje
-        # za duze).
+        # Listen behaves like a scrollable page (a QScrollArea wraps the tab)
+        # instead of a set of draggable splitters - a section gets exactly as
+        # much room as it actually needs. Without this, the scanner
+        # (spectrum + level meter + band list + buttons) can force a minimum
+        # window size taller than what's available on a smaller (e.g.
+        # second) monitor, so the window can't actually maximize
+        # (isMaximized() returns True, but the window stays oversized anyway).
         listen_tab = QWidget()
         layout = QVBoxLayout(listen_tab)
 
@@ -57,33 +59,37 @@ class MainWindow(QMainWindow):
         self.playback_panel.set_known_frequencies(self.channels)
         self.playback_panel.set_known_folders(self.channel_folders)
 
-        # Kanaly (Lista pamieci + Czarna lista) - juz sam w sobie QTabWidget
-        # z dwiema wlasnymi podzakladkami, wiec staje sie wlasna gorna
-        # zakladka bez dodatkowego opakowania.
+        # Channels (Memory List + Blacklist) is already its own QTabWidget
+        # with two sub-tabs of its own, so it becomes a top-level tab without
+        # any extra wrapping.
         self.freq_manager = FrequencyManager(
             self.channels, self.blacklist, self.config.default_blacklist_margin_hz, self.channel_folders,
         )
 
-        # Opcje grupują ustawienia niezwiązane bezpośrednio z obsługą skanera.
-        options_tab = QWidget()
-        options_layout = QVBoxLayout(options_tab)
+        # Options groups settings not directly tied to running the scanner.
+        self.options_tab = QWidget()
+        options_layout = QVBoxLayout(self.options_tab)
         self.recording_panel = RecordingPanel(self.config.recording)
         options_layout.addWidget(self.recording_panel)
         self.recency_boost_panel = RecencyBoostPanel(self.config.recency_boost)
         options_layout.addWidget(self.recency_boost_panel)
         self.transcription_panel = TranscriptionPanel(self.config.transcription)
         options_layout.addWidget(self.transcription_panel)
+        self.location_panel = LocationPanel(self.config.location)
+        options_layout.addWidget(self.location_panel)
+        self.language_panel = LanguagePanel(self.config)
+        options_layout.addWidget(self.language_panel)
         options_layout.addStretch(1)
 
         self.tabs = QTabWidget()
-        self.tabs.addTab(self.listen_scroll, "Nasłuch")
-        self.tabs.addTab(self.playback_panel, "Odtwarzacz")
-        self.tabs.addTab(self.freq_manager, "Kanały")
-        self.tabs.addTab(self.playback_panel.stats_tab, "Statystyki")
-        self.tabs.addTab(options_tab, "Opcje")
+        self.tabs.addTab(self.listen_scroll, tr("Listen"))
+        self.tabs.addTab(self.playback_panel, tr("Playback"))
+        self.tabs.addTab(self.freq_manager, tr("Channels"))
+        self.tabs.addTab(self.playback_panel.stats_tab, tr("Statistics"))
+        self.tabs.addTab(self.options_tab, tr("Options"))
         self.setCentralWidget(self.tabs)
 
-        self.statusBar().showMessage("Gotowy.")
+        self.statusBar().showMessage(tr("Ready."))
 
         self.scanner_panel.start_requested.connect(self._start_scanner)
         self.scanner_panel.stop_requested.connect(self._stop_scanner)
@@ -100,11 +106,14 @@ class MainWindow(QMainWindow):
         self.transcription_panel.settings_changed.connect(self._save_config)
         self.transcription_panel.enabled_changed.connect(self.playback_panel.set_transcription_enabled)
         self.playback_panel.transcription_enabled_changed.connect(self.transcription_panel.set_enabled)
+        self.location_panel.settings_changed.connect(self._save_config)
+        self.language_panel.settings_changed.connect(self._save_config)
         self.freq_manager.channels_changed.connect(self._on_channels_changed)
         self.freq_manager.blacklist_changed.connect(self._on_blacklist_changed)
         self.freq_manager.folders_changed.connect(self._on_folders_changed)
         self.playback_panel.status_message.connect(self.statusBar().showMessage)
         self.playback_panel.channel_saved.connect(self._on_channel_saved)
+        self.playback_panel.location_setup_requested.connect(self._reveal_location)
         self.playback_panel.stats_tab.frequencySelected.connect(self._on_stats_freq_selected)
 
     # -- persistence -----------------------------------------------------
@@ -153,23 +162,30 @@ class MainWindow(QMainWindow):
         self.playback_panel.set_known_folders(folders)
 
     def _on_stats_freq_selected(self, freq_khz: int) -> None:
-        """Statystyki jest teraz osobna gorna zakladka, wiec podwojne
-        kliknieciem czestotliwosci w tabeli statystyk (PlaybackPanel juz sam
-        przefiltrowal Odtwarzacz do tej czestotliwosci) trzeba jeszcze
-        recznie przelaczyc widoczna zakladke na Odtwarzacz, zeby wynik w
-        ogole bylo widac."""
+        """Statistics is now its own top-level tab, so double-clicking a
+        frequency in the stats table (PlaybackPanel already filtered
+        Odtwarzacz to that frequency) still needs to switch the visible tab
+        to Odtwarzacz by hand, or the result wouldn't be visible at all."""
         self.tabs.setCurrentWidget(self.playback_panel)
 
     def _reveal_memory_list(self) -> None:
-        """"Lista pamieci" w zakladce Skaner: przelacza na zakladke Kanaly
-        (podzakladka Lista pamieci) i ustawia tam fokus na wyszukiwarce."""
+        """"Memory list" shortcut in the Scanner tab: switches to the
+        Channels tab (Memory List sub-tab) and focuses its search box."""
         self.tabs.setCurrentWidget(self.freq_manager)
         self.freq_manager.reveal_channels()
 
+    def _reveal_location(self) -> None:
+        """PlaybackPanel asked to be sent here because the user clicked
+        FlightRadar24/ADSBExchange with no location configured yet - switch
+        to Options and put the cursor right on the field that needs filling
+        in, instead of just landing on the tab and leaving them to hunt for it."""
+        self.tabs.setCurrentWidget(self.options_tab)
+        self.location_panel.focus_input()
+
     def _on_channel_saved(self, channel: Channel) -> None:
-        """"Zapisz czestotliwosc" w zakladce Odtwarzacz: dopisuje nowy kanal
-        do Listy pamieci albo nadpisuje nazwe/folder istniejacego (dopasowanie
-        po czestotliwosci), zamiast tworzyc duplikat."""
+        """"Save frequency" in the Odtwarzacz tab: appends a new channel to
+        the Memory List, or overwrites the name/folder of an existing one
+        (matched by frequency), instead of creating a duplicate."""
         existing = next((c for c in self.channels if c.freq_hz == channel.freq_hz), None)
         if existing is not None:
             existing.name = channel.name
@@ -188,9 +204,9 @@ class MainWindow(QMainWindow):
         self.freq_manager.set_folders(self.channel_folders)
         self.playback_panel.set_known_frequencies(self.channels)
         self.scanner_panel.set_channels(self.channels)
+        name_suffix = tr(" as “{name}”.").format(name=channel.name) if channel.name else "."
         self.statusBar().showMessage(
-            f"Zapisano {channel.freq_hz / 1e6:.4f} MHz w Liście pamięci" +
-            (f" jako „{channel.name}”." if channel.name else "."), 5000,
+            tr("Saved {freq:.4f} MHz to the Memory List").format(freq=channel.freq_hz / 1e6) + name_suffix, 5000,
         )
 
     # -- scanner lifecycle -------------------------------------------------
@@ -242,7 +258,7 @@ class MainWindow(QMainWindow):
 
     def _on_auto_lockout(self, freq_hz: int) -> None:
         self.freq_manager.add_lockout(freq_hz)
-        self.statusBar().showMessage(f"Zablokowano {freq_hz / 1e6:.4f} MHz (lockout).", 5000)
+        self.statusBar().showMessage(tr("Blacklisted {freq:.4f} MHz (lockout).").format(freq=freq_hz / 1e6), 5000)
 
     def _on_engine_finished(self) -> None:
         if self.engine is not None:
