@@ -16,7 +16,7 @@ from ...config import AppConfig, VfoRangeConfig
 from ...i18n import tr
 from ...military_presets import BAND_PRESETS
 from ...models import Channel
-from ...sdr_backend import DEFAULT_GAIN_RANGE_DB, SoapyBackend
+from ...sdr_backend import DEFAULT_GAIN_RANGE_DB, enumerate_devices
 from ..widgets import BAND_OVERRIDE_ACCENT, LevelMeter, SliderSpin, SpectrumView, apply_emoji_font
 
 RESOURCES_DIR = Path(__file__).resolve().parent.parent / "resources"
@@ -756,7 +756,7 @@ class ScannerPanel(QGroupBox):
 
     def _populate_devices(self) -> None:
         self.device_combo.addItem(tr("Automatic (first detected)"), ("auto", ""))
-        for dev in SoapyBackend.enumerate_devices():
+        for dev in enumerate_devices():
             label = dev.get("label") or dev.get("driver", "device")
             args = ",".join(f"{k}={v}" for k, v in dev.items())
             self.device_combo.addItem(label, (dev.get("driver", "auto"), args))

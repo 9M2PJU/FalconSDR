@@ -5,7 +5,8 @@ Guidance for AI coding agents working in this repository.
 ## What this is
 
 SmartScanATC (`smartscanatc/`) is a PySide6 desktop app that scans a radio band
-(default: airband ATC 118–136 MHz) via SoapySDR and records audio **only**
+(default: airband ATC 118–136 MHz) via SoapySDR (Linux) or a native
+librtlsdr backend (Windows/macOS - see gotcha 16) and records audio **only**
 for transmissions the scanner actually stops on — never the retuning noise.
 Full functional spec was provided by the user in Polish; the state machine in
 `smartscan/scanner_engine.py` is the authoritative implementation of it.
@@ -17,13 +18,15 @@ cd smartscanatc
 python3 main.py
 ```
 
-`PySide6`, `numpy`, `scipy` and `pyqtgraph` all have reliable pip wheels on
-every platform — install via `pip install -r requirements.txt` (or a venv).
-`SoapySDR` (+ device drivers) and `PyAudio`/PortAudio are the two exceptions
-that need system-level installation (apt on Linux, PothosSDR on Windows,
-Homebrew on macOS — see `requirements.txt` for exact commands). If SoapySDR
-or hardware isn't available, the app auto-falls-back to `SimulatedBackend`
-(see below) rather than failing to start.
+`PySide6`, `numpy`, `scipy`, `pyqtgraph`, `pyrtlsdr`/`pyrtlsdrlib` and
+`sounddevice` all have reliable pip wheels on every platform — install via
+`pip install -r requirements.txt` (or a venv); on Windows/macOS this is
+enough by itself to get a working RTL-SDR + live audio setup, no system
+packages needed (see gotcha 16). `SoapySDR` and `PyAudio`/PortAudio remain
+the two things that need system-level installation on Linux (apt - see
+`requirements.txt`) and stay optional-but-preferred on Windows/macOS. If no
+SDR library/hardware is available at all, the app auto-falls-back to
+`SimulatedBackend` (see below) rather than failing to start.
 
 **Migrated from PyQt6 to PySide6** (see git history) specifically so the
 project isn't forced onto GPLv3 by its GUI toolkit's own license — PySide6 is
@@ -82,14 +85,18 @@ for exactly this reason. Add a new language by dropping one `.po` file — see
   and `Demodulator` (AM/NFM/WFM → audio). `Demodulator.demod(iq, modulation, offset_hz)` mixes
   a channel down from a wideband capture's window center to baseband *before* decimating and
   demodulating — order matters (see gotcha 6 below).
-- `smartscan/sdr_backend.py` — `SoapyBackend` (real hardware, exposes `gain_range_db` read
-  from the device and a live `set_gain()`) and `SimulatedBackend` (deterministic fake bursts
-  on 121.5/118.1/124.0 MHz, reacts to `set_gain()` by scaling the fake signal so the Gain
-  slider does something visible even without hardware). `create_backend()` transparently
-  falls back to simulation on any Soapy error. `AcquisitionThread` wraps whatever
-  `create_backend()`/`SoapyBackend()` returns - see gotcha 11 below, this is what
-  `ScannerEngine._backend` actually is at runtime, not the raw backend.
-- `smartscan/audio_output.py` — live speaker monitoring via PyAudio; no-ops if unavailable.
+- `smartscan/sdr_backend.py` — `SoapyBackend` (real hardware via SoapySDR, exposes
+  `gain_range_db` read from the device and a live `set_gain()`), `RtlSdrBackend` (real
+  hardware via native librtlsdr/pyrtlsdr, same contract - see gotcha 16), and
+  `SimulatedBackend` (deterministic fake bursts on 121.5/118.1/124.0 MHz, reacts to
+  `set_gain()` by scaling the fake signal so the Gain slider does something visible even
+  without hardware). `open_real_backend()` picks between the two real backends (see gotcha
+  16); `create_backend()` transparently falls back to simulation only if *that* fails too.
+  `AcquisitionThread` wraps whatever `create_backend()`/`open_real_backend()` returns - see
+  gotcha 11 below, this is what `ScannerEngine._backend` actually is at runtime, not the
+  raw backend.
+- `smartscan/audio_output.py` — live speaker monitoring via PyAudio, falling back to
+  `sounddevice` if PyAudio isn't installed (see gotcha 16) - a no-op if neither is.
 - `smartscan/recorder.py` — WAV writer only; Single-file vs Split-file modes. Always writes
   WAV in real time regardless of `RecordingConfig.output_format` — MP3 is a
   finish-line transcode, not a `Recorder` concern (see gotcha 14 below and
@@ -486,6 +493,90 @@ for exactly this reason. Add a new language by dropping one `.po` file — see
     capture (whatever `_service_active_slots()` also demodulates from that
     same tick), not a second independent hardware read - there is only one
     `AcquisitionThread` (gotcha 11) and one read per tick to go around.
+16. **Windows/macOS get RTL-SDR without SoapySDR at all, through
+    `RtlSdrBackend` (native librtlsdr via `pyrtlsdr`/`pyrtlsdrlib`) - a real
+    hardware backend, not a shim over `SimulatedBackend`.** SoapySDR has no
+    pip wheel and PothosSDR (its Windows installer bundle) has been
+    unmaintained since 2021, so requiring it there would mean "doesn't
+    really work on Windows" in practice. `pyrtlsdrlib` ships a prebuilt
+    librtlsdr (with RTL-SDR Blog V4 support) for Windows/macOS/Linux inside
+    its own wheel - `pip install -r requirements.txt` alone is enough on
+    Windows/macOS (Windows still needs the WinUSB driver via Zadig, the
+    same one SDR++/SDR# require - nothing this project can automate). On
+    Linux the bundled library lives entirely inside the venv's
+    site-packages and never touches the system's own `librtlsdr.so` that
+    SoapySDR links against - installing `pyrtlsdr`/`pyrtlsdrlib` alongside
+    `python3-soapysdr` is safe, no collision (confirmed - both a real
+    RTL-SDR device and SoapySDR were present on the machine this was
+    verified on).
+    `RtlSdrBackend` matches `SoapyBackend`'s contract on every point gotcha
+    8/10/11 depend on: bias-tee forced off on open and every retune,
+    `SdrBackend._wait_for_reopen_cooldown()`, and `read()` raising instead
+    of ever returning short/empty (librtlsdr's sync read raises
+    LibUSBError/IOError on a dead device - never silently returns fewer
+    bytes). It also matches SoapyRTLSDR's own CF32 sample scaling exactly
+    (`(i - 127.4) / 128`, not pyrtlsdr's own default `read_samples()`
+    scaling of `i / 127.5 - 1`, which is close but not identical) so a
+    trigger/squelch threshold tuned on Linux/SoapySDR still means the same
+    dBFS on Windows/macOS with the same `config.json`. `read()` always
+    requests a whole multiple of 512 bytes (the USB packet size - a known
+    source of libusb overflow errors otherwise) and carries any leftover
+    bytes over to the next call (`self._carry`, discarded on
+    `set_frequency()` - leftover bytes belong to the frequency that's now
+    gone, splicing them into the next read would corrupt one IQ block the
+    same way gotcha 11's overflow bug did) - verified directly against real
+    RTL-SDR Blog V4 hardware on Linux (20 consecutive odd-sized,
+    non-512-aligned reads, a retune mid-stream, no shape/dtype corruption).
+    `enumerate_devices()` (module-level function, not `SoapyBackend`'s own
+    static method - `ScannerPanel._populate_devices()` now calls this one)
+    only adds native entries when Soapy doesn't already list an `rtlsdr`
+    device, so the one dongle never appears twice on Linux with both
+    present - verified on the same real hardware.
+    `open_real_backend()` (used by both `create_backend()` and
+    `ScannerEngine._open_backend_with_retry()`'s reconnect path - never
+    the raw `SoapyBackend`/`RtlSdrBackend` constructor directly) is the
+    only thing that knows how to pick between the two: an explicit
+    `driver="rtlsdr_native"` always uses this backend; an explicit
+    `driver="rtlsdr"` (SoapySDR's own key) uses native librtlsdr instead
+    *only* when SoapySDR isn't installed at all - the point being a
+    `config.json` saved on Linux with SoapySDR's driver key still opens
+    correctly on a Windows/macOS install of the exact same config; `"auto"`
+    tries SoapySDR first, native RTL-SDR second, and only raises (letting
+    `create_backend()`'s own separate try/except substitute
+    `SimulatedBackend`) if both fail - never silently prefers simulation
+    while *either* real backend could have worked. **Known caveat found
+    while verifying this on real hardware, pre-existing on `SoapyBackend`
+    and NOT something this backend introduced or fixes by design (it just
+    happens to usually paper over the symptom as a side effect of trying
+    native RTL-SDR second):** `SoapyBackend.__init__`'s own `"auto"` path
+    calls `SoapySDR.Device({})` with a genuinely empty filter, which lets
+    SoapySDR match *any* registered driver, including `soapysdr-module-
+    audio`'s "audio" driver (see gotcha 4) - confirmed reproducing this
+    directly (`SoapyBackend("auto", "", ...)` raised a PulseAudio
+    `activateStream()` error instead of ever reaching the RTL-SDR) on a
+    machine with both a real RTL-SDR and `soapysdr-module-audio` installed.
+    Since gotcha 8 makes `create_backend()` treat any `"auto"` failure as
+    "substitute `SimulatedBackend`", this means **Automatic device
+    selection can silently fall back to simulation despite real, working
+    hardware being present**, purely because of unrelated audio-driver
+    detection ordering - `open_real_backend()`'s two-backend fallback
+    happens to route around it here (native RTL-SDR doesn't have this
+    "audio" driver ambiguity at all), but the underlying `SoapyBackend`
+    bug is still there and would resurface on Linux with SoapySDR-only (no
+    pyrtlsdr) plus `soapysdr-module-audio` installed. Not fixed as part of
+    this work - flagging for whoever picks it up next: the fix is
+    `SoapyBackend`'s own `"auto"` args should filter out `driver="audio"`
+    the same way `enumerate_devices()` already does, not leave `{}`
+    genuinely unconstrained.
+    `audio_output.py`'s `sounddevice` fallback (only used when
+    `HAVE_PYAUDIO` is `False` - Linux keeps PyAudio, confirmed unaffected
+    by installing `sounddevice` alongside it) shares one `_next_frames()`
+    helper between both backends' callbacks (`_pa_callback`/`_sd_callback`)
+    - if you touch the priming/underrun logic, it lives there once, not
+    twice. `io_diag_log.py`'s `_loadavg1()` also now catches
+    `AttributeError` alongside `OSError` - `os.getloadavg()` doesn't exist
+    on Windows at all, and this runs on the SDR acquisition thread, so it
+    must never raise regardless of platform.
 
 ## Testing without touching the user's real config/recordings
 

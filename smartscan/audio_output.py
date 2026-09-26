@@ -1,6 +1,7 @@
-"""Live audio monitoring output (speaker), backed directly by PyAudio/PortAudio.
+"""Live audio monitoring output (speaker), backed directly by PortAudio -
+through PyAudio when installed, else sounddevice (see HAVE_SOUNDDEVICE).
 
-Degrades gracefully to a no-op if PyAudio isn't installed, so the rest of
+Degrades gracefully to a no-op if neither is installed, so the rest of
 the app (scanning + recording) still works without live audio.
 
 History: this went through several redesigns chasing a quality gap between
@@ -127,6 +128,17 @@ try:
     HAVE_PYAUDIO = True
 except ImportError:
     HAVE_PYAUDIO = False
+
+# Fallback when PyAudio isn't available - the usual case on Windows/macOS,
+# where PyAudio has no wheel for newer Pythons and needs a C compiler (plus
+# PortAudio from brew on macOS). sounddevice's wheels bundle PortAudio
+# itself. Same PortAudio underneath, so the same device indices, rates and
+# callback model - only the Python wrapper differs.
+try:
+    import sounddevice
+    HAVE_SOUNDDEVICE = True
+except Exception:  # noqa: BLE001 - OSError if the bundled PortAudio fails to load
+    HAVE_SOUNDDEVICE = False
 
 # Same flag as the rest of the live-audio debugging effort (see
 # scanner_engine.py's _DEBUG_TIMING) - when set, also captures every sample
@@ -283,18 +295,27 @@ class AudioOutput:
         # _DEBUG constant's docstring for why that matters here specifically.
         self._capture: np.ndarray | None = None
         self._capture_pos = 0
-        if not HAVE_PYAUDIO:
+        if not HAVE_PYAUDIO and not HAVE_SOUNDDEVICE:
             return
         try:
-            self._pa = pyaudio.PyAudio()
-            output_rate = self._pick_output_rate(device_index)
-            kwargs = dict(
-                format=pyaudio.paFloat32, channels=2, rate=output_rate, output=True,
-                frames_per_buffer=_FRAMES_PER_BUFFER, stream_callback=self._pa_callback,
-            )
-            if device_index is not None and device_index >= 0:
-                kwargs["output_device_index"] = device_index
-            self._stream = self._pa.open(**kwargs)
+            if HAVE_PYAUDIO:
+                self._pa = pyaudio.PyAudio()
+                output_rate = self._pick_output_rate(device_index)
+                kwargs = dict(
+                    format=pyaudio.paFloat32, channels=2, rate=output_rate, output=True,
+                    frames_per_buffer=_FRAMES_PER_BUFFER, stream_callback=self._pa_callback,
+                )
+                if device_index is not None and device_index >= 0:
+                    kwargs["output_device_index"] = device_index
+                self._stream = self._pa.open(**kwargs)
+            else:
+                output_rate = self._pick_output_rate(device_index)
+                self._stream = sounddevice.OutputStream(
+                    samplerate=output_rate, channels=2, dtype="float32",
+                    blocksize=_FRAMES_PER_BUFFER, callback=self._sd_callback,
+                    device=device_index if device_index is not None and device_index >= 0 else None,
+                )
+                self._stream.start()
             self.output_rate = output_rate
             if _DEBUG:
                 self._capture = np.zeros((int(output_rate * _CAPTURE_MAX_SECONDS), 2), dtype=np.float32)
@@ -311,6 +332,13 @@ class AudioOutput:
 
     def _pick_output_rate(self, device_index: int) -> int:
         try:
+            if self._pa is None:
+                if device_index is not None and device_index >= 0:
+                    info = sounddevice.query_devices(device_index)
+                else:
+                    info = sounddevice.query_devices(kind="output")
+                rate = int(round(info.get("default_samplerate", 0)))
+                return rate if rate > 0 else 48000
             if device_index is not None and device_index >= 0:
                 info = self._pa.get_device_info_by_index(device_index)
             else:
@@ -347,6 +375,16 @@ class AudioOutput:
         pads with silence if it's caught up short even so (only possible if
         the scanner is genuinely producing audio slower than real time for
         longer than the cushion covers) rather than glitching."""
+        return (np.ascontiguousarray(self._next_frames(frame_count)).tobytes(), pyaudio.paContinue)
+
+    def _sd_callback(self, outdata, frames, time_info, status) -> None:
+        """sounddevice's equivalent of _pa_callback - same PortAudio thread,
+        fills the given buffer in place instead of returning bytes."""
+        outdata[:] = self._next_frames(frames)
+
+    def _next_frames(self, frame_count: int) -> np.ndarray:
+        """The body shared by both PortAudio wrappers' callbacks - see
+        _pa_callback's docstring."""
         with self._buffer_lock:
             avail = self._buffer.shape[0]
             if avail == 0:
@@ -361,7 +399,7 @@ class AudioOutput:
                 if avail < self._prime_len:
                     out = np.zeros((frame_count, 2), dtype=np.float32)
                     self._capture_write(out)
-                    return (out.tobytes(), pyaudio.paContinue)
+                    return out
                 self._priming = False
             if avail >= frame_count:
                 out = self._buffer[:frame_count]
@@ -370,7 +408,7 @@ class AudioOutput:
                 out = np.concatenate([self._buffer, np.zeros((frame_count - avail, 2), dtype=np.float32)])
                 self._buffer = np.zeros((0, 2), dtype=np.float32)
             self._capture_write(out)
-        return (np.ascontiguousarray(out).tobytes(), pyaudio.paContinue)
+        return out
 
     def _capture_write(self, out: np.ndarray) -> None:
         """O(1)-ish slice-assign into the pre-allocated capture buffer - see
@@ -456,7 +494,10 @@ class AudioOutput:
     def close(self) -> None:
         if self._stream is not None:
             try:
-                self._stream.stop_stream()
+                if self._pa is not None:
+                    self._stream.stop_stream()
+                else:
+                    self._stream.stop()
                 self._stream.close()
             except Exception:
                 pass
@@ -490,7 +531,16 @@ class AudioOutput:
     @staticmethod
     def list_output_devices() -> list[tuple[int, str]]:
         if not HAVE_PYAUDIO:
-            return []
+            if not HAVE_SOUNDDEVICE:
+                return []
+            try:
+                return [
+                    (i, info.get("name", f"device {i}"))
+                    for i, info in enumerate(sounddevice.query_devices())
+                    if info.get("max_output_channels", 0) > 0
+                ]
+            except Exception:
+                return []
         devices = []
         pa = pyaudio.PyAudio()
         try:

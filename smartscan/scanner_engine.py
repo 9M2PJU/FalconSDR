@@ -45,7 +45,7 @@ from .i18n import tr
 from .iq_recorder import IQRecorder
 from .models import BlacklistEntry, Channel, Modulation, ScannerState
 from .recorder import Recorder
-from .sdr_backend import AcquisitionThread, SoapyBackend, create_backend
+from .sdr_backend import AcquisitionThread, create_backend, open_real_backend
 from .wav_metadata import append_metadata_chunk
 
 AUDIO_RATE = 12500
@@ -781,7 +781,7 @@ class ScannerEngine(threading.Thread):
             # is a reconnect after real hardware was already proven present,
             # so a failure here must keep raising, never quietly substitute
             # fake data (that's exactly the bug that confused a user before).
-            raw_backend = SoapyBackend(dev.driver, dev.device_args, dev.sample_rate_hz, dev.gain_mode, dev.gain_db)
+            raw_backend = open_real_backend(dev.driver, dev.device_args, dev.sample_rate_hz, dev.gain_mode, dev.gain_db)
         # Wrapped in a dedicated acquisition thread (see AcquisitionThread's
         # docstring) so nothing this loop does between two backend.read()
         # calls - demod/noise-reduction/file I/O for however many slots are
