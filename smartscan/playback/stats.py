@@ -1,4 +1,5 @@
-"""Obliczanie statystyk zbioru nagrań (do zakładki Statystyki oraz panelu częstotliwości)."""
+"""Computes statistics over the recording collection (for the Statistics tab
+and the frequency panel)."""
 from __future__ import annotations
 
 from collections import Counter, defaultdict
@@ -6,6 +7,7 @@ from dataclasses import dataclass
 from datetime import datetime
 from typing import Dict, List, Optional
 
+from smartscan.i18n import tr
 from smartscan.playback.models import Recording
 
 
@@ -43,11 +45,14 @@ def frequency_stats(recordings: List[Recording], use_utc: bool = False) -> List[
     return result
 
 
-# Etykiety dla najczęstszych języków w tym nasłuchu (patrz
-# transcription_engine.py - realnie widziane: pl/en jako treść, plus
-# przypadkowe "egzotyczne" wskazania detekcji na słabym audio). Cokolwiek
-# spoza tego słownika i tak wyświetla się poprawnie (patrz LanguageStat.label) -
-# to tylko kosmetyka dla najpopularniejszych, nie kompletna tabela ISO 639-1.
+# Labels for the most common languages in this kind of listening (see
+# transcription_engine.py - what's actually observed is pl/en as real
+# content, plus the occasional "exotic" detection misfire on weak audio).
+# Anything outside this dict still displays fine (see LanguageStat.label) -
+# this is just cosmetics for the most common ones, not a complete ISO 639-1
+# table. Deliberately shown in each language's own native name (Deutsch,
+# not "German") regardless of the UI language - the standard convention for
+# a language picker/list, not something that gets translated.
 _LANGUAGE_LABELS = {
     "pl": "Polski", "en": "English", "de": "Deutsch", "fr": "Français",
     "ru": "Русский", "uk": "Українська", "tr": "Türkçe", "ar": "العربية",
@@ -55,15 +60,15 @@ _LANGUAGE_LABELS = {
     "it": "Italiano", "nl": "Nederlands", "cs": "Čeština", "sk": "Slovenčina",
     "pt": "Português", "el": "Ελληνικά", "hu": "Magyar", "ro": "Română",
 }
-# Sentinel (nie None - to znaczyłoby "brak filtra/pokaż wszystko" gdzie
-# indziej) dla nagrań bez wykrytego języka: brak transkrypcji w ogóle,
-# albo transkrypcja zakończona statusem bez języka (skipped_short/error).
+# Sentinel (not None - that would mean "no filter/show everything" elsewhere)
+# for recordings with no detected language: no transcript at all, or a
+# transcript that ended with a status carrying no language (skipped_short/error).
 NO_LANGUAGE = ""
 
 
 @dataclass
 class LanguageStat:
-    language: str  # kod ISO, albo NO_LANGUAGE dla "bez transkrypcji"
+    language: str  # ISO code, or NO_LANGUAGE for "no transcript"
     count: int
     avg_quality: float
     total_duration_sec: float
@@ -72,15 +77,15 @@ class LanguageStat:
     @property
     def label(self) -> str:
         if self.language == NO_LANGUAGE:
-            return "(bez transkrypcji)"
+            return tr("(no transcript)")
         return _LANGUAGE_LABELS.get(self.language, self.language.upper())
 
 
 def language_stats(recordings: List[Recording], use_utc: bool = False) -> List[LanguageStat]:
-    """Jak frequency_stats(), ale grupowane po wykrytym/wymuszonym języku
-    transkrypcji zamiast po częstotliwości - patrz freq_panel.py (tryb
-    "Języki"), do wyłapywania np. źle rozpoznanych egzotycznych języków na
-    słabym audio (patrz _resolve_language w transcription_engine.py)."""
+    """Like frequency_stats(), but grouped by detected/forced transcript
+    language instead of frequency - see freq_panel.py ("Languages" mode), for
+    catching e.g. exotic languages misdetected on weak audio (see
+    _resolve_language in transcription_engine.py)."""
     by_lang: Dict[str, List[Recording]] = defaultdict(list)
     for rec in recordings:
         lang = rec.transcript.language if rec.transcript and rec.transcript.language else NO_LANGUAGE
@@ -110,15 +115,22 @@ def counts_per_hour(recordings: List[Recording], use_utc: bool = False) -> List[
     return [(h, counter.get(h, 0)) for h in range(24)]
 
 
-_WEEKDAY_LABELS = ["Pon", "Wt", "Śr", "Czw", "Pt", "Sob", "Nd"]
+def _weekday_labels() -> list[str]:
+    # A function, not a module-level constant: the active language (see
+    # smartscan/i18n.py) is only known once set_language() runs, which
+    # happens after this module is first imported - a constant evaluated at
+    # import time would freeze in whatever language happened to be active
+    # then (i.e. always English, since i18n.set_language() hasn't run yet).
+    return [tr("Mon"), tr("Tue"), tr("Wed"), tr("Thu"), tr("Fri"), tr("Sat"), tr("Sun")]
 
 
 def counts_per_weekday(recordings: List[Recording], use_utc: bool = False) -> List[tuple[str, int]]:
     """Mon..Sun, always in that order and always all 7 present (0 where
     nothing was heard) - for spotting e.g. "this one's only active on
     weekdays" at a glance, same idea as counts_per_hour."""
+    labels = _weekday_labels()
     counter: Counter[int] = Counter((r.dt_utc if use_utc else r.dt_local).weekday() for r in recordings)
-    return [(_WEEKDAY_LABELS[d], counter.get(d, 0)) for d in range(7)]
+    return [(labels[d], counter.get(d, 0)) for d in range(7)]
 
 
 @dataclass

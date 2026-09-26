@@ -42,7 +42,13 @@ AVIATION_MILITARY_BANDS: list[VfoRangeConfig] = [MILITARY_VHF_BAND, MILITARY_UHF
 
 @dataclass(frozen=True)
 class BandPreset:
-    """One entry in the "Dodaj preset" picker for the band-list editor."""
+    """One entry in the "Add preset" picker for the band-list editor.
+    ``label``/``tooltip`` here are the plain English source text - wrapped in
+    ``tr()`` at the point of display (ScannerPanel._build_vfo_form), not
+    here: this list is built once, at module-import time, which happens
+    before ``i18n.set_language()`` ever runs (see main.py) - a tr() call
+    made here would always resolve to English regardless of the configured
+    language."""
     id: str
     label: str
     tooltip: str
@@ -65,21 +71,21 @@ class BandPreset:
 # catching real traffic rather than dead air.
 BAND_PRESETS: list[BandPreset] = [
     BandPreset(
-        id="civil_air", label="Lotnictwo cywilne (118-137 MHz)",
-        tooltip="Standardowe pasmo lotnictwa cywilnego: wieze, zbliżanie, kontrola obszaru.",
+        id="civil_air", label="Civil aviation (118-137 MHz)",
+        tooltip="Standard civil aviation band: towers, approach, area control.",
         start_hz=CIVIL_BAND.start_hz, stop_hz=CIVIL_BAND.stop_hz, step_hz=CIVIL_BAND.step_hz,
     ),
     BandPreset(
-        id="mil_vhf", label="Wojskowe VHF (137-144 MHz)",
-        tooltip="Wojskowe pasmo VHF sasiadujace z lotnictwem cywilnym.",
+        id="mil_vhf", label="Military VHF (137-144 MHz)",
+        tooltip="Military VHF band adjacent to civil aviation.",
         start_hz=MILITARY_VHF_BAND.start_hz, stop_hz=MILITARY_VHF_BAND.stop_hz,
         step_hz=MILITARY_VHF_BAND.step_hz,
     ),
     BandPreset(
-        id="mil_uhf", label="Wojskowe UHF NATO (225-400 MHz)",
+        id="mil_uhf", label="Military UHF NATO (225-400 MHz)",
         tooltip=(
-            "Zharmonizowane pasmo NATO UHF: tankowanie w powietrzu,\n"
-            "QRA/Baltic Air Policing, cwiczenia."
+            "Harmonized NATO UHF band: air-to-air refueling,\n"
+            "QRA/Baltic Air Policing, exercises."
         ),
         start_hz=MILITARY_UHF_BAND.start_hz, stop_hz=MILITARY_UHF_BAND.stop_hz,
         step_hz=MILITARY_UHF_BAND.step_hz,
@@ -87,54 +93,56 @@ BAND_PRESETS: list[BandPreset] = [
     BandPreset(
         id="pmr446", label="PMR446 (446.00625-446.19375 MHz)",
         tooltip=(
-            "Bezlicencyjne krotkofalowki PMR446 (16 kanalow analogowych, NFM).\n"
-            "Bardzo duza szansa zlapania czegos w poblizu - popularne na\n"
-            "wycieczkach, budowach, w hotelach/campingach."
+            "License-free PMR446 walkie-talkies (16 analog channels, NFM).\n"
+            "Very good chance of catching something nearby - popular on\n"
+            "trips, construction sites, at hotels/campsites."
         ),
         start_hz=446_006_250, stop_hz=446_193_750, step_hz=12_500, modulation="NFM",
     ),
     BandPreset(
-        id="ham_2m", label="Amatorskie 2m (144-146 MHz)",
-        tooltip="Pasmo radioamatorskie 2m (VHF, NFM): przemienniki i lacznosc bezposrednia.",
+        id="ham_2m", label="Ham 2m (144-146 MHz)",
+        tooltip="2m amateur radio band (VHF, NFM): repeaters and simplex.",
         start_hz=144_000_000, stop_hz=146_000_000, step_hz=12_500, modulation="NFM",
     ),
     BandPreset(
-        id="ham_70cm", label="Amatorskie 70cm (430-440 MHz)",
-        tooltip="Pasmo radioamatorskie 70cm (UHF, NFM): przemienniki i lacznosc bezposrednia.",
+        id="ham_70cm", label="Ham 70cm (430-440 MHz)",
+        tooltip="70cm amateur radio band (UHF, NFM): repeaters and simplex.",
         start_hz=430_000_000, stop_hz=440_000_000, step_hz=12_500, modulation="NFM",
     ),
     BandPreset(
-        id="marine_vhf", label="Morskie VHF (156-162 MHz)",
+        id="marine_vhf", label="Marine VHF (156-162 MHz)",
         tooltip=(
-            "Morskie pasmo VHF (kanaly 1-88, w tym kanal 16 - wywolawczy/ratunkowy, NFM).\n"
-            "Przydatne w poblizu wybrzeza, portu lub jeziora ze szlakiem zeglugowym."
+            "Marine VHF band (channels 1-88, including channel 16 - calling/\n"
+            "distress, NFM). Useful near a coast, harbor, or a lake with shipping traffic."
         ),
         start_hz=156_000_000, stop_hz=162_025_000, step_hz=25_000, modulation="NFM",
     ),
     BandPreset(
-        id="fm_broadcast", label="Radio FM (87.5-108 MHz)",
+        id="fm_broadcast", label="FM broadcast radio (87.5-108 MHz)",
         tooltip=(
-            "Nadawcze pasmo FM (WFM). Nie ATC, ale silne, stale obecne stacje\n"
-            "ulatwiaja szybkie sprawdzenie czy antena/odbiornik dziala poprawnie."
+            "FM broadcast band (WFM). Not ATC, but strong, always-on stations\n"
+            "make it easy to quickly check the antenna/receiver works correctly."
         ),
         start_hz=87_500_000, stop_hz=108_000_000, step_hz=100_000, modulation="WFM",
     ),
     BandPreset(
-        id="fire_vhf", label="Straz pozarna (148.6625-149.3375 MHz)",
+        id="fire_vhf", label="Fire brigade (148.6625-149.3375 MHz)",
         tooltip=(
-            "Pasmo UKF PSP/OSP (NFM), tu miesci sie caly kanalowy plan ratowniczo-\n"
-            "gasniczy (KRG) oraz siec alarmowania syren OSP. Wiele jednostek OSP\n"
-            "nadal pracuje analogowo mimo trwajacej migracji PSP do DMR - patrz\n"
-            "tez gotowe kanaly KRG w zakladce Kanaly (\"Wczytaj straz pozarna\")."
+            "PSP/OSP VHF band (NFM), home to the whole rescue-firefighting\n"
+            "channel plan (KRG) and the OSP siren-alerting network. Many OSP\n"
+            "units still operate on analog despite PSP's ongoing migration to\n"
+            "DMR - see also the ready-made KRG channels in the Channels tab\n"
+            "(\"Load fire brigade\"). Poland-specific."
         ),
         start_hz=148_662_500, stop_hz=149_337_500, step_hz=12_500, modulation="NFM",
     ),
     BandPreset(
-        id="prm", label="Służby Ratunkowe / PRM (168.5-169.2 MHz)",
+        id="prm", label="Emergency medical / PRM (168.5-169.2 MHz)",
         tooltip=(
-            "Państwowe Ratownictwo Medyczne (karetki / PRM), Pogotowie\n"
-            "Energetyczne i służby komunalne. Karetki i dyspozytorzy PRM\n"
-            "w wielu rejonach wciąż nadają tu w analogu."
+            "State medical rescue service (ambulances / PRM), power-grid\n"
+            "emergency service, and municipal services. Ambulances and PRM\n"
+            "dispatchers in many regions still transmit here in analog.\n"
+            "Poland-specific."
         ),
         start_hz=168_500_000, stop_hz=169_200_000, step_hz=12_500, modulation="NFM",
     ),
@@ -142,15 +150,18 @@ BAND_PRESETS: list[BandPreset] = [
 
 # Curated discrete channels (Memory List mode) ------------------------------
 # Highest hit-rate picks: guard/emergency, NATO/USAF air-to-air refueling
-# (tankers - "latajace cysterny"), Warszawa OAT military control sectors, and
-# the eastern/northern QRA and reinforcement bases most active during Baltic
-# Air Policing and eastern-flank exercises.
+# (tankers), Warsaw OAT military control sectors, and the eastern/northern
+# QRA and reinforcement bases most active during Baltic Air Policing and
+# eastern-flank exercises. Channel names are kept as their real, Poland-
+# specific facility/callsign names (e.g. "Malbork Wieza/Tower") rather than
+# translated - they're proper nouns, the actual identifiers heard on air, not
+# generic UI text.
 MILITARY_CHANNELS: list[Channel] = [
     # -- Guard / emergency (always worth a slot, near-constant monitoring) --
     _ch(243.000, "UHF Guard (MAD, emergency)"),
     _ch(121.500, "VHF Guard (IAD, emergency)"),
 
-    # -- NATO/USAF common air-to-air refueling (tankers, cysterny) --
+    # -- NATO/USAF common air-to-air refueling (tankers) --
     _ch(282.000, "Tankowanie - AR Common"),
     _ch(282.800, "Tankowanie - AR Common"),
     _ch(294.800, "Tankowanie - USAF Air Refueling"),
@@ -159,7 +170,7 @@ MILITARY_CHANNELS: list[Channel] = [
     _ch(349.700, "Tankowanie - AR Secondary (boom coord.)"),
     _ch(282.100, "SAR / Search and Rescue"),
 
-    # -- EPWW (Warszawa) OAT - wojskowe sektory kontroli w locie --
+    # -- EPWW (Warsaw) OAT - military in-flight control sectors --
     _ch(378.050, "EPWW OAT GF/B (UHF)"),
     _ch(278.600, "EPWW OAT GF/NE (UHF)"),
     _ch(267.825, "EPWW OAT NE/C (UHF)"),
@@ -176,11 +187,11 @@ MILITARY_CHANNELS: list[Channel] = [
     # -- Lask EPLK (F-16, BAP) --
     _ch(306.775, "Lask ATIS (UHF)"),
 
-    # -- Minsk Mazowiecki EPMM (wschodnia flanka, przerzut/tankowanie) --
+    # -- Minsk Mazowiecki EPMM (eastern flank, deployment/refueling) --
     _ch(278.575, "Minsk Mazowiecki Approach (UHF)"),
     _ch(279.075, "Minsk Mazowiecki Wieza/Tower (UHF)"),
 
-    # -- Powidz EPPW (transport strategiczny, tankowce) --
+    # -- Powidz EPPW (strategic transport, tankers) --
     _ch(279.850, "Powidz ATIS (UHF)"),
 
     # -- Swidwin EPSN --
@@ -188,28 +199,28 @@ MILITARY_CHANNELS: list[Channel] = [
     _ch(278.975, "Swidwin Approach (UHF)"),
     _ch(233.975, "Swidwin Wieza/Tower (UHF)"),
 
-    # -- Miroslawiec EPMI (BSP/drony, wsparcie) --
+    # -- Miroslawiec EPMI (UAVs/drones, support) --
     _ch(234.075, "Miroslawiec PAR (UHF)"),
     _ch(234.875, "Miroslawiec Approach (UHF)"),
     _ch(264.875, "Miroslawiec Wieza/Tower (UHF)"),
 ]
 
-# Straz pozarna (PSP/OSP) - ogolnopolskie kanaly ratowniczo-gasnicze (KRG) z
-# planu czestotliwosci UKF (148.6625-149.3375 MHz, NFM, rastr 12.5 kHz) oraz
-# para czestotliwosci selektywnego alarmowania syren OSP. KRG 1-8 to kanaly
-# uzywane ogolnokrajowo w akcjach ratowniczo-gasniczych (nie lokalne dyzurki),
-# wiec to one najczesciej nioso realny ruch. Wiele OSP nadal pracuje
-# analogowo mimo trwajacej migracji PSP do DMR - lokalnie moga byc w uzyciu
-# inne/dodatkowe kanaly z tego samego pasma.
+# Fire brigade (PSP/OSP) - nationwide rescue-firefighting channels (KRG) from
+# the VHF frequency plan (148.6625-149.3375 MHz, NFM, 12.5 kHz raster) plus
+# the OSP siren selective-alerting frequency pair. KRG 1-8 are the channels
+# used nationwide during rescue-firefighting operations (not local dispatch
+# desks), so they're the ones most likely to carry real traffic. Many OSP
+# units still operate on analog despite PSP's ongoing migration to DMR -
+# other/additional channels from the same band may be in local use.
 FIRE_CHANNELS: list[Channel] = [
-    _ch(148.7000, "PSP KRG 1 (ogolnopolski)", Modulation.NFM),
-    _ch(149.0875, "PSP KRG 2 (ogolnopolski)", Modulation.NFM),
-    _ch(149.1375, "PSP KRG 3 (ogolnopolski)", Modulation.NFM),
-    _ch(149.1625, "PSP KRG 4 (ogolnopolski)", Modulation.NFM),
-    _ch(149.2250, "PSP KRG 5 (ogolnopolski)", Modulation.NFM),
-    _ch(149.2375, "PSP KRG 6 (ogolnopolski)", Modulation.NFM),
-    _ch(149.2625, "PSP KRG 7 (ogolnopolski)", Modulation.NFM),
-    _ch(149.2750, "PSP KRG 8 (ogolnopolski)", Modulation.NFM),
-    _ch(148.7250, "OSP - alarmowanie syren (Tx)", Modulation.NFM),
-    _ch(148.8250, "OSP - alarmowanie syren (Rx)", Modulation.NFM),
+    _ch(148.7000, "PSP KRG 1 (nationwide)", Modulation.NFM),
+    _ch(149.0875, "PSP KRG 2 (nationwide)", Modulation.NFM),
+    _ch(149.1375, "PSP KRG 3 (nationwide)", Modulation.NFM),
+    _ch(149.1625, "PSP KRG 4 (nationwide)", Modulation.NFM),
+    _ch(149.2250, "PSP KRG 5 (nationwide)", Modulation.NFM),
+    _ch(149.2375, "PSP KRG 6 (nationwide)", Modulation.NFM),
+    _ch(149.2625, "PSP KRG 7 (nationwide)", Modulation.NFM),
+    _ch(149.2750, "PSP KRG 8 (nationwide)", Modulation.NFM),
+    _ch(148.7250, "OSP - siren alerting (Tx)", Modulation.NFM),
+    _ch(148.8250, "OSP - siren alerting (Rx)", Modulation.NFM),
 ]

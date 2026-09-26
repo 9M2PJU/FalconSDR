@@ -40,6 +40,7 @@ from .channelizer import (
 )
 from .config import AppConfig, CONFIG_DIR, VfoRangeConfig
 from .dsp import Demodulator, NoiseReducer
+from .i18n import tr
 from .models import BlacklistEntry, Channel, Modulation, ScannerState
 from .recorder import Recorder
 from .sdr_backend import AcquisitionThread, SoapyBackend, create_backend
@@ -603,7 +604,7 @@ class ScannerEngine(threading.Thread):
             try:
                 self._main_loop()
             except Exception as exc:
-                self.signals.log.emit(f"Polaczenie z SDR przerwane: {exc}")
+                self.signals.log.emit(tr("SDR connection lost: {error}").format(error=exc))
                 for freq_hz in list(self._slots.keys()):
                     self._close_slot(freq_hz, reason="connection_lost")
                 if self._backend is not None:
@@ -629,7 +630,7 @@ class ScannerEngine(threading.Thread):
         self._audio_out = AudioOutput(AUDIO_RATE, dev.audio_output_device)
         _checkpoint(f"AudioOutput created, available={self._audio_out.available}")
         if not self._audio_out.available:
-            self.signals.log.emit("Brak wyjscia audio (PyAudio) - monitorowanie na zywo wylaczone.")
+            self.signals.log.emit(tr("No audio output (PyAudio) - live monitoring disabled."))
         self._spectrum_worker = _SpectrumWorker(self.signals)
         _checkpoint("_SpectrumWorker thread started")
         # Read once per engine start (not re-read mid-session) - roll-off is
@@ -640,8 +641,9 @@ class ScannerEngine(threading.Thread):
         _checkpoint(f"EdgeCompensation loaded, buckets={self._edge_compensation.bucket_count}")
         if self._edge_compensation.has_data:
             self.signals.log.emit(
-                f"Kompensacja opadania sygnalu na krawedziach okna: aktywna "
-                f"({self._edge_compensation.bucket_count} kubelkow danych z historii nasluchu)."
+                tr("Edge roll-off compensation: active ({count} data buckets from listening history).").format(
+                    count=self._edge_compensation.bucket_count,
+                )
             )
         self._rebuild_windows()
         _checkpoint("_rebuild_windows() done")
@@ -672,19 +674,21 @@ class ScannerEngine(threading.Thread):
         self._applied_gain_mode, self._applied_gain_db = dev.gain_mode, dev.gain_db
         self.signals.gain_range_changed.emit(*self._backend.gain_range_db)
         if self._backend.label == "simulated" and dev.driver != "simulated":
-            self.signals.log.emit("Nie znaleziono/nie skonfigurowano SoapySDR - dzialam w trybie SYMULACJI.")
-        # Bezpośredni odczyt tego co sterownik faktycznie oddaje na jedno
-        # readStream() (patrz SoapyBackend.__init__ i jego komentarz o
-        # bufflen) - zamiast dalej zgadywać z samych statystyk, ta liczba
-        # mówi wprost czy jeden takt (chunk_size próbek) w ogóle mieści się
-        # w jednym wywołaniu, czy driver i tak odda mniej niezależnie od
-        # tego jak duży bufor mu podstawimy.
+            self.signals.log.emit(tr("SoapySDR not found/configured - running in SIMULATION mode."))
+        # Direct readout of what the driver actually hands back on one
+        # readStream() call (see SoapyBackend.__init__ and its comment on
+        # bufflen) - instead of continuing to guess from statistics alone,
+        # this number states outright whether one tick's worth (chunk_size
+        # samples) fits in a single call, or whether the driver hands back
+        # less regardless of how big a buffer we give it.
         mtu = getattr(self._backend, "stream_mtu", None)
         if mtu is not None:
             chunk = self._chunk_size()
+            fits = tr("fits in one readStream() call") if mtu >= chunk else tr("STILL needs multiple calls per tick")
             self.signals.log.emit(
-                f"SDR stream MTU: {mtu} probek/wywolanie (takt = {chunk} probek"
-                f"{' - mieści się w jednym readStream()' if mtu >= chunk else ' - NADAL wymaga wielu wywolan na takt'})."
+                tr("SDR stream MTU: {mtu} samples/call (tick = {chunk} samples - {fits}).").format(
+                    mtu=mtu, chunk=chunk, fits=fits,
+                )
             )
 
     def _open_backend_with_retry(self, allow_simulated_fallback: bool) -> bool:
@@ -695,7 +699,7 @@ class ScannerEngine(threading.Thread):
             try:
                 self._open_backend(allow_simulated_fallback)
                 if attempt > 0:
-                    self.signals.log.emit("Polaczono ponownie z SDR - wznawiam skanowanie.")
+                    self.signals.log.emit(tr("Reconnected to the SDR - resuming scanning."))
                 return True
             except Exception as exc:
                 if self._stop_evt.is_set():
@@ -703,7 +707,9 @@ class ScannerEngine(threading.Thread):
                 attempt += 1
                 backoff = RECONNECT_BACKOFF_S[min(attempt - 1, len(RECONNECT_BACKOFF_S) - 1)]
                 self.signals.log.emit(
-                    f"Nie udalo sie polaczyc z SDR ({exc}) - ponowna proba za {backoff}s (proba {attempt})..."
+                    tr("Failed to connect to the SDR ({error}) - retrying in {backoff}s (attempt {attempt})...").format(
+                        error=exc, backoff=backoff, attempt=attempt,
+                    )
                 )
                 self._emit_state(ScannerState.RECONNECTING)
                 deadline = time.monotonic() + backoff
@@ -856,7 +862,9 @@ class ScannerEngine(threading.Thread):
                 keep_every = -(-len(freqs) // MAX_VFO_CHANNELS)
                 freqs = freqs[::keep_every]
                 self.signals.log.emit(
-                    f"Zbyt wiele kanalow pasma \"{vr.label}\" ({len(freqs) * keep_every}) - przerzedzono co {keep_every}."
+                    tr("Too many channels in band \"{label}\" ({count}) - thinned every {every}.").format(
+                        label=vr.label, count=len(freqs) * keep_every, every=keep_every,
+                    )
                 )
             for f in freqs:
                 if f not in bw_map:
@@ -888,7 +896,9 @@ class ScannerEngine(threading.Thread):
                 keep_every = -(-len(freqs) // MAX_VFO_CHANNELS)
                 freqs = freqs[::keep_every]
                 self.signals.log.emit(
-                    f"Zbyt wiele kanalow pasma \"{vr.label}\" ({len(freqs) * keep_every}) - przerzedzono co {keep_every}."
+                    tr("Too many channels in band \"{label}\" ({count}) - thinned every {every}.").format(
+                        label=vr.label, count=len(freqs) * keep_every, every=keep_every,
+                    )
                 )
             for f in freqs:
                 if f not in bw_map:
@@ -949,10 +959,14 @@ class ScannerEngine(threading.Thread):
             self._channel_weight_map = weight_map
 
         total_windows = len(default_windows) + sum(len(lane.windows) for lane in priority_lanes)
-        extra = f", {len(priority_lanes)} pozycji z waga priorytetu" if priority_lanes else ""
+        extra = (
+            " " + tr("({count} priority-weighted entries)").format(count=len(priority_lanes))
+            if priority_lanes else ""
+        )
         self.signals.log.emit(
-            f"Skanowanie szerokopasmowe: {len(bw_map)} kanalow w {total_windows} "
-            f"oknie/oknach przechwytu ({sample_rate / 1e6:.2f} MHz kazde){extra}."
+            tr("Wideband scanning: {channels} channels in {windows} capture window(s) ({mhz:.2f} MHz each){extra}.").format(
+                channels=len(bw_map), windows=total_windows, mhz=sample_rate / 1e6, extra=extra,
+            )
         )
 
     def _chunk_size(self) -> int:
@@ -1629,7 +1643,7 @@ class ScannerEngine(threading.Thread):
             # this point. Left un-reset, its first call after resuming
             # would silently splice whatever partial frame was buffered
             # from *before* the gap onto this genuinely new, non-adjacent
-            # audio as if no time had passed - a real, reported "ścinka"/
+            # audio as if no time had passed - a real, reported glitch/
             # click right at the resume point. Resetting means losing at
             # most one FRAME_SIZE-worth (~40ms) of noise-reduction "warm-
             # up" on resume, a far smaller cost than a stitched artifact.

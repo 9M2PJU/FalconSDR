@@ -1,5 +1,5 @@
-"""Model tabeli Qt dla listy nagrań: formatowanie, kolorowanie jakości,
-filtrowanie i poprawne (numeryczne/czasowe) sortowanie kolumn."""
+"""Qt table model for the recordings list: formatting, quality coloring,
+filtering, and correct (numeric/time-based) column sorting."""
 from __future__ import annotations
 
 from datetime import datetime, timedelta
@@ -9,28 +9,41 @@ from typing import List, Optional
 from PySide6.QtCore import QModelIndex, QSortFilterProxyModel, Qt, QAbstractTableModel
 from PySide6.QtGui import QColor
 
+from smartscan.i18n import tr
 from smartscan.playback.models import Recording, TranscriptionResult
-
-COLUMNS = ["Data", "Godzina", "Częstotliwość", "Czas trwania", "SNR (dB)", "Jakość", "Rozmiar", "Transkrypcja"]
 
 COL_DATE, COL_TIME, COL_FREQ, COL_DUR, COL_SNR, COL_QUALITY, COL_SIZE, COL_TRANSCRIPT = range(8)
 
+
+def _columns() -> list[str]:
+    # A function, not a module-level constant - see stats.py's
+    # _weekday_labels() for why (the active language is only known once
+    # i18n.set_language() runs, after this module is first imported).
+    return [
+        tr("Date"), tr("Time"), tr("Frequency"), tr("Duration"), tr("SNR (dB)"),
+        tr("Quality"), tr("Size"), tr("Transcript"),
+    ]
+
+
 _TRANSCRIPT_SNIPPET_LEN = 90
 
-# Etykiety i kolory dla statusów, które nie są zwykłym tekstem - patrz
-# Recording.transcript_status / TRANSCRIPT_STATUSES w playback/models.py.
-_TRANSCRIPT_STATUS_LABELS = {
-    "pending": "⏳ w kolejce",
-    "skipped_short": "– za krótkie",
-    "no_speech": "🔇 brak mowy",
-    "error": "⚠ błąd transkrypcji",
-}
+
+def _transcript_status_labels() -> dict[str, str]:
+    # Labels and colors for statuses that aren't plain text - see
+    # Recording.transcript_status / TRANSCRIPT_STATUSES in playback/models.py.
+    return {
+        "pending": tr("⏳ queued"),
+        "skipped_short": tr("– too short"),
+        "no_speech": tr("\U0001f507 no speech"),
+        "error": tr("⚠ transcription error"),
+    }
 
 
 def _transcript_display(rec: Recording) -> str:
     status = rec.transcript_status
-    if status in _TRANSCRIPT_STATUS_LABELS:
-        return _TRANSCRIPT_STATUS_LABELS[status]
+    labels = _transcript_status_labels()
+    if status in labels:
+        return labels[status]
     text = rec.transcript_text
     snippet = text if len(text) <= _TRANSCRIPT_SNIPPET_LEN else text[:_TRANSCRIPT_SNIPPET_LEN].rstrip() + "…"
     return f"❓ {snippet}" if status == "low_confidence" else snippet
@@ -63,7 +76,7 @@ def _format_size(num_bytes: int) -> str:
 
 def _quality_color(score: float) -> QColor:
     score = max(0.0, min(100.0, score))
-    # czerwony (słaba jakość) -> żółty -> zielony (dobra jakość)
+    # red (poor quality) -> yellow -> green (good quality)
     if score < 50:
         t = score / 50.0
         r, g, b = 210, int(60 + t * (200 - 60)), 60
@@ -78,9 +91,9 @@ class RecordingsTableModel(QAbstractTableModel):
         super().__init__(parent)
         self._recordings: List[Recording] = recordings or []
         self._use_utc = False
-        # freq_khz -> nazwa z Listy pamieci (zakladka Nasluch/Kanaly), zeby
-        # kolumna Czestotliwosc pokazywala np. "128.950 MHz — Rzeszow Wieza"
-        # zamiast samej liczby, gdy czestotliwosc jest rozpoznana.
+        # freq_khz -> name from the Memory List (Listen/Channels tab), so the
+        # Frequency column shows e.g. "128.950 MHz — Downtown Tower" instead
+        # of just the number, when the frequency is recognized.
         self._freq_names: dict[int, str] = {}
 
     def set_freq_names(self, freq_names: dict[int, str]) -> None:
@@ -101,10 +114,10 @@ class RecordingsTableModel(QAbstractTableModel):
     # -- API ------------------------------------------------------------
     def set_recordings(self, recordings: List[Recording]) -> None:
         self.beginResetModel()
-        # Kopia, nie referencja: PlaybackPanel trzyma swoją własną listę
-        # self._recordings i mutuje ją niezależnie (np. append_recording()
-        # przy nowym nagraniu, filtrowanie przy usuwaniu) - dzielenie jednej
-        # listy powodowało podwójne wstawienia/usunięcia.
+        # A copy, not a reference: PlaybackPanel keeps its own
+        # self._recordings list and mutates it independently (e.g.
+        # append_recording() for a new recording, filtering on delete) -
+        # sharing one list caused double insertions/removals.
         self._recordings = list(recordings)
         self.endResetModel()
 
@@ -128,11 +141,11 @@ class RecordingsTableModel(QAbstractTableModel):
         return 0 if parent.isValid() else len(self._recordings)
 
     def columnCount(self, parent=QModelIndex()) -> int:
-        return 0 if parent.isValid() else len(COLUMNS)
+        return 0 if parent.isValid() else len(_columns())
 
     def headerData(self, section, orientation, role=Qt.ItemDataRole.DisplayRole):
         if orientation == Qt.Orientation.Horizontal and role == Qt.ItemDataRole.DisplayRole:
-            return COLUMNS[section]
+            return _columns()[section]
         return None
 
     def data(self, index: QModelIndex, role: int = Qt.ItemDataRole.DisplayRole):
@@ -158,7 +171,7 @@ class RecordingsTableModel(QAbstractTableModel):
                 if role == Qt.ItemDataRole.DisplayRole:
                     if rec.quality is None:
                         return "—"
-                    return "uszkodzony" if not rec.quality.readable else f"{rec.snr_db:.1f}"
+                    return tr("corrupt") if not rec.quality.readable else f"{rec.snr_db:.1f}"
                 if rec.quality is None:
                     return -999.0
                 return -999.0 if not rec.quality.readable else rec.snr_db
@@ -166,7 +179,7 @@ class RecordingsTableModel(QAbstractTableModel):
                 if role == Qt.ItemDataRole.DisplayRole:
                     if rec.quality is None:
                         return "—"
-                    return "⚠ uszkodzony" if not rec.quality.readable else f"{rec.quality_score:.0f}"
+                    return tr("⚠ corrupt") if not rec.quality.readable else f"{rec.quality_score:.0f}"
                 if rec.quality is None:
                     return -1.0
                 return -2.0 if not rec.quality.readable else rec.quality_score
@@ -182,7 +195,7 @@ class RecordingsTableModel(QAbstractTableModel):
 
         if role == Qt.ItemDataRole.BackgroundRole and col == COL_QUALITY and rec.quality:
             if not rec.quality.readable:
-                return QColor(120, 120, 130, 90)  # szary - plik nieczytelny, nie "słaba jakość"
+                return QColor(120, 120, 130, 90)  # gray - file unreadable, not "poor quality"
             return _quality_color(rec.quality_score)
         if role == Qt.ItemDataRole.BackgroundRole and col == COL_TRANSCRIPT:
             return _transcript_color(rec.transcript_status)
@@ -190,35 +203,37 @@ class RecordingsTableModel(QAbstractTableModel):
         if role == Qt.ItemDataRole.ToolTipRole:
             if col == COL_TRANSCRIPT:
                 if rec.transcript is None:
-                    return "Nie transkrybowano jeszcze."
+                    return tr("Not transcribed yet.")
                 t = rec.transcript
-                tip = f"Status: {t.status}\nJęzyk: {t.language} ({t.language_probability * 100:.0f}%)\nSilnik: {t.engine}"
+                tip = tr("Status: {status}\nLanguage: {language} ({probability:.0f}%)\nEngine: {engine}").format(
+                    status=t.status, language=t.language, probability=t.language_probability * 100, engine=t.engine,
+                )
                 if t.text:
                     tip += f"\n\n{t.text}"
                 return tip
             tip = str(rec.path)
             if rec.quality and not rec.quality.readable:
-                tip += "\n\n⚠ Plik uszkodzony lub nieczytelny - nie udało się przeanalizować audio."
+                tip += "\n\n" + tr("⚠ File is corrupt or unreadable - couldn't analyze the audio.")
             elif rec.quality:
-                tip += (
-                    f"\nSzum tła: {rec.quality.noise_floor:.0f}"
-                    f"\nPoziom sygnału: {rec.quality.signal_level:.0f}"
-                    f"\nPrzesterowanie: {rec.quality.clipping_ratio * 100:.1f}%"
+                tip += tr("\nNoise floor: {noise_floor:.0f}\nSignal level: {signal_level:.0f}\nClipping: {clipping:.1f}%").format(
+                    noise_floor=rec.quality.noise_floor, signal_level=rec.quality.signal_level,
+                    clipping=rec.quality.clipping_ratio * 100,
                 )
             return tip
 
         return None
 
     def append_recording(self, rec: Recording) -> None:
-        """Wstawia jedno świeżo zakończone nagranie bez resetowania całego
-        modelu (a więc bez utraty zaznaczenia/przewinięcia widoku)."""
+        """Inserts one freshly-finished recording without resetting the whole
+        model (so it doesn't lose the current selection/scroll position)."""
         row = len(self._recordings)
         self.beginInsertRows(QModelIndex(), row, row)
         self._recordings.append(rec)
         self.endInsertRows()
 
     def remove_recording(self, path: Path) -> Optional[Recording]:
-        """Usuwa nagranie z modelu (np. po skasowaniu pliku z dysku). Zwraca usunięty Recording albo None."""
+        """Removes a recording from the model (e.g. after deleting the file
+        from disk). Returns the removed Recording, or None."""
         for row, rec in enumerate(self._recordings):
             if rec.path == path:
                 self.beginRemoveRows(QModelIndex(), row, row)
@@ -227,7 +242,7 @@ class RecordingsTableModel(QAbstractTableModel):
                 return rec
         return None
 
-    # -- aktualizacja pojedynczego wiersza (worker w tle kończy jedno nagranie) --
+    # -- updating a single row (a background worker finishes one recording) --
     def update_transcript(self, path: Path, result: TranscriptionResult) -> None:
         for row, rec in enumerate(self._recordings):
             if rec.path == path:
@@ -241,7 +256,7 @@ class RecordingsTableModel(QAbstractTableModel):
 
 
 class RecordingsFilterProxy(QSortFilterProxyModel):
-    """Filtruje po częstotliwości, zakresie dat, minimalnej jakości i wyszukiwanym tekście."""
+    """Filters by frequency, date range, minimum quality and search text."""
 
     def __init__(self, parent=None):
         super().__init__(parent)
@@ -252,11 +267,11 @@ class RecordingsFilterProxy(QSortFilterProxyModel):
         self._min_quality: float = 0.0
         self._search_text: str = ""
         self._favorites_only: bool = False
-        # None = brak filtra językowego; "" (NO_LANGUAGE, patrz stats.py) =
-        # tylko nagrania bez wykrytego języka; kod ISO = tylko ten język.
-        # Osobny wymiar od _freq_khz - freq_panel.py czyści ten przy wyborze
-        # w trybie Częstotliwości i na odwrót, więc oba filtry nigdy się
-        # niespodziewanie nie łączą.
+        # None = no language filter; "" (NO_LANGUAGE, see stats.py) = only
+        # recordings with no detected language; an ISO code = only that
+        # language. A separate dimension from _freq_khz - freq_panel.py
+        # clears this one when selecting in Frequency mode and vice versa,
+        # so the two filters never unexpectedly combine.
         self._language: Optional[str] = None
 
     def source(self) -> RecordingsTableModel:

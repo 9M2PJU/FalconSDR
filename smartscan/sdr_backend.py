@@ -83,7 +83,7 @@ class SoapyBackend(SdrBackend):
 
     def __init__(self, driver: str, device_args: str, sample_rate: float, gain_mode: str, gain_db: float):
         if not HAVE_SOAPY:
-            raise RuntimeError("Modul python3-soapysdr nie jest zainstalowany")
+            raise RuntimeError("The python3-soapysdr module is not installed")
         self._wait_for_reopen_cooldown()
         args = {"driver": driver} if driver and driver != "auto" else {}
         if device_args:
@@ -226,8 +226,8 @@ class SoapyBackend(SdrBackend):
             # exception is ever raised. Raise here so that case reconnects
             # too, same as a fully dead stream.
             raise RuntimeError(
-                f"Strumien SDR dostarcza za malo danych ({got}/{num_samples} probek) "
-                "- urzadzenie odlaczone lub nie odpowiada"
+                f"SDR stream is delivering too little data ({got}/{num_samples} samples) "
+                "- device disconnected or not responding"
             )
         return out[:got]
 
@@ -360,7 +360,7 @@ class AcquisitionThread:
     driver silently drops/laps real samples. Splicing what we read *after*
     that onto what came before joins two non-time-contiguous IQ blocks,
     which shows up as a broadband click/phase discontinuity once
-    demodulated - audible as a "ścinka" in both live audio and recordings,
+    demodulated - audible as a glitch/skip in both live audio and recordings,
     completely unrelated to squelch or noise reduction. Measured for real
     on this project's own SDR I/O diagnostic log (see io_diag_log.py):
     historically ~5% of all 5-second windows had at least one such overflow
@@ -529,14 +529,14 @@ class AcquisitionThread:
                 remaining = deadline - time.monotonic()
                 if remaining <= 0:
                     raise RuntimeError(
-                        "Watek akwizycji SDR nie dostarczyl danych na czas - "
-                        "urzadzenie odlaczone lub nie odpowiada"
+                        "SDR acquisition thread didn't deliver data in time - "
+                        "device disconnected or not responding"
                     )
                 self._cond.wait(remaining)
             if self._error is not None:
                 raise self._error
             if not self._queue:
-                raise RuntimeError("Watek akwizycji SDR zatrzymany")
+                raise RuntimeError("SDR acquisition thread stopped")
             return self._queue.popleft()
 
     def _submit_command(self, kind: str, args: tuple, timeout: float = 2.0) -> None:
@@ -558,7 +558,7 @@ class AcquisitionThread:
             self._cond.notify_all()
         if not self._command_done.wait(timeout):
             raise RuntimeError(
-                "Watek akwizycji SDR nie odpowiedzial na zmiane czestotliwosci/gainu na czas"
+                "SDR acquisition thread didn't respond to the frequency/gain change in time"
             )
         if self._error is not None:
             raise self._error

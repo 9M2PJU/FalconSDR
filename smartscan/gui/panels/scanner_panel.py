@@ -681,9 +681,9 @@ class ScannerPanel(QGroupBox):
         preset_row = QHBoxLayout()
         self.preset_combo = QComboBox()
         for preset in BAND_PRESETS:
-            self.preset_combo.addItem(preset.label, preset.id)
+            self.preset_combo.addItem(tr(preset.label), preset.id)
             self.preset_combo.setItemData(
-                self.preset_combo.count() - 1, preset.tooltip, Qt.ItemDataRole.ToolTipRole
+                self.preset_combo.count() - 1, tr(preset.tooltip), Qt.ItemDataRole.ToolTipRole
             )
         add_preset_btn = QPushButton(tr("Add preset"))
         add_preset_btn.clicked.connect(self._on_add_preset)
@@ -910,7 +910,9 @@ class ScannerPanel(QGroupBox):
         preset = next((p for p in BAND_PRESETS if p.id == preset_id), None)
         if preset is None:
             return
-        self.config.bands.append(preset.to_band())
+        band = preset.to_band()
+        band.label = tr(preset.label)  # translated, not the preset's raw English source
+        self.config.bands.append(band)
         self._rebuild_band_rows()
         self.settings_changed.emit()
 

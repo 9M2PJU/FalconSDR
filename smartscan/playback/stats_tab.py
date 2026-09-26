@@ -1,7 +1,7 @@
-"""Zakładka Statystyki: podsumowanie, tabela częstotliwości, wykresy ruchu -
-ogólne (wszystkie nagrania) domyślnie, albo dla jednej wybranej częstotliwości
-(klik w tabelę) - godziny doby i dni tygodnia, żeby było widać np. "ten kanał
-żyje tylko w dni robocze rano" na pierwszy rzut oka."""
+"""Statistics tab: summary, frequency table, traffic charts - overall (every
+recording) by default, or for one selected frequency (click in the table) -
+hour-of-day and day-of-week, so e.g. "this channel is only alive on weekday
+mornings" is visible at a glance."""
 from __future__ import annotations
 
 from typing import List, Optional
@@ -23,11 +23,25 @@ from PySide6.QtWidgets import (
     QWidget,
 )
 
+from smartscan.i18n import tr
 from smartscan.playback.models import Recording
 from smartscan.playback.stats import counts_per_day, counts_per_hour, counts_per_weekday, frequency_stats, summarize
 
 pg.setConfigOption("background", (30, 30, 34))
 pg.setConfigOption("foreground", (220, 220, 220))
+
+_SUMMARY_KEYS = ["recordings", "total_time", "date_range", "avg_quality", "frequencies", "busiest"]
+
+
+def _summary_key_labels() -> dict[str, str]:
+    return {
+        "recordings": tr("Recordings"),
+        "total_time": tr("Total time"),
+        "date_range": tr("Date range"),
+        "avg_quality": tr("Avg. quality"),
+        "frequencies": tr("Frequencies"),
+        "busiest": tr("Busiest"),
+    }
 
 
 class _NumericItem(QTableWidgetItem):
@@ -60,7 +74,7 @@ def _bar_chart(categories: List[str], values: List[float], color="#4f9cff", rota
 
 
 class StatsTab(QWidget):
-    frequencySelected = Signal(int)  # dwuklik w wiersz - "przejdz do Przegladarki"
+    frequencySelected = Signal(int)  # double-click on a row - "jump to the browser"
 
     def __init__(self, parent=None):
         super().__init__(parent)
@@ -71,13 +85,12 @@ class StatsTab(QWidget):
 
         outer = QVBoxLayout(self)
 
-        self.summary_box = QGroupBox("Podsumowanie")
+        self.summary_box = QGroupBox(tr("Summary"))
         self.summary_layout = QGridLayout(self.summary_box)
         self.summary_labels = {}
-        for i, key in enumerate(
-            ["Nagrań", "Łączny czas", "Zakres dat", "Śr. jakość", "Częstotliwości", "Najaktywniejsza"]
-        ):
-            self.summary_layout.addWidget(QLabel(f"<b>{key}:</b>"), i // 2, (i % 2) * 2)
+        key_labels = _summary_key_labels()
+        for i, key in enumerate(_SUMMARY_KEYS):
+            self.summary_layout.addWidget(QLabel(f"<b>{key_labels[key]}:</b>"), i // 2, (i % 2) * 2)
             value_label = QLabel("—")
             self.summary_labels[key] = value_label
             self.summary_layout.addWidget(value_label, i // 2, (i % 2) * 2 + 1)
@@ -87,15 +100,15 @@ class StatsTab(QWidget):
         outer.addWidget(splitter, stretch=1)
 
         self.freq_table = QTableWidget(0, 4)
-        self.freq_table.setHorizontalHeaderLabels(["Częstotliwość", "Liczba", "Śr. jakość", "Ostatnio słyszana"])
+        self.freq_table.setHorizontalHeaderLabels([tr("Frequency"), tr("Count"), tr("Avg. quality"), tr("Last heard")])
         self.freq_table.horizontalHeader().setSectionResizeMode(QHeaderView.ResizeMode.Stretch)
         self.freq_table.setEditTriggers(QTableWidget.EditTrigger.NoEditTriggers)
         self.freq_table.setSelectionBehavior(QTableWidget.SelectionBehavior.SelectRows)
         self.freq_table.setSortingEnabled(True)
-        self.freq_table.setToolTip(
-            "Klik: pokaż specyfikę tej częstotliwości obok (godziny/dni tygodnia).\n"
-            "Podwójny klik: przejdź do niej w zakładce Odtwarzacz."
-        )
+        self.freq_table.setToolTip(tr(
+            "Click: show this frequency's details on the side (hours/weekdays).\n"
+            "Double-click: jump to it in the Odtwarzacz tab."
+        ))
         self.freq_table.cellDoubleClicked.connect(self._on_freq_row_activated)
         self.freq_table.itemSelectionChanged.connect(self._on_freq_selection_changed)
         splitter.addWidget(self.freq_table)
@@ -107,28 +120,28 @@ class StatsTab(QWidget):
         self.charts_stack.addWidget(self._build_overview_widget())
         self.charts_stack.addWidget(self._build_detail_widget())
 
-    # -- ogólny widok (domyślny, nic nie wybrane) ---------------------------
+    # -- overview (default, nothing selected) ---------------------------
     def _build_overview_widget(self) -> QWidget:
         widget = QWidget()
         layout = QVBoxLayout(widget)
         layout.setContentsMargins(0, 0, 0, 0)
-        layout.addWidget(QLabel("<b>Liczba nagrań dziennie</b>"))
+        layout.addWidget(QLabel(f"<b>{tr('Recordings per day')}</b>"))
         self.day_chart_container = QVBoxLayout()
         layout.addLayout(self.day_chart_container)
-        self.hour_chart_title = QLabel("<b>Ruch wg godziny doby (czas polski)</b>")
+        self.hour_chart_title = QLabel(f"<b>{tr('Traffic by hour of day (local time)')}</b>")
         layout.addWidget(self.hour_chart_title)
         self.hour_chart_container = QVBoxLayout()
         layout.addLayout(self.hour_chart_container)
         return widget
 
-    # -- widok jednej czestotliwosci (klik w tabele) -------------------------
+    # -- single-frequency view (click in the table) -------------------------
     def _build_detail_widget(self) -> QWidget:
         widget = QWidget()
         layout = QVBoxLayout(widget)
         layout.setContentsMargins(0, 0, 0, 0)
 
-        back_btn = QPushButton("← Widok ogólny")
-        back_btn.setToolTip("Odznacz wybraną częstotliwość i wróć do statystyk całej biblioteki")
+        back_btn = QPushButton(tr("← Overview"))
+        back_btn.setToolTip(tr("Deselect the chosen frequency and go back to the whole library's stats"))
         back_btn.clicked.connect(self._show_overview)
         layout.addWidget(back_btn)
 
@@ -142,12 +155,12 @@ class StatsTab(QWidget):
         self.detail_stats_label.setWordWrap(True)
         layout.addWidget(self.detail_stats_label)
 
-        self.detail_hour_title = QLabel("<b>Wg godziny doby (czas polski)</b>")
+        self.detail_hour_title = QLabel(f"<b>{tr('By hour of day (local time)')}</b>")
         layout.addWidget(self.detail_hour_title)
         self.detail_hour_container = QVBoxLayout()
         layout.addLayout(self.detail_hour_container)
 
-        layout.addWidget(QLabel("<b>Wg dnia tygodnia</b>"))
+        layout.addWidget(QLabel(f"<b>{tr('By day of week')}</b>"))
         self.detail_weekday_container = QVBoxLayout()
         layout.addLayout(self.detail_weekday_container)
         return widget
@@ -191,8 +204,9 @@ class StatsTab(QWidget):
         total_min = sum(r.duration_sec for r in recs) / 60.0
         last_heard = max((r.dt_utc if self._use_utc else r.dt_local) for r in recs)
         self.detail_stats_label.setText(
-            f"{len(recs)} nagrań  •  śr. jakość {avg_q:.0f}/100  •  łącznie {total_min:.1f} min  •  "
-            f"ostatnio słyszana {last_heard:%Y-%m-%d %H:%M}"
+            tr("{count} recordings • avg. quality {quality:.0f}/100 • {minutes:.1f} min total • last heard {last_heard}").format(
+                count=len(recs), quality=avg_q, minutes=total_min, last_heard=f"{last_heard:%Y-%m-%d %H:%M}",
+            )
         )
 
         hour_counts = counts_per_hour(recs, use_utc=self._use_utc)
@@ -207,7 +221,7 @@ class StatsTab(QWidget):
         )
         self.charts_stack.setCurrentIndex(1)
 
-    # -- wspolne -------------------------------------------------------------
+    # -- shared -------------------------------------------------------------
     def _set_chart(self, key: str, container: QVBoxLayout, labels: List[str], values: List[float], color: str) -> None:
         old = self._charts.get(key)
         if old is not None:
@@ -223,8 +237,9 @@ class StatsTab(QWidget):
 
     def set_use_utc(self, use_utc: bool) -> None:
         self._use_utc = use_utc
-        self.hour_chart_title.setText(f"<b>Ruch wg godziny doby (czas {'UTC' if use_utc else 'polski'})</b>")
-        self.detail_hour_title.setText(f"<b>Wg godziny doby (czas {'UTC' if use_utc else 'polski'})</b>")
+        tz_label = tr("UTC") if use_utc else tr("local")
+        self.hour_chart_title.setText(f"<b>{tr('Traffic by hour of day ({tz} time)').format(tz=tz_label)}</b>")
+        self.detail_hour_title.setText(f"<b>{tr('By hour of day ({tz} time)').format(tz=tz_label)}</b>")
 
     def update_stats(self, recordings: List[Recording]) -> None:
         self._recordings = recordings
@@ -235,12 +250,12 @@ class StatsTab(QWidget):
         if summary.date_from and summary.date_to:
             date_range = f"{summary.date_from:%Y-%m-%d} → {summary.date_to:%Y-%m-%d}"
 
-        self.summary_labels["Nagrań"].setText(str(summary.total_count))
-        self.summary_labels["Łączny czas"].setText(f"{hours:.1f} h")
-        self.summary_labels["Zakres dat"].setText(date_range)
-        self.summary_labels["Śr. jakość"].setText(f"{summary.avg_quality:.0f} / 100")
-        self.summary_labels["Częstotliwości"].setText(str(summary.unique_frequencies))
-        self.summary_labels["Najaktywniejsza"].setText(
+        self.summary_labels["recordings"].setText(str(summary.total_count))
+        self.summary_labels["total_time"].setText(f"{hours:.1f} h")
+        self.summary_labels["date_range"].setText(date_range)
+        self.summary_labels["avg_quality"].setText(f"{summary.avg_quality:.0f} / 100")
+        self.summary_labels["frequencies"].setText(str(summary.unique_frequencies))
+        self.summary_labels["busiest"].setText(
             f"{summary.busiest_freq.label} ({summary.busiest_freq.count})" if summary.busiest_freq else "—"
         )
 

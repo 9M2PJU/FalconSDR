@@ -726,3 +726,285 @@ msgstr "pyqtgraph niedostępny - podgląd widma wyłączony"
 msgid "Click/drag to seek. Bar height = loudness at that point in the recording."
 msgstr "Klik/przeciągnięcie - przewijanie. Wysokość słupków = głośność w tym miejscu nagrania."
 
+
+# --- playback/freq_panel.py, stats_tab.py, stats.py ---
+
+msgid "Frequencies"
+msgstr "Częstotliwości"
+
+msgid "Languages"
+msgstr "Języki"
+
+msgid "Search frequencies..."
+msgstr "Szukaj częstotliwości..."
+
+msgid "Sort: transmission count"
+msgstr "Sortuj: liczba transmisji"
+
+msgid "Sort: frequency"
+msgstr "Sortuj: częstotliwość"
+
+msgid "Sort: quality"
+msgstr "Sortuj: jakość"
+
+msgid "Sort: language"
+msgstr "Sortuj: język"
+
+msgid "Search languages..."
+msgstr "Szukaj języka..."
+
+msgid "All"
+msgstr "Wszystkie"
+
+msgid "★ Favorites"
+msgstr "★ Ulubione"
+
+msgid "avg. quality"
+msgstr "śr. jakość"
+
+msgid "Recordings"
+msgstr "Nagrań"
+
+msgid "Total time"
+msgstr "Łączny czas"
+
+msgid "Date range"
+msgstr "Zakres dat"
+
+msgid "Avg. quality"
+msgstr "Śr. jakość"
+
+msgid "Busiest"
+msgstr "Najaktywniejsza"
+
+msgid "Summary"
+msgstr "Podsumowanie"
+
+msgid "Frequency"
+msgstr "Częstotliwość"
+
+msgid "Count"
+msgstr "Liczba"
+
+msgid "Last heard"
+msgstr "Ostatnio słyszana"
+
+msgid "Click: show this frequency's details on the side (hours/weekdays).\nDouble-click: jump to it in the Odtwarzacz tab."
+msgstr "Klik: pokaż specyfikę tej częstotliwości obok (godziny/dni tygodnia).\nPodwójny klik: przejdź do niej w zakładce Odtwarzacz."
+
+msgid "Recordings per day"
+msgstr "Liczba nagrań dziennie"
+
+msgid "Traffic by hour of day (local time)"
+msgstr "Ruch wg godziny doby (czas lokalny)"
+
+msgid "← Overview"
+msgstr "← Widok ogólny"
+
+msgid "Deselect the chosen frequency and go back to the whole library's stats"
+msgstr "Odznacz wybraną częstotliwość i wróć do statystyk całej biblioteki"
+
+msgid "By hour of day (local time)"
+msgstr "Wg godziny doby (czas lokalny)"
+
+msgid "By day of week"
+msgstr "Wg dnia tygodnia"
+
+msgid "{count} recordings • avg. quality {quality:.0f}/100 • {minutes:.1f} min total • last heard {last_heard}"
+msgstr "{count} nagrań • śr. jakość {quality:.0f}/100 • łącznie {minutes:.1f} min • ostatnio słyszana {last_heard}"
+
+msgid "UTC"
+msgstr "UTC"
+
+msgid "local"
+msgstr "polski"
+
+msgid "Traffic by hour of day ({tz} time)"
+msgstr "Ruch wg godziny doby (czas {tz})"
+
+msgid "By hour of day ({tz} time)"
+msgstr "Wg godziny doby (czas {tz})"
+
+msgid "(no transcript)"
+msgstr "(bez transkrypcji)"
+
+msgid "Mon"
+msgstr "Pon"
+
+msgid "Tue"
+msgstr "Wt"
+
+msgid "Wed"
+msgstr "Śr"
+
+msgid "Thu"
+msgstr "Czw"
+
+msgid "Fri"
+msgstr "Pt"
+
+msgid "Sat"
+msgstr "Sob"
+
+msgid "Sun"
+msgstr "Nd"
+
+
+# --- playback/models_qt.py ---
+
+msgid "Date"
+msgstr "Data"
+
+msgid "Time"
+msgstr "Godzina"
+
+msgid "Frequency"
+msgstr "Częstotliwość"
+
+msgid "Duration"
+msgstr "Czas trwania"
+
+msgid "SNR (dB)"
+msgstr "SNR (dB)"
+
+msgid "Quality"
+msgstr "Jakość"
+
+msgid "Size"
+msgstr "Rozmiar"
+
+msgid "Transcript"
+msgstr "Transkrypcja"
+
+msgid "⏳ queued"
+msgstr "⏳ w kolejce"
+
+msgid "– too short"
+msgstr "– za krótkie"
+
+msgid "🔇 no speech"
+msgstr "🔇 brak mowy"
+
+msgid "⚠ transcription error"
+msgstr "⚠ błąd transkrypcji"
+
+msgid "corrupt"
+msgstr "uszkodzony"
+
+msgid "⚠ corrupt"
+msgstr "⚠ uszkodzony"
+
+msgid "Not transcribed yet."
+msgstr "Nie transkrybowano jeszcze."
+
+msgid "Status: {status}\nLanguage: {language} ({probability:.0f}%)\nEngine: {engine}"
+msgstr "Status: {status}\nJęzyk: {language} ({probability:.0f}%)\nSilnik: {engine}"
+
+msgid "⚠ File is corrupt or unreadable - couldn't analyze the audio."
+msgstr "⚠ Plik uszkodzony lub nieczytelny - nie udało się przeanalizować audio."
+
+msgid "\nNoise floor: {noise_floor:.0f}\nSignal level: {signal_level:.0f}\nClipping: {clipping:.1f}%"
+msgstr "\nSzum tła: {noise_floor:.0f}\nPoziom sygnału: {signal_level:.0f}\nPrzesterowanie: {clipping:.1f}%"
+
+
+# --- scanner_engine.py ---
+
+msgid "SDR connection lost: {error}"
+msgstr "Połączenie z SDR przerwane: {error}"
+
+msgid "No audio output (PyAudio) - live monitoring disabled."
+msgstr "Brak wyjścia audio (PyAudio) - monitorowanie na żywo wyłączone."
+
+msgid "Edge roll-off compensation: active ({count} data buckets from listening history)."
+msgstr "Kompensacja opadania sygnału na krawędziach okna: aktywna ({count} kubełków danych z historii nasłuchu)."
+
+msgid "SoapySDR not found/configured - running in SIMULATION mode."
+msgstr "Nie znaleziono/nie skonfigurowano SoapySDR - działam w trybie SYMULACJI."
+
+msgid "fits in one readStream() call"
+msgstr "mieści się w jednym readStream()"
+
+msgid "STILL needs multiple calls per tick"
+msgstr "NADAL wymaga wielu wywołań na takt"
+
+msgid "SDR stream MTU: {mtu} samples/call (tick = {chunk} samples - {fits})."
+msgstr "SDR stream MTU: {mtu} próbek/wywołanie (takt = {chunk} próbek - {fits})."
+
+msgid "Reconnected to the SDR - resuming scanning."
+msgstr "Połączono ponownie z SDR - wznawiam skanowanie."
+
+msgid "Failed to connect to the SDR ({error}) - retrying in {backoff}s (attempt {attempt})..."
+msgstr "Nie udało się połączyć z SDR ({error}) - ponowna próba za {backoff}s (próba {attempt})..."
+
+msgid "Too many channels in band \"{label}\" ({count}) - thinned every {every}."
+msgstr "Zbyt wiele kanałów pasma \"{label}\" ({count}) - przerzedzono co {every}."
+
+msgid "({count} priority-weighted entries)"
+msgstr "({count} pozycji z wagą priorytetu)"
+
+msgid "Wideband scanning: {channels} channels in {windows} capture window(s) ({mhz:.2f} MHz each){extra}."
+msgstr "Skanowanie szerokopasmowe: {channels} kanałów w {windows} oknie/oknach przechwytu ({mhz:.2f} MHz każde){extra}."
+
+
+# --- military_presets.py (BAND_PRESETS labels/tooltips) ---
+
+msgid "Civil aviation (118-137 MHz)"
+msgstr "Lotnictwo cywilne (118-137 MHz)"
+
+msgid "Standard civil aviation band: towers, approach, area control."
+msgstr "Standardowe pasmo lotnictwa cywilnego: wieże, zbliżanie, kontrola obszaru."
+
+msgid "Military VHF (137-144 MHz)"
+msgstr "Wojskowe VHF (137-144 MHz)"
+
+msgid "Military VHF band adjacent to civil aviation."
+msgstr "Wojskowe pasmo VHF sąsiadujące z lotnictwem cywilnym."
+
+msgid "Military UHF NATO (225-400 MHz)"
+msgstr "Wojskowe UHF NATO (225-400 MHz)"
+
+msgid "Harmonized NATO UHF band: air-to-air refueling,\nQRA/Baltic Air Policing, exercises."
+msgstr "Zharmonizowane pasmo NATO UHF: tankowanie w powietrzu,\nQRA/Baltic Air Policing, ćwiczenia."
+
+msgid "PMR446 (446.00625-446.19375 MHz)"
+msgstr "PMR446 (446.00625-446.19375 MHz)"
+
+msgid "License-free PMR446 walkie-talkies (16 analog channels, NFM).\nVery good chance of catching something nearby - popular on\ntrips, construction sites, at hotels/campsites."
+msgstr "Bezlicencyjne krótkofalówki PMR446 (16 kanałów analogowych, NFM).\nBardzo duża szansa złapania czegoś w pobliżu - popularne na\nwycieczkach, budowach, w hotelach/kampingach."
+
+msgid "Ham 2m (144-146 MHz)"
+msgstr "Amatorskie 2m (144-146 MHz)"
+
+msgid "2m amateur radio band (VHF, NFM): repeaters and simplex."
+msgstr "Pasmo radioamatorskie 2m (VHF, NFM): przemienniki i łączność bezpośrednia."
+
+msgid "Ham 70cm (430-440 MHz)"
+msgstr "Amatorskie 70cm (430-440 MHz)"
+
+msgid "70cm amateur radio band (UHF, NFM): repeaters and simplex."
+msgstr "Pasmo radioamatorskie 70cm (UHF, NFM): przemienniki i łączność bezpośrednia."
+
+msgid "Marine VHF (156-162 MHz)"
+msgstr "Morskie VHF (156-162 MHz)"
+
+msgid "Marine VHF band (channels 1-88, including channel 16 - calling/\ndistress, NFM). Useful near a coast, harbor, or a lake with shipping traffic."
+msgstr "Morskie pasmo VHF (kanały 1-88, w tym kanał 16 - wywoławczy/ratunkowy, NFM).\nPrzydatne w pobliżu wybrzeża, portu lub jeziora ze szlakiem żeglugowym."
+
+msgid "FM broadcast radio (87.5-108 MHz)"
+msgstr "Radio FM (87.5-108 MHz)"
+
+msgid "FM broadcast band (WFM). Not ATC, but strong, always-on stations\nmake it easy to quickly check the antenna/receiver works correctly."
+msgstr "Nadawcze pasmo FM (WFM). Nie ATC, ale silne, stale obecne stacje\nułatwiają szybkie sprawdzenie czy antena/odbiornik działa poprawnie."
+
+msgid "Fire brigade (148.6625-149.3375 MHz)"
+msgstr "Straż pożarna (148.6625-149.3375 MHz)"
+
+msgid "PSP/OSP VHF band (NFM), home to the whole rescue-firefighting\nchannel plan (KRG) and the OSP siren-alerting network. Many OSP\nunits still operate on analog despite PSP's ongoing migration to\nDMR - see also the ready-made KRG channels in the Channels tab\n(\"Load fire brigade\"). Poland-specific."
+msgstr "Pasmo UKF PSP/OSP (NFM), tu mieści się cały kanałowy plan ratowniczo-\ngaśniczy (KRG) oraz sieć alarmowania syren OSP. Wiele jednostek OSP\nnadal pracuje analogowo mimo trwającej migracji PSP do DMR - patrz\nteż gotowe kanały KRG w zakładce Kanały (\"Wczytaj straż pożarną\"). Specyficzne dla Polski."
+
+msgid "Emergency medical / PRM (168.5-169.2 MHz)"
+msgstr "Służby Ratunkowe / PRM (168.5-169.2 MHz)"
+
+msgid "State medical rescue service (ambulances / PRM), power-grid\nemergency service, and municipal services. Ambulances and PRM\ndispatchers in many regions still transmit here in analog.\nPoland-specific."
+msgstr "Państwowe Ratownictwo Medyczne (karetki / PRM), Pogotowie\nEnergetyczne i służby komunalne. Karetki i dyspozytorzy PRM\nw wielu rejonach wciąż nadają tu w analogu. Specyficzne dla Polski."
+
