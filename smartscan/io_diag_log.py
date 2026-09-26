@@ -83,9 +83,11 @@ class SdrIoDiagLogger:
 
     @staticmethod
     def _loadavg1() -> float | None:
+        # getloadavg() doesn't exist at all on Windows (AttributeError) -
+        # this runs on the SDR acquisition thread, so it must never raise.
         try:
             return os.getloadavg()[0]
-        except OSError:
+        except (OSError, AttributeError):
             return None
 
     def record_error(self, code: int, call_index: int, got_so_far: int, num_samples: int) -> None:

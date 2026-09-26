@@ -22,6 +22,22 @@ try:
 except ImportError:
     HAVE_SOAPY = False
 
+# Native librtlsdr via pyrtlsdr - the pip-only path for Windows/macOS, where
+# SoapySDR has no pip wheel (PothosSDR's last Windows bundle is from 2021 and
+# conda is a whole separate toolchain). pyrtlsdrlib ships a prebuilt
+# librtlsdr (with RTL-SDR Blog V4 support) for Windows/macOS/Linux. Broad
+# except: pyrtlsdr raises plain OSError/others at import when it can't find
+# the shared library at all, not just ImportError.
+try:
+    from rtlsdr import RtlSdr
+    HAVE_RTLSDR_NATIVE = True
+except Exception:  # noqa: BLE001
+    HAVE_RTLSDR_NATIVE = False
+
+#: config.device.driver value selecting RtlSdrBackend - deliberately distinct
+#: from SoapySDR's own "rtlsdr" driver key, so both can coexist on Linux.
+RTLSDR_NATIVE_DRIVER = "rtlsdr_native"
+
 
 # Real crashes observed (journalctl, see the session that added this): the
 # whole process dies silently - no Python traceback, no Qt/Soapy error text
@@ -275,6 +291,148 @@ class SoapyBackend(SdrBackend):
         return [d for d in devices if d.get("driver") != "audio"]
 
 
+# Same unsigned-8-bit -> float mapping SoapyRTLSDR's CF32 lookup table uses
+# ((i - 127.4) / 128), so levels in dBFS - and therefore every trigger/
+# squelch threshold a user has tuned on Linux/SoapySDR - mean the same thing
+# on this backend. pyrtlsdr's own read_samples() uses (i / 127.5 - 1), which
+# is close but not identical.
+_RTLSDR_LUT = ((np.arange(256, dtype=np.float32) - 127.4) / 128.0).astype(np.float32)
+
+# librtlsdr's rtlsdr_read_sync() does a raw libusb bulk transfer - lengths
+# that aren't a multiple of the USB packet size (512 B) are a known source
+# of overflow errors on some libusb backends. RtlSdrBackend.read() always
+# asks the driver for a whole number of these and carries the remainder
+# over to the next call instead of dropping it.
+_RTLSDR_READ_GRANULE_BYTES = 512
+
+
+class RtlSdrBackend(SdrBackend):
+    """RTL-SDR dongles through librtlsdr directly (pyrtlsdr), without
+    SoapySDR - see HAVE_RTLSDR_NATIVE's comment for why this exists. Same
+    contract as SoapyBackend: bias-tee forced off on open and every retune,
+    reopen cooldown, and read() raising instead of ever returning short.
+
+    Uses librtlsdr's synchronous read, called back-to-back by
+    AcquisitionThread (never from the busy scanner loop), so the gap between
+    two bulk transfers stays tiny and the dongle's own FIFO covers it.
+    """
+    label = RTLSDR_NATIVE_DRIVER
+
+    def __init__(self, device_args: str, sample_rate: float, gain_mode: str, gain_db: float):
+        if not HAVE_RTLSDR_NATIVE:
+            raise RuntimeError("The pyrtlsdr/pyrtlsdrlib modules are not installed")
+        SoapyBackend._wait_for_reopen_cooldown()
+        serial = None
+        for kv in (device_args or "").split(","):
+            if "=" in kv:
+                k, v = kv.split("=", 1)
+                if k.strip() == "serial" and v.strip():
+                    serial = v.strip()
+        self.device = RtlSdr(serial_number=serial) if serial else RtlSdr()
+        try:
+            self.device.set_bias_tee(False)
+            self.sample_rate = sample_rate
+            self.device.sample_rate = sample_rate
+            gains = self.device.get_gains()  # tenths of a dB
+            if gains:
+                self.gain_range_db = (min(gains) / 10.0, max(gains) / 10.0)
+            self.set_gain(gain_mode, gain_db)
+        except Exception:
+            self.device.close()
+            raise
+        self._carry = np.empty(0, dtype=np.uint8)
+        self._io_diag = SdrIoDiagLogger()
+
+    def set_frequency(self, freq_hz: float) -> None:
+        self.device.center_freq = int(freq_hz)
+        # See SoapyBackend.set_frequency() - re-asserted on every retune.
+        self.device.set_bias_tee(False)
+        # Leftover bytes belong to the previous frequency.
+        self._carry = np.empty(0, dtype=np.uint8)
+
+    def set_gain(self, gain_mode: str, gain_db: float) -> None:
+        # pyrtlsdr's set_gain() already picks the nearest supported step.
+        self.device.set_gain("auto" if gain_mode == "auto" else gain_db)
+
+    def read(self, num_samples: int) -> np.ndarray:
+        need = 2 * num_samples - self._carry.size
+        read_start = time.monotonic()
+        if need > 0:
+            request = -(-need // _RTLSDR_READ_GRANULE_BYTES) * _RTLSDR_READ_GRANULE_BYTES
+            try:
+                # Raises (LibUSBError/IOError) on an unplugged device or a
+                # short read - never returns fewer bytes than requested, so
+                # the scanner's reconnect logic sees a dead stream the same
+                # way it does from SoapyBackend.read().
+                raw = np.ctypeslib.as_array(self.device.read_bytes(request)).copy()
+            except Exception as exc:
+                raise RuntimeError(f"RTL-SDR read failed - device disconnected or not responding ({exc})") from exc
+            data = np.concatenate((self._carry, raw)) if self._carry.size else raw
+        else:
+            data = self._carry
+        self._io_diag.record_read(time.monotonic() - read_start, 1)
+        used = 2 * num_samples
+        self._carry = data[used:]
+        iq = _RTLSDR_LUT[data[:used]]
+        return iq.view(np.complex64)
+
+    def close(self) -> None:
+        try:
+            self.device.close()
+        except Exception:
+            pass
+        SoapyBackend._record_close_time()
+
+    @staticmethod
+    def enumerate_devices() -> list[dict]:
+        if not HAVE_RTLSDR_NATIVE:
+            return []
+        try:
+            serials = RtlSdr.get_device_serial_addresses()
+        except Exception:
+            return []
+        # No commas in the label - ScannerPanel joins every key into one
+        # "k=v,k=v" device_args string.
+        return [
+            {"driver": RTLSDR_NATIVE_DRIVER, "label": f"RTL-SDR (librtlsdr) SN {serial}", "serial": serial}
+            for serial in serials
+        ]
+
+
+def enumerate_devices() -> list[dict]:
+    """Every real device the GUI can offer. Native librtlsdr devices are only
+    listed when SoapySDR doesn't already expose an rtlsdr device - on Linux
+    with both installed, the one dongle would otherwise show up twice."""
+    devices = SoapyBackend.enumerate_devices()
+    if not any(d.get("driver") == "rtlsdr" for d in devices):
+        devices += RtlSdrBackend.enumerate_devices()
+    return devices
+
+
+def open_real_backend(driver: str, device_args: str, sample_rate: float, gain_mode: str, gain_db: float) -> SdrBackend:
+    """Opens real hardware only - never falls back to SimulatedBackend.
+
+    "auto" tries SoapySDR first (Linux's native path), then librtlsdr
+    directly. A config saved on Linux with SoapySDR's "rtlsdr" driver also
+    opens through librtlsdr on a machine without SoapySDR, so the same
+    config.json works across platforms."""
+    if driver == RTLSDR_NATIVE_DRIVER or (driver == "rtlsdr" and not HAVE_SOAPY):
+        return RtlSdrBackend(device_args, sample_rate, gain_mode, gain_db)
+    if driver and driver != "auto":
+        return SoapyBackend(driver, device_args, sample_rate, gain_mode, gain_db)
+    if not HAVE_SOAPY and HAVE_RTLSDR_NATIVE:
+        return RtlSdrBackend(device_args, sample_rate, gain_mode, gain_db)
+    try:
+        return SoapyBackend(driver, device_args, sample_rate, gain_mode, gain_db)
+    except Exception as soapy_exc:
+        if not HAVE_RTLSDR_NATIVE:
+            raise
+        try:
+            return RtlSdrBackend(device_args, sample_rate, gain_mode, gain_db)
+        except Exception:
+            raise soapy_exc
+
+
 class SimulatedBackend(SdrBackend):
     """Generates noise plus occasional synthetic AM bursts so the whole
     scan/detect/record pipeline can be exercised without real hardware.
@@ -480,6 +638,11 @@ class AcquisitionThread:
                 with self._cond:
                     self._error = exc
                     self._cond.notify_all()
+                # Wake a set_frequency()/set_gain() caller that submitted its
+                # command while this read was in flight - otherwise it sits
+                # out its full timeout and reports a misleading "didn't
+                # respond" instead of this real error.
+                self._command_done.set()
                 return
             with self._cond:
                 if self._stop_evt.is_set():
@@ -554,9 +717,11 @@ class AcquisitionThread:
         the same error a dead device would raise from read()."""
         self._command_done.clear()
         with self._cond:
+            if self._error is not None:
+                raise self._error
             self._pending_command = (kind, args)
             self._cond.notify_all()
-        if not self._command_done.wait(timeout):
+        if not self._command_done.wait(timeout) and self._error is None:
             raise RuntimeError(
                 "SDR acquisition thread didn't respond to the frequency/gain change in time"
             )
@@ -599,7 +764,7 @@ def create_backend(driver: str, device_args: str, sample_rate: float, gain_mode:
         # No specific device was requested - fall back to simulation quietly
         # so the app is still usable/demoable with nothing plugged in.
         try:
-            return SoapyBackend(driver, device_args, sample_rate, gain_mode, gain_db)
+            return open_real_backend(driver, device_args, sample_rate, gain_mode, gain_db)
         except Exception:
             backend = SimulatedBackend(sample_rate)
             backend.set_gain(gain_mode, gain_db)
@@ -609,4 +774,4 @@ def create_backend(driver: str, device_args: str, sample_rate: float, gain_mode:
     # open, that's worth surfacing loudly (engine stops, clear log message)
     # rather than silently switching to fake data - which looks identical to
     # a working scan and is exactly what confused a user pulling the dongle.
-    return SoapyBackend(driver, device_args, sample_rate, gain_mode, gain_db)
+    return open_real_backend(driver, device_args, sample_rate, gain_mode, gain_db)

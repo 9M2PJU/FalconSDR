@@ -5,16 +5,28 @@ PySide6>=6.6
 numpy>=1.26
 scipy>=1.11
 pyqtgraph>=0.13
+# Windows has no system time zone database - zoneinfo needs this package
+# there (on Linux/macOS it's harmless, the system one is used first).
+tzdata
+# RTL-SDR without SoapySDR: pyrtlsdrlib ships a prebuilt librtlsdr (incl.
+# RTL-SDR Blog V4 support) for Windows/macOS/Linux, so on Windows/macOS the
+# dongle works with pip alone. On Windows the dongle still needs the WinUSB
+# driver (Zadig) - the same one SDR++/SDR# already need.
+pyrtlsdr>=0.3
+pyrtlsdrlib
+# Live audio on Windows/macOS: wheels bundle PortAudio, no compiler needed.
+# Used only when PyAudio (below) isn't installed - Linux keeps PyAudio.
+sounddevice
 #
 # SoapySDR (+ device drivers, e.g. SoapySDRRTLSDR) and PyAudio/PortAudio are
 # the two exceptions - they need system-level installation:
 #   Linux (Ubuntu/Debian):  sudo apt install python3-soapysdr soapysdr0.8-module-rtlsdr python3-pyaudio
-#   Windows:                install the PothosSDR bundle (ships SoapySDR + drivers
-#                           + Python bindings prebuilt), and `pip install PyAudio`
-#   macOS:                  brew install soapysdr soapyrtlsdr portaudio, then
-#                           `pip install PyAudio`
-# If SoapySDR isn't available at all, the app still starts and falls back to
-# the built-in Simulated backend rather than failing.
+#   Windows:                nothing extra - RTL-SDR via pyrtlsdr, audio via
+#                           sounddevice (both above); SoapySDR optional
+#   macOS:                  nothing extra, same as Windows; SoapySDR optional
+#                           (brew install soapysdr soapyrtlsdr)
+# If no SDR library is available at all, the app still starts and falls back
+# to the built-in Simulated backend rather than failing.
 #
 # QtMultimedia (used by the Odtwarzacz tab's audio player) is bundled in the
 # single PySide6 wheel - no separate package needed, unlike PyQt6/apt.
