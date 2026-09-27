@@ -102,7 +102,7 @@ class MainWindow(QMainWindow):
         self.scanner_panel.manual_record_toggled.connect(self._on_manual_record_toggled)
         self.scanner_panel.auto_recording_toggled.connect(self._on_scanner_auto_recording_toggled)
         self.recording_panel.enabled_changed.connect(self._on_options_auto_recording_toggled)
-        self.recording_panel.raw_iq_record_toggled.connect(self._on_raw_iq_record_toggled)
+        self.scanner_panel.raw_iq_record_toggled.connect(self._on_raw_iq_record_toggled)
         self.scanner_panel.settings_changed.connect(self._save_config)
         self.scanner_panel.settings_changed.connect(self._maybe_live_rebuild)
         self.scanner_panel.memory_list_requested.connect(self._reveal_memory_list)
@@ -311,17 +311,17 @@ class MainWindow(QMainWindow):
         self.scanner_panel.set_manual_recording_active(active)
 
     def _on_raw_iq_record_toggled(self, checked: bool) -> None:
-        """Record raw IQ / Stop recording IQ in Options - see
-        ScannerEngine.start_raw_iq_recording()'s docstring. Can't work
-        without a running engine to feed it - the button itself is disabled
-        then too (see RecordingPanel.set_running()), this is just the
-        defensive fallback for the click reaching here anyway."""
+        """Record raw IQ / Stop recording IQ in the Listen tab (right under
+        Mute) - see ScannerEngine.start_raw_iq_recording()'s docstring.
+        Can't work without a running engine to feed it - the button itself
+        is disabled then too (see ScannerPanel.set_running()), this is just
+        the defensive fallback for the click reaching here anyway."""
         if self.engine is None:
-            self.recording_panel.set_raw_iq_recording_active(False)
+            self.scanner_panel.set_raw_iq_recording_active(False)
             return
         if checked:
             if not self._confirm_recording_disclaimer():
-                self.recording_panel.set_raw_iq_recording_active(False)
+                self.scanner_panel.set_raw_iq_recording_active(False)
                 return
             self.engine.start_raw_iq_recording()
         else:
@@ -330,7 +330,7 @@ class MainWindow(QMainWindow):
     def _on_raw_iq_recording_changed(self, active: bool, _path: str) -> None:
         """ScannerEngine stopped (or started) raw IQ recording on its own
         side - e.g. _teardown() force-stopping it when the scanner stops."""
-        self.recording_panel.set_raw_iq_recording_active(active)
+        self.scanner_panel.set_raw_iq_recording_active(active)
 
     def _on_scanner_auto_recording_toggled(self, checked: bool) -> None:
         """The Auto-recording checkbox in the Listen tab changed - keep

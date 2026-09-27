@@ -363,6 +363,15 @@ class ScannerPanel(QGroupBox):
     # checkbox (Options tab) - MainWindow keeps the two in sync so either
     # one reflects a change made in the other.
     auto_recording_toggled = Signal(bool)
+    # Raw IQ Record/Stop button - a manual, momentary action (like
+    # manual_record_toggled above), never persisted to config and never
+    # synced anywhere else, so this is just "user clicked it" -> "ask
+    # MainWindow to start/stop ScannerEngine.start_raw_iq_recording()". Lives
+    # here (Listen tab, right under Mute) rather than in RecordingPanel
+    # (Options) by explicit request - a technical but still one-click,
+    # in-the-moment action belongs next to the other live scanning controls,
+    # not buried in settings.
+    raw_iq_record_toggled = Signal(bool)
     settings_changed = Signal()
     memory_list_requested = Signal()  # "Memory list" shortcut - handled by MainWindow
     channel_weight_changed = Signal()  # a channel's weight was edited inline - MainWindow persists/rebuilds
@@ -598,6 +607,26 @@ class ScannerPanel(QGroupBox):
         btn_row.addWidget(self.skip_blacklist_btn, 1)
         btn_row.addWidget(self.mute_btn, 1)
         root.addLayout(btn_row)
+
+        raw_iq_row = QHBoxLayout()
+        self.raw_iq_btn = QPushButton(tr("Record raw IQ"))
+        self.raw_iq_btn.setCheckable(True)
+        self.raw_iq_btn.setEnabled(False)  # only while the scanner is running - see set_running()
+        self.raw_iq_btn.setToolTip(tr(
+            "Advanced/technical: records the actual wideband complex samples "
+            "this app demodulates from, in the SigMF format (readable by GNU "
+            "Radio, Inspectrum, SDR++, ...) - independent of any specific "
+            "channel or trigger. Saved to a 'raw_iq' subfolder, separate from "
+            "the Odtwarzacz library. Warning: uncompressed IQ is large - "
+            "roughly sample_rate x 8 bytes/second (~19 MB/s at this app's "
+            "default 2.4 MSPS capture bandwidth)."
+        ))
+        self.raw_iq_btn.toggled.connect(self.raw_iq_record_toggled.emit)
+        self.raw_iq_label = QLabel("")
+        self.raw_iq_label.setStyleSheet("color: #9aa0a6;")
+        raw_iq_row.addWidget(self.raw_iq_btn)
+        raw_iq_row.addWidget(self.raw_iq_label, 1)
+        root.addLayout(raw_iq_row)
 
         record_row = QHBoxLayout()
         self.manual_record_btn = QPushButton(tr("● Record"))
@@ -1070,6 +1099,7 @@ class ScannerPanel(QGroupBox):
         self.device_combo.setEnabled(not running)
         self.bandwidth_spin.setEnabled(not running)
         self.manual_record_btn.setEnabled(running)
+        self.raw_iq_btn.setEnabled(running)
         if not running:
             self.cycle_time_label.setText("")
             # A manual recording can't outlive the scanner that feeds it -
@@ -1078,6 +1108,7 @@ class ScannerPanel(QGroupBox):
             # staying stuck showing "Stop recording" for a scanner that no
             # longer exists.
             self.set_manual_recording_active(False)
+            self.set_raw_iq_recording_active(False)
 
     def set_manual_recording_active(self, active: bool) -> None:
         """Syncs the Record button's checked state/label without re-emitting
@@ -1089,6 +1120,13 @@ class ScannerPanel(QGroupBox):
         self.manual_record_btn.setChecked(active)
         self.manual_record_btn.blockSignals(False)
         self.manual_record_btn.setText(tr("■ Stop recording") if active else tr("● Record"))
+
+    def set_raw_iq_recording_active(self, active: bool) -> None:
+        self.raw_iq_btn.blockSignals(True)
+        self.raw_iq_btn.setChecked(active)
+        self.raw_iq_btn.blockSignals(False)
+        self.raw_iq_btn.setText(tr("■ Stop recording IQ") if active else tr("Record raw IQ"))
+        self.raw_iq_label.setText(tr("Recording raw IQ...") if active else "")
 
     def set_auto_recording(self, enabled: bool) -> None:
         """Syncs state after the Auto-recording toggle changes in the Options tab."""
