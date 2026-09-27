@@ -25,7 +25,7 @@ def load_channels() -> list[Channel]:
         try:
             channels.append(Channel.from_row(row))
         except (ValueError, IndexError) as exc:
-            logger.warning("Pomijam uszkodzony wiersz w %s: %r (%s)", CHANNELS_CSV, row, exc)
+            logger.warning("Skipping corrupted row in %s: %r (%s)", CHANNELS_CSV, row, exc)
     return channels
 
 
@@ -52,7 +52,7 @@ def load_blacklist() -> list[BlacklistEntry]:
         try:
             entries.append(BlacklistEntry.from_row(row))
         except (ValueError, IndexError) as exc:
-            logger.warning("Pomijam uszkodzony wiersz w %s: %r (%s)", BLACKLIST_CSV, row, exc)
+            logger.warning("Skipping corrupted row in %s: %r (%s)", BLACKLIST_CSV, row, exc)
     return entries
 
 

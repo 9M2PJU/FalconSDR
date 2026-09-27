@@ -167,7 +167,10 @@ class AppConfig:
     # the same session - there is no separate "mode" to switch between.
     bands: list[VfoRangeConfig] = field(
         default_factory=lambda: [
-            VfoRangeConfig(start_hz=118_000_000, stop_hz=136_975_000, step_hz=8_333, label="Lotnictwo cywilne")
+            VfoRangeConfig(
+                start_hz=118_000_000, stop_hz=136_975_000, step_hz=8_333,
+                label="Civil aviation (118-137 MHz)",
+            )
         ]
     )
     timing: TimingConfig = field(default_factory=TimingConfig)
