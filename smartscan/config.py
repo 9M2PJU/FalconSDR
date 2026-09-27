@@ -146,6 +146,17 @@ class TranscriptionConfig:
 
 
 @dataclass
+class LegalDisclaimerConfig:
+    """Which UI languages (see i18n.current_language()) have already seen
+    each disclaimer - not a single "seen ever" flag, since dismissing it in
+    one language doesn't mean it was actually read/understood in another
+    the user (or a different person using the same install) later switches
+    to. See gui/legal_disclaimer.py."""
+    launch_seen_languages: list[str] = field(default_factory=list)
+    recording_seen_languages: list[str] = field(default_factory=list)
+
+
+@dataclass
 class AppConfig:
     device: DeviceConfig = field(default_factory=DeviceConfig)
     # Bands/ranges swept together in one scan session - presets, custom ranges
@@ -205,6 +216,7 @@ class AppConfig:
     # smartscan/i18n.py's resolve_system_language()/set_language(). Applying
     # a change needs a restart - see MainWindow._restart_app().
     language: str = "auto"
+    legal_disclaimer: LegalDisclaimerConfig = field(default_factory=LegalDisclaimerConfig)
 
     @staticmethod
     def load() -> "AppConfig":
@@ -246,6 +258,7 @@ class AppConfig:
             memory_list_enabled=raw.get("memory_list_enabled", True),
             wfm_stereo_enabled=raw.get("wfm_stereo_enabled", False),
             language=raw.get("language", "auto"),
+            legal_disclaimer=LegalDisclaimerConfig(**raw.get("legal_disclaimer", {})),
         )
 
     def save(self) -> None:

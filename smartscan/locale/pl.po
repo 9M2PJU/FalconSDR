@@ -1122,3 +1122,24 @@ msgstr "Transkrypcja została właśnie zainstalowana w osobnym środowisku - ur
 
 msgid "Manual recording"
 msgstr "Nagranie ręczne"
+
+# --- legal disclaimers (gui/legal_disclaimer.py) ---
+
+msgid "Before you start"
+msgstr "Zanim zaczniesz"
+
+msgid "SmartScanATC can tune to a wide range of radio frequencies, some of which may be restricted or illegal to listen to or record where you live.\n\nUsing this software does not authorize you to listen to or record any transmission. Radio monitoring and recording laws vary significantly between countries - some places allow listening to most frequencies but restrict recording or sharing what you hear; others restrict listening to non-public or certain public-safety/aviation communications entirely.\n\nYou are solely responsible for knowing and following the laws that apply to you. If you're unsure, check your local telecommunications regulations before using the scanning or recording features."
+msgstr "SmartScanATC może przestrajać się na szeroki zakres częstotliwości radiowych, z których część może być objęta ograniczeniami albo nielegalna do słuchania lub nagrywania w Twoim kraju.\n\nKorzystanie z tego programu nie upoważnia Cię do słuchania ani nagrywania żadnej transmisji. Przepisy dotyczące nasłuchu i nagrywania radiowego znacząco różnią się między krajami - w niektórych miejscach wolno słuchać większości częstotliwości, ale nagrywanie lub udostępnianie tego, co usłyszysz, jest ograniczone; w innych zabroniony jest sam nasłuch łączności niepublicznej lub niektórych służb (bezpieczeństwa publicznego, lotnictwa).\n\nPonosisz wyłączną odpowiedzialność za znajomość i przestrzeganie przepisów, które Cię obowiązują. Jeśli nie masz pewności, sprawdź lokalne przepisy telekomunikacyjne, zanim zaczniesz korzystać z funkcji skanowania lub nagrywania."
+
+msgid "Before you record"
+msgstr "Zanim zaczniesz nagrywać"
+
+msgid "You're about to record for the first time.\n\nRecording radio transmissions can be more restricted than simply listening to them, depending on your country's laws - even where monitoring itself is legal. Make sure you've checked the rules that apply where you live before continuing."
+msgstr "Zaraz nagrasz coś po raz pierwszy.\n\nNagrywanie transmisji radiowych może podlegać większym ograniczeniom niż sam nasłuch, w zależności od przepisów Twojego kraju - nawet tam, gdzie sam nasłuch jest legalny. Upewnij się, że sprawdziłeś zasady obowiązujące w miejscu, w którym mieszkasz, zanim będziesz kontynuować."
+
+msgid "I understand, continue"
+msgstr "Rozumiem, kontynuuj"
+
+msgid "Cancel"
+msgstr "Anuluj"
+

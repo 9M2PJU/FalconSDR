@@ -758,6 +758,53 @@ for exactly this reason. Add a new language by dropping one `.po` file — see
     reports the same duration/SNR as its original WAV (within lossy-codec
     rounding), `readable=True`, a real non-flat waveform - not just "didn't
     crash".
+20. **Legal disclaimers (`smartscan/gui/legal_disclaimer.py`) are tracked
+    per *UI language*, not once-ever - `AppConfig.legal_disclaimer`
+    (`LegalDisclaimerConfig`) holds two separate lists of language codes
+    (`launch_seen_languages`/`recording_seen_languages`), keyed off
+    `i18n.current_language()`.** Dismissing this in English doesn't mean a
+    Polish-reading user (or the same person switching languages later) ever
+    actually read it - the whole point is making sure it was seen in
+    whatever language is actually in effect, so a language switch means
+    seeing it again, by explicit design, not a bug to "fix" by making it
+    once-ever. Two independent notices, both by explicit request:
+    - `maybe_show_launch_disclaimer()` - shown once per language at
+      startup (`MainWindow.__init__()`'s last line), purely informational
+      (a single acknowledgement button, `QMessageBox.information`) - general
+      "laws about listening/recording vary by country, you're responsible
+      for knowing yours" framing, doesn't block using the app.
+    - `confirm_recording_disclaimer()` - a real *gate*, shown the first
+      time (per language) the user is actually about to start recording
+      anything, with Continue/Cancel. **All three recording-starting
+      actions funnel through this one shared function and shared
+      `recording_seen_languages` state** - auto-recording (both
+      `MainWindow._on_scanner_auto_recording_toggled`/
+      `_on_options_auto_recording_toggled`, gated identically since either
+      tab's checkbox can trigger it), the manual Record button (gotcha 13),
+      and raw IQ recording (gotcha 15) - not three separate disclaimers,
+      since the underlying legal question ("are you allowed to record
+      this") is the same regardless of which mechanism is doing the
+      recording. A decline (`False` return) must revert whatever
+      toggle/button the user just clicked back to its prior state
+      (`set_auto_recording(False)`/`set_enabled(False)`/
+      `set_manual_recording_active(False)`/`set_raw_iq_recording_active(False)`
+      - each already existed as the sync method for the *other* direction,
+      gotcha 13/15's cross-tab sync) *and* return early *before* actually
+      calling `config.recording.enabled = True` / `engine.start_*_recording()`
+      - a decline must have zero side effects, not just a cosmetically
+      reverted checkbox with recording silently still happening underneath.
+    Both functions take the `LegalDisclaimerConfig` object directly (not
+    the whole `AppConfig`) and mutate it in place on acceptance; persisting
+    the change to disk is the caller's job
+    (`MainWindow._maybe_show_launch_disclaimer()`/
+    `_confirm_recording_disclaimer()` both call `self._save_config()`
+    immediately after) - keeps the two functions testable in isolation
+    (verified: mocking just `QMessageBox`/`QMessageBox.information` inside
+    `legal_disclaimer.py`'s own namespace, no GUI event loop needed to
+    drive them) without needing a `MainWindow` at all. If you add a fourth
+    recording-starting mechanism later: route it through
+    `MainWindow._confirm_recording_disclaimer()` like the other three, not
+    a new standalone check.
 
 ## Testing without touching the user's real config/recordings
 

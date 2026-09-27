@@ -15,6 +15,7 @@ from ..config import AppConfig
 from ..i18n import tr
 from ..models import Channel
 from ..scanner_engine import ScannerEngine
+from .legal_disclaimer import confirm_recording_disclaimer, maybe_show_launch_disclaimer
 from .panels.frequency_manager import FrequencyManager
 from .panels.language_panel import LanguagePanel
 from .panels.location_panel import LocationPanel
@@ -125,9 +126,26 @@ class MainWindow(QMainWindow):
         self.playback_panel.location_setup_requested.connect(self._reveal_location)
         self.playback_panel.stats_tab.frequencySelected.connect(self._on_stats_freq_selected)
 
+        self._maybe_show_launch_disclaimer()
+
     # -- persistence -----------------------------------------------------
     def _save_config(self) -> None:
         self.config.save()
+
+    # -- legal notices -----------------------------------------------------
+    def _maybe_show_launch_disclaimer(self) -> None:
+        if maybe_show_launch_disclaimer(self, self.config.legal_disclaimer):
+            self._save_config()
+
+    def _confirm_recording_disclaimer(self) -> bool:
+        """Gate shared by every recording-starting action (auto-recording,
+        manual Record, raw IQ) - see confirm_recording_disclaimer()'s own
+        docstring for why they all funnel through one shared notice/seen-
+        language state instead of three separate ones."""
+        accepted = confirm_recording_disclaimer(self, self.config.legal_disclaimer)
+        if accepted:
+            self._save_config()
+        return accepted
 
     def _maybe_live_rebuild(self) -> None:
         """Any change that can affect what the scanner watches (bands, step,
@@ -278,6 +296,9 @@ class MainWindow(QMainWindow):
             self.scanner_panel.set_manual_recording_active(False)
             return
         if checked:
+            if not self._confirm_recording_disclaimer():
+                self.scanner_panel.set_manual_recording_active(False)
+                return
             self.engine.start_manual_recording()
         else:
             self.engine.stop_manual_recording()
@@ -299,6 +320,9 @@ class MainWindow(QMainWindow):
             self.recording_panel.set_raw_iq_recording_active(False)
             return
         if checked:
+            if not self._confirm_recording_disclaimer():
+                self.recording_panel.set_raw_iq_recording_active(False)
+                return
             self.engine.start_raw_iq_recording()
         else:
             self.engine.stop_raw_iq_recording()
@@ -312,12 +336,18 @@ class MainWindow(QMainWindow):
         """The Auto-recording checkbox in the Listen tab changed - keep
         config and the Options-tab copy of the same setting in sync (see
         RecordingPanel.enabled_changed for the reverse direction)."""
+        if checked and not self._confirm_recording_disclaimer():
+            self.scanner_panel.set_auto_recording(False)
+            return
         self.config.recording.enabled = checked
         self.recording_panel.set_enabled(checked)
         self.playback_panel.update_recording_notice()
         self._save_config()
 
     def _on_options_auto_recording_toggled(self, checked: bool) -> None:
+        if checked and not self._confirm_recording_disclaimer():
+            self.recording_panel.set_enabled(False)
+            return
         self.config.recording.enabled = checked
         self.scanner_panel.set_auto_recording(checked)
         self.playback_panel.update_recording_notice()
