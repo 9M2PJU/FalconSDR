@@ -125,27 +125,14 @@ BAND_PRESETS: list[BandPreset] = [
         ),
         start_hz=87_500_000, stop_hz=108_000_000, step_hz=100_000, modulation="WFM",
     ),
-    BandPreset(
-        id="fire_vhf", label="Fire brigade (148.6625-149.3375 MHz)",
-        tooltip=(
-            "PSP/OSP VHF band (NFM), home to the whole rescue-firefighting\n"
-            "channel plan (KRG) and the OSP siren-alerting network. Many OSP\n"
-            "units still operate on analog despite PSP's ongoing migration to\n"
-            "DMR - see also the ready-made KRG channels in the Channels tab\n"
-            "(\"Load fire brigade\"). Poland-specific."
-        ),
-        start_hz=148_662_500, stop_hz=149_337_500, step_hz=12_500, modulation="NFM",
-    ),
-    BandPreset(
-        id="prm", label="Emergency medical / PRM (168.5-169.2 MHz)",
-        tooltip=(
-            "State medical rescue service (ambulances / PRM), power-grid\n"
-            "emergency service, and municipal services. Ambulances and PRM\n"
-            "dispatchers in many regions still transmit here in analog.\n"
-            "Poland-specific."
-        ),
-        start_hz=168_500_000, stop_hz=169_200_000, step_hz=12_500, modulation="NFM",
-    ),
+    # Deliberately no country-specific band presets here (e.g. Poland's
+    # PSP/OSP fire-brigade 148.6625-149.3375 MHz or PRM 168.5-169.2 MHz,
+    # both removed - see git history) - this list is meant to be useful
+    # everywhere by default. Poland-specific *discrete channels* still exist
+    # (MILITARY_CHANNELS/FIRE_CHANNELS below) - those are opt-in via
+    # explicit "Load Polish ..." buttons in the Channels tab, not auto-
+    # loaded and not in this wide-sweep picker, so they don't need the same
+    # bar for international relevance.
 ]
 
 # Curated discrete channels (Memory List mode) ------------------------------

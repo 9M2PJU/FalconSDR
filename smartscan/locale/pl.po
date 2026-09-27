@@ -678,14 +678,14 @@ msgstr "Nowy folder"
 msgid "Creates an empty folder, to which frequencies can be dragged\nright away from the list below (or picked when adding/editing a channel)."
 msgstr "Tworzy pusty folder, do którego można od razu przeciągać częstotliwości\nz listy poniżej (albo wybrać go przy dodawaniu/edycji kanału)."
 
-msgid "Load military (known frequencies)"
-msgstr "Wczytaj wojskowe (znane częstotliwości)"
+msgid "Load Polish military frequencies"
+msgstr "Wczytaj polskie częstotliwości wojskowe"
 
 msgid "Appends verified, publicly known military frequencies: guard,\nair-to-air refueling (tankers), Warsaw OAT sectors, and\ntower/approach frequencies of QRA/Baltic Air Policing bases\n(Malbork, Łask, Mińsk Mazowiecki, Powidz, Świdwin, Mirosławiec).\nPoland-specific - doesn't overwrite the existing list."
 msgstr "Dopisuje sprawdzone, publicznie znane częstotliwości wojskowe: guard,\ntankowanie w powietrzu (cysterny), sektory OAT Warszawa oraz wieże/\npodejścia baz QRA/Baltic Air Policing (Malbork, Łask, Mińsk Mazowiecki,\nPowidz, Świdwin, Mirosławiec). Specyficzne dla Polski - nie nadpisuje istniejącej listy."
 
-msgid "Load fire brigade (known frequencies)"
-msgstr "Wczytaj straż pożarną (znane częstotliwości)"
+msgid "Load Polish fire brigade frequencies"
+msgstr "Wczytaj polskie częstotliwości straży pożarnej"
 
 msgid "Appends the nationwide PSP rescue-firefighting channels (KRG 1-8)\nand OSP siren-alerting frequencies (148.6625-149.3375 MHz, NFM).\nMany volunteer fire brigades still operate on analog despite PSP's\nmigration to DMR. Poland-specific - doesn't overwrite the existing list."
 msgstr "Dopisuje ogólnopolskie kanały ratowniczo-gaśnicze PSP (KRG 1-8) oraz\nczęstotliwości alarmowania syren OSP (148.6625-149.3375 MHz, NFM).\nWiele OSP nadal pracuje analogowo mimo migracji PSP do DMR. Specyficzne dla Polski - nie nadpisuje istniejącej listy."
@@ -996,17 +996,6 @@ msgstr "Radio FM (87.5-108 MHz)"
 msgid "FM broadcast band (WFM). Not ATC, but strong, always-on stations\nmake it easy to quickly check the antenna/receiver works correctly."
 msgstr "Nadawcze pasmo FM (WFM). Nie ATC, ale silne, stale obecne stacje\nułatwiają szybkie sprawdzenie czy antena/odbiornik działa poprawnie."
 
-msgid "Fire brigade (148.6625-149.3375 MHz)"
-msgstr "Straż pożarna (148.6625-149.3375 MHz)"
-
-msgid "PSP/OSP VHF band (NFM), home to the whole rescue-firefighting\nchannel plan (KRG) and the OSP siren-alerting network. Many OSP\nunits still operate on analog despite PSP's ongoing migration to\nDMR - see also the ready-made KRG channels in the Channels tab\n(\"Load fire brigade\"). Poland-specific."
-msgstr "Pasmo UKF PSP/OSP (NFM), tu mieści się cały kanałowy plan ratowniczo-\ngaśniczy (KRG) oraz sieć alarmowania syren OSP. Wiele jednostek OSP\nnadal pracuje analogowo mimo trwającej migracji PSP do DMR - patrz\nteż gotowe kanały KRG w zakładce Kanały (\"Wczytaj straż pożarną\"). Specyficzne dla Polski."
-
-msgid "Emergency medical / PRM (168.5-169.2 MHz)"
-msgstr "Służby Ratunkowe / PRM (168.5-169.2 MHz)"
-
-msgid "State medical rescue service (ambulances / PRM), power-grid\nemergency service, and municipal services. Ambulances and PRM\ndispatchers in many regions still transmit here in analog.\nPoland-specific."
-msgstr "Państwowe Ratownictwo Medyczne (karetki / PRM), Pogotowie\nEnergetyczne i służby komunalne. Karetki i dyspozytorzy PRM\nw wielu rejonach wciąż nadają tu w analogu. Specyficzne dla Polski."
 
 
 # --- language_panel.py / main_window.py - live restart + auto locale ---

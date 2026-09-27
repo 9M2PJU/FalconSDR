@@ -258,7 +258,7 @@ class FrequencyManager(QTabWidget):
             "Creates an empty folder, to which frequencies can be dragged\n"
             "right away from the list below (or picked when adding/editing a channel)."
         ))
-        military_btn = QPushButton(tr("Load military (known frequencies)"))
+        military_btn = QPushButton(tr("Load Polish military frequencies"))
         military_btn.setToolTip(tr(
             "Appends verified, publicly known military frequencies: guard,\n"
             "air-to-air refueling (tankers), Warsaw OAT sectors, and\n"
@@ -267,7 +267,7 @@ class FrequencyManager(QTabWidget):
             "Poland-specific - doesn't overwrite the existing list."
         ))
         military_btn.clicked.connect(self._load_military_channels)
-        fire_btn = QPushButton(tr("Load fire brigade (known frequencies)"))
+        fire_btn = QPushButton(tr("Load Polish fire brigade frequencies"))
         fire_btn.setToolTip(tr(
             "Appends the nationwide PSP rescue-firefighting channels (KRG 1-8)\n"
             "and OSP siren-alerting frequencies (148.6625-149.3375 MHz, NFM).\n"
