@@ -558,6 +558,19 @@ class AcquisitionThread:
         self._cond = threading.Condition(self._lock)
         self._stop_evt = threading.Event()
         self._error: BaseException | None = None
+        # Always-on health counters (not gated behind SMARTSCAN_DEBUG_LIVE_AUDIO,
+        # unlike scanner_engine.py's own tick-timing summary) - see
+        # _maybe_report_health()'s docstring for why this needed to exist
+        # independent of that flag: a dropped chunk here is real, permanent
+        # data loss (this queue overflowing, gotcha 11/28's own subject),
+        # not a cosmetic timing wobble, and the one thing this class can see
+        # that nothing downstream can reconstruct after the fact.
+        self._chunks_read = 0
+        self._chunks_dropped = 0
+        self._read_slow_count = 0  # read() calls that took > one chunk's own duration
+        self._read_max_s = 0.0
+        self._chunk_duration_s = chunk_size / max(1.0, backend.sample_rate)
+        self._health_reported_at = time.monotonic()
         # Bumped every time a retune/gain change is actually applied (see
         # _run()'s command handling) - see _run()'s comment on why a read()
         # started before that point must never be allowed to land in the
@@ -617,6 +630,40 @@ class AcquisitionThread:
         else:
             print("[sdr-acquisition] real-time priority: OK (SCHED_FIFO)", flush=True)
 
+    _HEALTH_REPORT_INTERVAL_S = 20.0
+
+    def _maybe_report_health(self) -> None:
+        """Always-on (never gated behind SMARTSCAN_DEBUG_LIVE_AUDIO)
+        periodic summary of this thread's own read timing and queue-drop
+        counters - added chasing a real user report of live audio glitches
+        plus recordings measurably shorter than the real elapsed time they
+        spanned (missing *samples*, not just a live-monitoring buffering
+        artifact - see AGENTS.md gotcha 30). ``_chunks_dropped`` is the one
+        number that distinguishes "genuinely lost data" (this queue
+        overflowing because the consumer fell behind for multiple seconds -
+        see __init__'s ``max_queued`` docstring) from "everything reached
+        the consumer, just with some timing jitter along the way" (slow
+        individual read() calls that never actually cost a dropped chunk) -
+        the two look identical from a listener's ear but need completely
+        different fixes, and this is the only place in the whole pipeline
+        that can actually tell them apart, since a dropped chunk is
+        invisible to every downstream consumer (there's nothing to detect
+        the *absence* of a chunk from the demod/recording side). Every
+        counter is cumulative since this thread started, not reset per
+        report - a single dropped chunk anywhere in a session should never
+        quietly age out of visibility ~20s later."""
+        now = time.monotonic()
+        if now - self._health_reported_at < self._HEALTH_REPORT_INTERVAL_S:
+            return
+        self._health_reported_at = now
+        print(
+            f"[sdr-acquisition] health: chunks_read={self._chunks_read} "
+            f"chunks_DROPPED={self._chunks_dropped} slow_reads={self._read_slow_count} "
+            f"(budget {self._chunk_duration_s * 1000:.0f}ms) max_read={self._read_max_s * 1000:.0f}ms "
+            f"queue_depth={len(self._queue)}/{self._max_queued}",
+            flush=True,
+        )
+
     def _run(self) -> None:
         self._boost_priority()
         while not self._stop_evt.is_set():
@@ -652,7 +699,9 @@ class AcquisitionThread:
                     my_generation = self._generation
                 self._command_done.set()
             try:
+                read_start = time.monotonic()
                 block = self._backend.read(self._chunk_size)
+                read_elapsed = time.monotonic() - read_start
             except BaseException as exc:  # noqa: BLE001 - propagated verbatim to read(), see there
                 with self._cond:
                     self._error = exc
@@ -686,10 +735,16 @@ class AcquisitionThread:
                     # and confirmed on real hardware (121-136 MHz civil
                     # aviation band, ~7 capture windows).
                     continue
+                self._chunks_read += 1
+                if read_elapsed > self._chunk_duration_s:
+                    self._read_slow_count += 1
+                self._read_max_s = max(self._read_max_s, read_elapsed)
                 self._queue.append(block)
                 if len(self._queue) > self._max_queued:
                     self._queue.popleft()
+                    self._chunks_dropped += 1
                 self._cond.notify_all()
+            self._maybe_report_health()
 
     def read(self, num_samples: int, timeout: float = 1.5) -> np.ndarray:
         """Same contract as SdrBackend.read(): blocks for the next ready

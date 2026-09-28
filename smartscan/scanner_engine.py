@@ -389,6 +389,7 @@ class ScannerEngine(threading.Thread):
         self._backend = None
         self._audio_out: AudioOutput | None = None
         self._spectrum_worker: _SpectrumWorker | None = None
+        self._last_spectrum_submit_at = 0.0
         self._edge_compensation: EdgeCompensation | None = None
         self._logged_checkpoints: set[str] = set()  # see _checkpoint_once()
 
@@ -1257,12 +1258,40 @@ class ScannerEngine(threading.Thread):
             return ScannerState.SIGNAL_DETECTED
         return ScannerState.LINGER
 
+    # Real-hardware finding (a full GUI session, real X11 display, not a
+    # headless test): submitting a new spectrum frame on *every* SCANNING
+    # tick (~33/s) meant the GUI's mini-spectrum widget was also updating at
+    # ~33/s - and each of those updates (SpectrumView.update_spectrum() -
+    # pyqtgraph curve setData + an explicit setYRange() call every single
+    # time) turned out to be real, substantial Python/Qt-level work holding
+    # the GIL, at almost the exact same cadence the scanner thread itself
+    # needs the GIL for its own tick processing. Measured directly: tick-
+    # processing time (the same work that was ~15ms with no GUI attached at
+    # all, even with several active slots) jumped to 50-60ms with a real
+    # window showing this widget and only *one* slot active - a 3-4x
+    # slowdown from GUI-thread GIL contention alone, severe enough to
+    # overflow AcquisitionThread's own queue (127 chunks genuinely dropped
+    # in a single ~90s session - the first time this investigation found
+    # real, permanent sample loss rather than just a live-monitoring
+    # buffering artifact). A visual preview has no business updating faster
+    # than a human can perceive anyway - throttling it to _SPECTRUM_FPS
+    # costs nothing visually and removes most of that GIL pressure.
+    _SPECTRUM_FPS = 10.0
+
     def _submit_spectrum(
         self, iq: np.ndarray, sample_rate: float, center_hz: float, trigger_dbfs: float, custom: bool = False,
     ) -> None:
         """Hands the raw IQ block to _SpectrumWorker's own thread - never
         computes the FFT here, on the same thread that also has to keep
-        live audio flowing in real time (see _SpectrumWorker's docstring)."""
+        live audio flowing in real time (see _SpectrumWorker's docstring).
+        Throttled to _SPECTRUM_FPS (see its own docstring) - skipping a
+        tick here only means the GUI's spectrum preview updates a little
+        less often, nothing downstream of this (detection, recording,
+        audio) is affected at all."""
+        now = time.monotonic()
+        if now - self._last_spectrum_submit_at < 1.0 / self._SPECTRUM_FPS:
+            return
+        self._last_spectrum_submit_at = now
         self._spectrum_worker.submit(iq, sample_rate, center_hz, trigger_dbfs, custom)
 
     def _emit_freqs(self) -> None:

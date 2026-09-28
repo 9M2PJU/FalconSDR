@@ -1233,6 +1233,84 @@ for exactly this reason. Add a new language by dropping one `.po` file — see
     these two lines *first*, before assuming either fix is actually active
     in whatever session is misbehaving.
 
+30. **The live-audio-dropout/"recording sounds sped up" investigation
+    (gotchas 26/28) finally found the actual, measurable root cause: the
+    Listen tab's mini-spectrum widget (`SpectrumView`), not anything in the
+    acquisition/audio-output threads themselves.** Every earlier real-
+    hardware test in this whole investigation (gotchas 26/27/28) ran
+    headless or via a bare `ScannerEngine` with no real window ever shown -
+    and every one of them came back completely clean (zero dropped chunks,
+    `over_budget=0`, stable buffer). The breakthrough was testing a *real*
+    `MainWindow`, actually `.show()`n on a real X11 display, with
+    `AcquisitionThread`'s own always-on health counters (see below)
+    watching: with only **one** active slot - the same workload that was
+    trivially cheap headless - tick-processing time jumped from ~15ms to
+    50-60ms, and over a single ~90s session the acquisition queue actually
+    **dropped 127 real chunks** (~3.8s of genuinely lost IQ, ~4.2% of the
+    session - not a live-monitoring buffering artifact, actual permanent
+    data loss upstream of both the speaker and the recorder, which is
+    exactly why the *recording itself* measurably ran short, not just live
+    playback). Root cause: `_submit_spectrum()` handed a new frame to
+    `_SpectrumWorker` on *every* SCANNING tick (~30-35/s), and
+    `SpectrumView.update_spectrum()` (pyqtgraph `setData()` +
+    `pg.mkPen()`+`setPen()` on the trigger line *every single call* even
+    when its color hadn't changed + an explicit `setYRange()` *every single
+    call* even when the range hadn't meaningfully moved) turned out to be
+    real, substantial GIL-holding Python/Qt work running on the GUI thread
+    at almost the exact same cadence the scanner thread needs the GIL for
+    its own real-time tick processing - the two threads were fighting for
+    the GIL ~30+ times a second, severely enough to make the acquisition
+    thread's own queue (bounded, gotcha 11) overflow for real. This is the
+    same failure family gotcha 28 already fixed for `_slot_pool`'s
+    non-primary slots vs. the primary slot's own processing, just a second,
+    independent contributor (a busy GUI thread) that no purely-headless test
+    could ever have surfaced, since there's no GUI thread to compete in the
+    first place. Fixed two ways, both in the same commit:
+    - `ScannerEngine._submit_spectrum()` now throttles to `_SPECTRUM_FPS`
+      (10Hz) instead of the full tick rate - a visual preview has no need to
+      update faster than that, and skipping a submission only means the GUI
+      spectrum updates a little less often, with zero effect on
+      detection/recording/audio (which never went through this path at
+      all - `_SpectrumWorker` was always decoupled from them, see its own
+      docstring).
+    - `SpectrumView.update_spectrum()` now caches the trigger line's pen
+      (only calls `setPen()` when custom/default actually flips) and skips
+      `setYRange()` entirely when the new range is within 0.5dB of the
+      last one actually applied - cheap wins on top of the throttle, same
+      direction of fix (less GIL-holding work per call, not just fewer
+      calls).
+    Re-verified on the exact same real-GUI/real-display scenario after the
+    fix: **0 chunks dropped** over the same ~90s session (down from 127),
+    `over_budget` at 0 for nearly the entire run (occasional 1-2 near the
+    end, `max_tick` in the mid-30s ms rather than 50-60ms), no re-priming
+    events logged at all (there was one in the broken run), and the
+    recording's own wall-clock-open-to-close time matched its actual audio
+    duration to within ~0.3s over 89s (vs. the ~3.8s of real missing audio
+    the broken version produced). If you touch `SpectrumView`/
+    `_submit_spectrum` again: never reintroduce an unconditional per-call
+    `setPen()`/`setYRange()`/uncapped submission rate on a widget updated
+    from a background-thread signal at scanner-tick cadence - a "just a
+    preview" widget can still meaningfully compete with the scanner's own
+    real-time work for the GIL, and unlike a slow FFT (which `_SpectrumWorker`
+    already isolates onto its own thread) the actual *cost* here was almost
+    entirely on the GUI/consumer side of that signal, not the producer side.
+    **Also added, chasing this same investigation - always-on (not
+    `SMARTSCAN_DEBUG_LIVE_AUDIO`-gated) health counters on
+    `AcquisitionThread` itself** (`_chunks_read`/`_chunks_dropped`/
+    `_read_slow_count`/`_read_max_s`, printed as one summary line every
+    `_HEALTH_REPORT_INTERVAL_S` (20s), cumulative since the thread started):
+    `_chunks_DROPPED` is the one number that distinguishes genuine,
+    permanent data loss (this thread's own queue overflowing - see its
+    `max_queued` docstring) from mere read-timing jitter that never actually
+    cost a chunk - nothing downstream of a dropped chunk can ever detect its
+    *absence*, so this was the only place in the whole pipeline that could
+    make that distinction, and it's what actually cracked this
+    investigation open. If you're ever chasing a live-audio/recording-
+    timing report again: check these counters *first*, on a real `MainWindow`
+    session (not a headless/bare-engine harness) - see this gotcha's own
+    finding for why a headless test alone can look perfectly healthy while
+    a real GUI session isn't.
+
 ## Testing without touching the user's real config/recordings
 
 There's no test suite yet. To smoke-test end to end, run the app with

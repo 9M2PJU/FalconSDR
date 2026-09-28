@@ -278,6 +278,12 @@ class SpectrumView(QWidget):
         self._plot = None
         self._curve = None
         self._trigger_line = None
+        # Cached across update_spectrum() calls - see there for why avoiding
+        # redundant setPen()/setYRange() work on every single call matters
+        # (this runs at up to _SPECTRUM_FPS times/second, competing for the
+        # GIL with the scanner thread's own real-time work).
+        self._trigger_pen_custom: bool | None = None
+        self._last_y_range: tuple[float, float] | None = None
         if HAVE_PYQTGRAPH:
             pg.setConfigOption("background", "#12141a")
             pg.setConfigOption("foreground", "#9aa0a6")
@@ -318,8 +324,16 @@ class SpectrumView(QWidget):
             return
         self._curve.setData(freqs_hz / 1e6, db)
         self._trigger_line.setValue(trigger_dbfs)
-        color = _TRIGGER_COLOR_CUSTOM if custom else _TRIGGER_COLOR_DEFAULT
-        self._trigger_line.setPen(pg.mkPen(color, width=1, style=Qt.PenStyle.DashLine))
+        # Only rebuild/reassign the pen when the color actually needs to
+        # change (custom<->default) - pg.mkPen() + setPen() on every single
+        # call, even when nothing about the line's appearance changed, was
+        # pure wasted GIL time at up to _SPECTRUM_FPS calls/second (see
+        # ScannerEngine._submit_spectrum's own docstring for the real-
+        # hardware measurement that made this worth trimming).
+        if self._trigger_pen_custom != custom:
+            color = _TRIGGER_COLOR_CUSTOM if custom else _TRIGGER_COLOR_DEFAULT
+            self._trigger_line.setPen(pg.mkPen(color, width=1, style=Qt.PenStyle.DashLine))
+            self._trigger_pen_custom = custom
         # Autorange alone tends to hug the trigger line right against the
         # top edge whenever nothing currently on screen is above it (the
         # common case) - there's nowhere to actually *see* a signal once it
@@ -334,7 +348,17 @@ class SpectrumView(QWidget):
             data_min = data_max = trigger_dbfs
         y_min = min(data_min, trigger_dbfs) - 3.0
         y_max = max(data_max, trigger_dbfs + _TRIGGER_HEADROOM_DB)
-        self._plot.setYRange(y_min, y_max, padding=0.02)
+        # setYRange() (ViewBox range-change propagation, axis tick/gridline
+        # recompute, repaint) is real work - skip it when the range hasn't
+        # moved enough to matter rather than paying that cost on every call
+        # even while a signal just sits at a stable level.
+        if (
+            self._last_y_range is None
+            or abs(y_min - self._last_y_range[0]) > 0.5
+            or abs(y_max - self._last_y_range[1]) > 0.5
+        ):
+            self._plot.setYRange(y_min, y_max, padding=0.02)
+            self._last_y_range = (y_min, y_max)
 
 
 class RecIndicator(QWidget):
