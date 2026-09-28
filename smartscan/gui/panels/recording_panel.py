@@ -66,8 +66,16 @@ class RecordingPanel(QGroupBox):
             "scanning/listening is never capped by this, only recording."
         ))
         self.max_concurrent_spin.valueChanged.connect(self._push_settings)
+        self.max_concurrent_spin.valueChanged.connect(self._update_max_concurrent_hint)
+        # A live, always-visible label instead of making the user discover
+        # "0 = unlimited" from the tooltip alone - real user feedback after
+        # the tooltip-only version shipped: "User też nie wie że 0 znaczy
+        # bez limitu" (a user has no way to know 0 means unlimited).
+        self.max_concurrent_hint = QLabel()
+        self.max_concurrent_hint.setStyleSheet("color: #9aa0a6;")
         limit_row.addWidget(QLabel(tr("Max simultaneous recordings:")))
         limit_row.addWidget(self.max_concurrent_spin)
+        limit_row.addWidget(self.max_concurrent_hint)
         limit_row.addStretch(1)
         root.addLayout(limit_row)
 
@@ -108,10 +116,14 @@ class RecordingPanel(QGroupBox):
     def _load_from_config(self) -> None:
         self.enable_check.setChecked(self.config.enabled)
         self.max_concurrent_spin.setValue(self.config.max_concurrent_recordings)
+        self._update_max_concurrent_hint(self.config.max_concurrent_recordings)
         self.wav_radio.setChecked(self.config.output_format != "mp3")
         self.mp3_radio.setChecked(self.config.output_format == "mp3")
         self.dir_edit.setText(self.config.output_dir)
         self._update_format_warning()
+
+    def _update_max_concurrent_hint(self, value: int) -> None:
+        self.max_concurrent_hint.setText(tr("(unlimited)") if value == 0 else "")
 
     def _update_format_warning(self) -> None:
         if self.mp3_radio.isChecked() and not ffmpeg_available():
@@ -152,7 +164,16 @@ class RecordingPanel(QGroupBox):
 
     def set_running(self, running: bool) -> None:
         self.enable_check.setEnabled(not running)
-        self.max_concurrent_spin.setEnabled(not running)
+        # Deliberately NOT disabled while running, unlike enable_check/wav_radio/
+        # mp3_radio above - a real user-reported bug turned out to actually be
+        # "this field is disabled the whole time you're scanning, with no
+        # visible reason why, so typing/scrolling silently does nothing" (the
+        # widget itself was fine - see ScannerEngine._at_recording_capacity(),
+        # already reads self.config.recording.max_concurrent_recordings fresh
+        # on every tick, so there's no persisted/opened-file state this could
+        # ever corrupt mid-scan, unlike output_format or the enabled toggle
+        # itself). Kept live-editable while scanning, the same way Trigger
+        # Level/Squelch/Gain/Tuning/Linger already are (see widgets.SliderSpin).
         self.wav_radio.setEnabled(not running)
         self.mp3_radio.setEnabled(not running)
         if not running:

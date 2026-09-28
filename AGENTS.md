@@ -1178,22 +1178,42 @@ for exactly this reason. Add a new language by dropping one `.po` file — see
     session) is a direct, user-facing lever for capping this regardless of
     root cause, and was itself found to have a real UI bug while
     troubleshooting this report - see the immediately following note.
-    **`RecordingPanel`'s "Max simultaneous recordings" `QSpinBox` used
-    `setSpecialValueText(tr("Unlimited"))` for 0, which turned out to make
-    the field silently un-typeable**: `QSpinBox`'s validator treats the
-    special-value text as the field's literal displayed text, so typing a
-    digit directly (the natural first thing anyone tries) gets rejected as
-    an unparseable edit to the string "Unlimited" - only the tiny spin-
-    arrows/scroll wheel (which don't go through the text validator at all)
-    actually worked, reproduced exactly via a real user report ("nie jestem
-    w stanie nic tutaj wpisać/zmienić"). Fixed by dropping
-    `setSpecialValueText` entirely - the field just shows a plain "0", which
-    has no such trap, and the tooltip already explains "0 = unlimited". If
-    you add another spinbox with a sentinel value like this: don't reach for
+    **`RecordingPanel`'s "Max simultaneous recordings" `QSpinBox` had two
+    separate real bugs stacked on top of each other, found across two
+    rounds of the same user report ("nie jestem w stanie nic tutaj
+    wpisać/zmienić").** First round: `setSpecialValueText(tr("Unlimited"))`
+    for 0 made the field silently reject typed digits - `QSpinBox`'s
+    validator treats the special-value text as the field's literal
+    displayed text, so typing a number directly (the natural first thing
+    anyone tries) is rejected as an unparseable edit to the string
+    "Unlimited"; only the tiny spin-arrows/scroll wheel (which bypass the
+    text validator entirely) worked. Fixed by dropping
+    `setSpecialValueText` - the field shows a plain "0" instead, which has
+    no such trap. **Second round, same symptom persisted anyway**: the real
+    remaining cause was `RecordingPanel.set_running(True)` disabling this
+    spinbox for the *entire* duration of a scan, same as `enable_check`/
+    `wav_radio`/`mp3_radio` - so a user testing live listening (scanner
+    running, exactly when they'd want to try this limit) found *nothing*
+    responded, not even the spin arrows or scroll wheel, with no visible
+    explanation why. Unlike `output_format`/the enable toggle (which really
+    can't safely change mid-recording), this setting has no persisted/
+    opened-file state depending on it at all -
+    `ScannerEngine._at_recording_capacity()` already reads
+    `config.recording.max_concurrent_recordings` fresh every single tick -
+    so there was never a correctness reason to lock it during a scan.
+    Fixed by removing it from `set_running()`'s disable list, making it
+    live-editable while scanning exactly like Trigger Level/Squelch/Gain/
+    Tuning/Linger already are (`widgets.SliderSpin`). Also added a
+    permanent, always-visible `(unlimited)` label next to the spinbox
+    (updates live via `_update_max_concurrent_hint`, no signal needed
+    beyond the existing `valueChanged`) after further feedback that a
+    tooltip alone doesn't make "0 = unlimited" discoverable. If you add
+    another spinbox with a sentinel value like this: don't reach for
     `setSpecialValueText` for anything a user is expected to type over
-    directly - it's fine for a value only ever reached via the spin
-    arrows/programmatically, but not for a field whose main sentinel *is*
-    its default/common value.
+    directly, and double-check `set_running()`'s (or any similar
+    mode-gated) disable list actually needs to include it - "locked while
+    scanning" should be reserved for settings a live change could actually
+    corrupt, not applied reflexively to every new Options control.
 29. **Both real-time-priority boosts (`AcquisitionThread._boost_priority`,
     gotcha 11; `AudioOutput._boost_priority_once`, gotcha 26) now print
     their own outcome unconditionally, not just under
