@@ -1375,7 +1375,10 @@ class ScannerEngine(threading.Thread):
                     self._skip_lockout_evt.clear()
                     state = ScannerState.CALCULATE_NEXT_FREQ
                     self._emit_state(state)
-                elif best_freq is not None and best_level >= effective_trigger:
+                elif (
+                    best_freq is not None and best_level >= effective_trigger
+                    and not self._at_recording_capacity()
+                ):
                     raw_level = raw_powers[best_freq]
                     self._calibration_log.log_detect(
                         best_freq, window.center_hz, sample_rate, self._applied_gain_mode,
@@ -1624,6 +1627,20 @@ class ScannerEngine(threading.Thread):
         stereo = slot.modulation == Modulation.WFM and self.config.wfm_stereo_enabled
         audio = slot.demod.demod(iq, slot.modulation, slot.offset_hz, stereo=stereo)
         self._play_and_record_slot(slot, audio, squelched=squelched)
+
+    def _at_recording_capacity(self) -> bool:
+        """True if opening one more slot would exceed
+        ``config.recording.max_concurrent_recordings`` (0 = unlimited, the
+        default - always returns False then). Only gates auto-recording:
+        irrelevant while auto-recording itself is off, since every open
+        slot's own ``Recorder`` only actually writes anything when
+        ``config.recording.enabled`` is True (see _open_slot) - a capped
+        scan with auto-recording off would otherwise stop *watching*
+        channels live for no reason, not just stop recording them."""
+        limit = self.config.recording.max_concurrent_recordings
+        if not self.config.recording.enabled or limit <= 0:
+            return False
+        return len(self._slots) >= limit
 
     def _open_slot(self, freq_hz: int, window: ScanWindow, level_dbfs: float) -> None:
         dev = self.config.device

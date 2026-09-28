@@ -1001,6 +1001,55 @@ for exactly this reason. Add a new language by dropping one `.po` file — see
     without re-solving the per-slot-fresh-`Recorder` problem that made the
     original version not actually work.
 
+24. **`RecordingConfig.max_concurrent_recordings` (0 = unlimited, default) is
+    a recording-only cap, checked in one place -
+    `ScannerEngine._at_recording_capacity()`, gating the
+    `elif best_freq is not None and best_level >= effective_trigger` branch
+    in `_main_loop()`'s SCANNING state right before it would otherwise call
+    `_open_slot()`.** Added by explicit request as a safety valve for
+    exactly the spectral-leakage scenario gotcha 23's neighbour discussion
+    surfaced: tightly-spaced channels (e.g. 12.5 kHz NFM) whose per-channel
+    power windows touch edge-to-edge with no guard band (see
+    `channelizer.channel_powers_from_spectrum()`) can each individually
+    cross `effective_trigger` from a single strong/nearby real transmission
+    leaking into its immediate neighbours - each one then opens its *own*
+    slot/recording over the next few ticks (`_main_loop()` only opens one
+    new slot per tick, whichever candidate is strongest - see the "no cap
+    on how many can open" comment there, which is correct/intentional for
+    genuinely simultaneous different transmissions and untouched by this
+    feature). This setting caps the resulting fan-out without touching that
+    design or the FFT/trigger math itself.
+    Deliberately **only** gates recording, not scanning/live listening:
+    `_at_recording_capacity()` returns `False` unconditionally whenever
+    `config.recording.enabled` is `False` or the limit is `<= 0` - a capped
+    scan with auto-recording *off* must keep watching/demodulating every
+    channel exactly as before, since nothing is actually being written to
+    disk for it to protect. When the cap *is* active, a candidate that
+    can't open this tick isn't lost - it's simply re-evaluated as a
+    candidate on the next tick (nothing marks it as rejected), so it opens
+    automatically the moment any existing slot's LINGER expires and frees
+    capacity, with no special-case bookkeeping needed. `len(self._slots)`
+    is the correct thing to compare against the limit only because every
+    open slot's `Recorder` really is being written to whenever
+    `config.recording.enabled` is `True` (see `_open_slot()`) - if that
+    ever stops being true (e.g. a future per-slot opt-out), this check
+    would need to count actually-recording slots instead of all open ones.
+    Manual recording (gotcha 13) and raw IQ recording (gotcha 15) are each
+    their own independent single recorder, entirely outside `self._slots`
+    - this cap has no effect on either, by design (the runaway-fan-out
+    problem this solves is specific to auto-recording's per-slot
+    architecture, gotcha 12). Verified end-to-end on `SimulatedBackend`
+    (whose 3 fixed fake bursts - 121.5/118.1/124.0 MHz - only ever
+    coexist in one capture window at a wide-enough sample rate, ~2.4 MHz
+    isn't enough to span all three): uncapped, all 3 opened simultaneously;
+    with `max_concurrent_recordings=2`, never more than 2 did.
+    `RecordingPanel`'s new "Max simultaneous recordings" `QSpinBox`
+    (0..50, `setSpecialValueText(tr("Unlimited"))` at 0) follows the same
+    signal-loading-guard pattern as every other widget in that panel
+    (gotcha 1) - wired through the existing `_push_settings()`/
+    `_load_from_config()`, no new signal needed since nothing outside this
+    panel needs to react live to a change in the limit.
+
 ## Testing without touching the user's real config/recordings
 
 There's no test suite yet. To smoke-test end to end, run the app with

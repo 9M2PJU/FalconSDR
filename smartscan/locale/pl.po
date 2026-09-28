@@ -57,6 +57,15 @@ msgstr "Nagrywanie"
 msgid "Record Only On Signal (only record while a signal is detected)"
 msgstr "Nagrywaj tylko przy sygnale (nagrywaj tylko, gdy wykryto sygnał)"
 
+msgid "Max simultaneous recordings:"
+msgstr "Maks. jednoczesnych nagrań:"
+
+msgid "Unlimited"
+msgstr "Bez limitu"
+
+msgid "Caps how many transmissions can be recorded at the same time. Once this many recordings are already active, a newly detected transmission is simply not recorded until one of them ends - useful if a busy band (or one strong signal leaking into tightly-spaced neighbour channels) opens far more simultaneous recordings than you actually want. 0 = unlimited. Live scanning/listening is never capped by this, only recording."
+msgstr "Ogranicza liczbę transmisji nagrywanych jednocześnie. Gdy tyle nagrań jest już aktywnych, nowo wykryta transmisja po prostu nie zostanie nagrana, dopóki jedno z nich się nie zakończy - przydatne, gdy zatłoczone pasmo (albo jeden silny sygnał przeciekający do ciasno rozstawionych sąsiednich kanałów) otwiera znacznie więcej jednoczesnych nagrań niż chcesz. 0 = bez limitu. To nigdy nie ogranicza samego skanowania/nasłuchu na żywo, tylko nagrywanie."
+
 msgid "Choose folder..."
 msgstr "Wybierz katalog..."
 

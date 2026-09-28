@@ -1,10 +1,11 @@
-"""Recording panel: Record Only On Signal toggle, WAV/MP3 format, REC lamp, output dir."""
+"""Recording panel: Record Only On Signal toggle, max concurrent recordings
+limit, WAV/MP3 format, REC lamp, output dir."""
 from __future__ import annotations
 
 from PySide6.QtCore import Signal
 from PySide6.QtWidgets import (
     QCheckBox, QFileDialog, QGroupBox, QHBoxLayout, QLabel, QLineEdit,
-    QPushButton, QRadioButton, QVBoxLayout,
+    QPushButton, QRadioButton, QSpinBox, QVBoxLayout,
 )
 
 from ...audio_transcode import ffmpeg_available
@@ -42,6 +43,25 @@ class RecordingPanel(QGroupBox):
         self.enable_check.toggled.connect(self._push_settings)
         root.addWidget(self.enable_check)
 
+        limit_row = QHBoxLayout()
+        self.max_concurrent_spin = QSpinBox()
+        self.max_concurrent_spin.setRange(0, 50)
+        self.max_concurrent_spin.setSpecialValueText(tr("Unlimited"))
+        self.max_concurrent_spin.setToolTip(tr(
+            "Caps how many transmissions can be recorded at the same time. "
+            "Once this many recordings are already active, a newly detected "
+            "transmission is simply not recorded until one of them ends - "
+            "useful if a busy band (or one strong signal leaking into "
+            "tightly-spaced neighbour channels) opens far more simultaneous "
+            "recordings than you actually want. 0 = unlimited. Live "
+            "scanning/listening is never capped by this, only recording."
+        ))
+        self.max_concurrent_spin.valueChanged.connect(self._push_settings)
+        limit_row.addWidget(QLabel(tr("Max simultaneous recordings:")))
+        limit_row.addWidget(self.max_concurrent_spin)
+        limit_row.addStretch(1)
+        root.addLayout(limit_row)
+
         format_row = QHBoxLayout()
         self.wav_radio = QRadioButton(tr("WAV (uncompressed)"))
         self.mp3_radio = QRadioButton(tr("MP3 (compressed, requires ffmpeg)"))
@@ -78,6 +98,7 @@ class RecordingPanel(QGroupBox):
 
     def _load_from_config(self) -> None:
         self.enable_check.setChecked(self.config.enabled)
+        self.max_concurrent_spin.setValue(self.config.max_concurrent_recordings)
         self.wav_radio.setChecked(self.config.output_format != "mp3")
         self.mp3_radio.setChecked(self.config.output_format == "mp3")
         self.dir_edit.setText(self.config.output_dir)
@@ -106,6 +127,7 @@ class RecordingPanel(QGroupBox):
         enabled = self.enable_check.isChecked()
         changed = enabled != self.config.enabled
         self.config.enabled = enabled
+        self.config.max_concurrent_recordings = self.max_concurrent_spin.value()
         self.config.output_format = "mp3" if self.mp3_radio.isChecked() else "wav"
         self._update_format_warning()
         self.settings_changed.emit()
@@ -121,6 +143,7 @@ class RecordingPanel(QGroupBox):
 
     def set_running(self, running: bool) -> None:
         self.enable_check.setEnabled(not running)
+        self.max_concurrent_spin.setEnabled(not running)
         self.wav_radio.setEnabled(not running)
         self.mp3_radio.setEnabled(not running)
         if not running:
