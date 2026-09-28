@@ -31,6 +31,7 @@ from pathlib import Path
 import numpy as np
 from PySide6.QtCore import QObject, Signal
 
+from .agc import SoftwareAgc
 from .audio_output import AudioOutput
 from .audio_transcode import transcode_to_mp3
 from .calibration_log import CalibrationLogger
@@ -433,6 +434,11 @@ class ScannerEngine(threading.Thread):
 
         self._applied_gain_mode = ""
         self._applied_gain_db = None
+        # Non-None only while "auto" gain is actually in effect - see
+        # _maybe_apply_gain()/_maybe_run_software_agc() and agc.py. Discarded
+        # (set back to None) the moment effective mode moves to "manual" for
+        # any reason (global toggle, or a band's own advanced override).
+        self._software_agc: SoftwareAgc | None = None
         self._had_real_hardware = False
 
         # Manual, trigger-independent continuous recording - see
@@ -1125,10 +1131,44 @@ class ScannerEngine(threading.Thread):
         return any(e.contains(freq_hz) for e in self.blacklist)
 
     def _maybe_apply_gain(self, window: ScanWindow | None) -> None:
+        """Applies a live Gain-slider/mode change mid-scan (see AGENTS.md) -
+        polled once per loop iteration. "Auto" is a software-driven control
+        loop now (see agc.py's own module docstring for why), never the
+        device's own onboard AGC hardware: entering it here just establishes
+        a starting manual gain (this band/global's own configured ``db`` -
+        same starting point Manual mode would use, so toggling Auto<->Manual
+        doesn't jump gain around for no reason) and creates a SoftwareAgc,
+        which _maybe_run_software_agc() then drives every SCANNING tick from
+        the real captured IQ's own peak. Leaving "auto" (mode flips to
+        "manual", globally or via a band's own advanced override) discards
+        it - the next real gain change goes back to a plain, one-shot
+        backend.set_gain() call."""
         mode, db = self._effective_gain(window)
+        if mode == "auto":
+            if self._applied_gain_mode != "auto" or self._software_agc is None:
+                self._software_agc = SoftwareAgc(db)
+                self._backend.set_gain("manual", db)
+                self._applied_gain_mode, self._applied_gain_db = "auto", db
+            return
+        self._software_agc = None
         if mode != self._applied_gain_mode or db != self._applied_gain_db:
             self._backend.set_gain(mode, db)
             self._applied_gain_mode, self._applied_gain_db = mode, db
+
+    def _maybe_run_software_agc(self, iq: np.ndarray) -> None:
+        """Called once per SCANNING tick with that tick's raw captured IQ -
+        a no-op whenever "auto" gain isn't actually active (see
+        _maybe_apply_gain). Most calls do nothing even while active (see
+        SoftwareAgc.step's rate limit/dead zone) - this is deliberately cheap
+        (one np.abs().max() over a block already read this tick, no extra
+        capture) to run unconditionally rather than only every so often."""
+        if self._software_agc is None or iq.size == 0:
+            return
+        peak = float(np.max(np.abs(iq)))
+        new_gain = self._software_agc.step(peak, self._backend.gain_range_db)
+        if new_gain is not None:
+            self._backend.set_gain("manual", new_gain)
+            self._applied_gain_db = new_gain
 
     def _next_window(self) -> ScanWindow | None:
         with self._lock:
@@ -1307,6 +1347,7 @@ class ScannerEngine(threading.Thread):
                 tick_start = time.monotonic() if _DEBUG_TIMING else 0.0
                 window = self._cur_window
                 self._feed_raw_iq(iq, window.center_hz)
+                self._maybe_run_software_agc(iq)
 
                 # One FFT/PSD/cumsum for the whole captured block, shared by
                 # both steps below (already-active slots + new-detection

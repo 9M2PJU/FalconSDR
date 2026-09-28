@@ -1050,6 +1050,90 @@ for exactly this reason. Add a new language by dropping one `.po` file — see
     `_load_from_config()`, no new signal needed since nothing outside this
     panel needs to react live to a change in the limit.
 
+25. **`Demodulator`'s AGC (dsp.py) tracks a smoothed envelope across calls
+    now, never a single chunk's own peak in isolation - see the `_AGC_*`
+    constants' docstring in dsp.py for the full story.** Real-hardware
+    finding while chasing a "quality/SNR reads low even though the live
+    dBFS looked strong" report: the original code re-normalized *every*
+    ~30ms chunk to a fixed peak using *only that chunk's own* peak, with no
+    memory between calls - any chunk whose peak happened to clear 0.35 (a
+    real, common case for discriminator noise/threshold-effect clicks, not
+    just genuine voice) got rescaled to the *same* loudness as a genuine
+    voice chunk, destroying the actual signal-to-noise contrast the RF
+    chain had delivered before `analyze_wav()` ever saw the samples -
+    confirmed by running the real `analyze_wav()` function against
+    synthesized "voice bursts between noisy gaps" audio processed both old
+    and new ways: 15.2 dB SNR/50.6 quality (old) vs 18.0 dB SNR/60.1 quality
+    (new) from *identical* underlying signal. Fixed with a real
+    attack-fast/release-slow envelope follower (`Demodulator._apply_agc`,
+    state in `self._agc_envelope`, cleared by `reset()`) - the same
+    asymmetric-time-constant shape a real AGC/compressor uses, not a peak
+    normalizer re-run from scratch every chunk. Works unchanged on WFM's
+    stereo (n, 2) output too (one shared scalar gain, L/R balance untouched).
+    If you touch this again: never go back to computing gain from a single
+    call's own audio in isolation - that's exactly the bug this replaced.
+26. **`AudioOutput`'s PortAudio callback thread (`_next_frames`, both
+    `_pa_callback`/`_sd_callback` wrappers) now requests real-time
+    (SCHED_FIFO) scheduling too, the same fix AGENTS.md gotcha 11 already
+    applied to the SDR acquisition thread, for the same underlying reason.**
+    This callback is Python code, so it needs the GIL like any other thread
+    in the process - left at plain SCHED_OTHER, it can be starved by a
+    nearby SCHED_FIFO thread (the acquisition thread) with no fairness
+    guarantee (gotcha 11's own measurement: up to 11.7s in the worst case
+    for a *different* normal-priority caller), except here a single missed
+    callback is an *instant* audible glitch, a harder real-time deadline
+    than a retune has. Can't be boosted at construction time like
+    `AcquisitionThread` does (PortAudio, not this class, creates and owns
+    this thread) - `_boost_priority_once()` requests it lazily, the first
+    time the callback actually runs, and is a no-op after that (flag-
+    guarded). Best-effort, same fallback as the acquisition thread's own
+    version. Verified the request actually lands: inspecting
+    `/proc/<pid>/task/*/comm`+`os.sched_getscheduler()` while a real stream
+    was running showed the callback's own OS thread at `SCHED_FIFO` after
+    its first invocation, previously always `SCHED_OTHER`.
+27. **"Auto" gain mode (`DeviceConfig.gain_mode == "auto"`) no longer means
+    "let the tuner's own onboard AGC hardware handle it" - it's a real
+    software control loop now (`smartscan/agc.py`'s `SoftwareAgc`,
+    driven by `ScannerEngine._maybe_apply_gain`/`_maybe_run_software_agc`).**
+    Real-hardware finding (RTL-SDR Blog V4, real strong local FM broadcast
+    stations): the tuner's own AGC (`SoapyBackend`/`RtlSdrBackend`'s old
+    `set_gain("auto", ...)` → `setGainMode(True)`) does not reliably prevent
+    ADC overload - measured a captured channel's own power at **+0.7 dBFS**,
+    above full scale, with the hardware AGC engaged and multiple strong FM
+    stations in the same wideband capture (which the tuner's own AGC only
+    ever sees as one combined average level, not per-station). This also
+    demonstrably worsened the "one strong signal trips several neighbour
+    channels" spectral-leakage symptom (see the max_concurrent_recordings
+    feature's own discussion) by making the overload itself worse: the same
+    real capture that showed 7-8 simultaneously "active" slots under
+    hardware AGC showed only 2-3 once overload was actually fixed.
+    `SoftwareAgc.step()` is a peak-tracking controller (target -9 dBFS
+    linear peak, +/-3dB dead zone, >=1s between adjustments, max 6dB/step,
+    clamped to the device's own `gain_range_db`) fed one measurement per
+    SCANNING tick from that tick's own already-captured IQ
+    (`float(np.max(np.abs(iq)))`) - no extra hardware read. `_maybe_apply_gain`
+    creates a fresh `SoftwareAgc` (seeded from the same `db` Manual mode
+    would use, so toggling Auto<->Manual doesn't jump gain for no reason)
+    whenever effective mode transitions *into* "auto" (globally, or via a
+    band's own advanced override - `_effective_gain()` still resolves both
+    the same way it always did), and discards it (`self._software_agc = None`)
+    the instant effective mode leaves "auto" - a plain one-shot
+    `backend.set_gain("manual", db)` handles Manual mode exactly as before,
+    untouched. The device backends (`SoapyBackend`/`RtlSdrBackend`) are
+    otherwise unchanged - they never receive `"auto"` from the engine
+    anymore in practice, only ever explicit `"manual"` values the engine
+    itself computed, so their own `setGainMode(True)` branch is effectively
+    dead code from ScannerEngine's own call path now (harmless if some
+    other future caller still wants literal hardware AGC - just not what
+    "Auto" in this app's own UI means anymore). Verified end-to-end on real
+    hardware: the exact capture that read +0.7 dBFS/measured 3 spuriously
+    "active" slots under the old hardware-AGC "auto" settled to -18.3 dBFS/1
+    real active slot with software AGC, gain auto-converging to 36 dB from
+    the same starting config.
+    If you touch the gain path again: never call `backend.set_gain("auto", ...)`
+    from the engine - "auto" is purely an engine-side policy now, the
+    backend only ever sees concrete numeric gain values.
+
 ## Testing without touching the user's real config/recordings
 
 There's no test suite yet. To smoke-test end to end, run the app with

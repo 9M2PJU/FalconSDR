@@ -49,6 +49,47 @@ WFM_PILOT_BAND_HZ = (WFM_PILOT_HZ - 2_000.0, WFM_PILOT_HZ + 2_000.0)
 # separation (L-R vs L+R balance) in a sane ballpark.
 WFM_STEREO_GAIN = 4.0
 
+# Demodulator output level control (see Demodulator._apply_agc). Replaces an
+# earlier version that renormalized every single ~30ms chunk independently to
+# a fixed peak, using *only* that chunk's own peak - found (real-hardware
+# testing, strong local FM broadcast station, RTL-SDR) to be a real, audible
+# defect: any chunk whose peak happened to clear _AGC_MIN_ENVELOPE (receiver
+# noise alone regularly does, briefly) got rescaled to the *exact same* fixed
+# loudness as a chunk that was mostly voice/program audio - destroying the
+# real amplitude difference between "signal" and "noise between words" that
+# the RF chain actually delivered, audible as rapid pumping/breathing synced
+# to the chunk boundary, and specifically why analyze_wav()'s SNR/quality
+# score could come out badly even when the *live* dBFS reading (measured pre-
+# demod, straight off the RF/FFT power) looked strong: the number that ends
+# up in the recorded PCM's own noise floor had already been dragged up toward
+# the signal level by this per-chunk rescaling, independent of how good the
+# actual reception was. Fixed with a proper attack/release-smoothed envelope
+# instead (state carried *across* calls in the Demodulator instance, reset()
+# clears it) - a real AGC design, the same shape SDR++ and other mature SDR
+# software use, not a peak normalizer re-run from scratch every chunk.
+_AGC_TARGET_PEAK = 0.8
+# Envelope floor - keeps a genuinely weak/marginal signal from being
+# amplified all the way up to full scale (which would just raise its noise
+# floor to be loud, not make it more intelligible) - same intent the old
+# per-chunk version's `max(peak, 0.35)` had for its quiet-chunk case.
+_AGC_MIN_ENVELOPE = 0.35
+# Fast attack (reacts to a *rising* level within ~10ms) - short enough that a
+# sudden loud transient still gets pulled down before it can clip, long
+# enough (versus reacting within a single sample) to not itself audibly pump.
+_AGC_ATTACK_TAU_S = 0.01
+# Slow release (a falling level relaxes back over ~400ms) - deliberately much
+# slower than attack (asymmetric, standard AGC/compressor design): a brief
+# quiet gap between words shouldn't have its noise floor boosted back up
+# before the next word arrives, which is exactly the pumping this replaces.
+_AGC_RELEASE_TAU_S = 0.4
+# Upper bound on the gain this can ever apply - without it, a very weak/
+# marginal signal (envelope tracking down toward its floor) could otherwise
+# get amplified into ear-splitting hiss during a long weak stretch; matches
+# the old design's implicit cap of 0.8/0.35 ~= 2.3x for its "quiet" case,
+# given some headroom since the new envelope tracks real signal more
+# accurately than a single chunk's own peak did.
+_AGC_MAX_GAIN = 6.0
+
 
 def level_dbfs(iq: np.ndarray) -> float:
     """RMS power of a complex baseband block, expressed in dBFS (0 dB = full scale)."""
@@ -89,6 +130,14 @@ class Demodulator:
         self._deemph_zi_l = np.zeros(1)
         self._deemph_zi_r = np.zeros(1)
         self._pilot_amp = 0.0
+        # Smoothed level-tracking state for _apply_agc() - see the _AGC_*
+        # constants' docstring for why this replaced a per-chunk peak
+        # normalization. Persists across demod() calls (unlike a per-chunk
+        # peak, which by definition can't carry any memory) so a single
+        # quiet or loud chunk doesn't instantly swing the whole output's
+        # gain - only reset alongside every other piece of this
+        # demodulator's running state.
+        self._agc_envelope = _AGC_MIN_ENVELOPE
 
     def reset(self) -> None:
         self._prev_phase = 0.0
@@ -100,6 +149,7 @@ class Demodulator:
         self._deemph_zi_l = np.zeros(1)
         self._deemph_zi_r = np.zeros(1)
         self._pilot_amp = 0.0
+        self._agc_envelope = _AGC_MIN_ENVELOPE
 
     def _decimate(self, x: np.ndarray) -> np.ndarray:
         # Channel-select + resample *before* demodulating: resample_poly's
@@ -232,10 +282,28 @@ class Demodulator:
                 audio = np.clip(np.diff(phase), -3.0, 3.0)
 
         audio = audio.astype(np.float32)
-        peak = np.max(np.abs(audio)) if audio.size else 0.0
-        if peak > 1e-6:
-            audio = audio / max(peak, 0.35) * 0.8
+        audio = self._apply_agc(audio)
         return np.clip(audio, -1.0, 1.0).astype(np.float32)
+
+    def _apply_agc(self, audio: np.ndarray) -> np.ndarray:
+        """Smoothly tracks this demodulator's own output envelope (peak,
+        attack/release-filtered - see the _AGC_* constants) and scales
+        ``audio`` to bring that *tracked* envelope to _AGC_TARGET_PEAK,
+        instead of forcing every individual chunk's own peak there
+        independently - see the module-level docstring above _AGC_TARGET_PEAK
+        for the real, audible pumping bug this replaced. Works unchanged on
+        mono (n,) or stereo (n, 2) - a single shared gain keeps L/R balance
+        intact either way."""
+        if audio.size == 0:
+            return audio
+        peak = float(np.max(np.abs(audio)))
+        dt = audio.shape[0] / self.audio_rate
+        tau = _AGC_ATTACK_TAU_S if peak > self._agc_envelope else _AGC_RELEASE_TAU_S
+        coef = 1.0 - np.exp(-dt / tau)
+        self._agc_envelope += (peak - self._agc_envelope) * coef
+        self._agc_envelope = max(self._agc_envelope, _AGC_MIN_ENVELOPE)
+        gain = min(_AGC_TARGET_PEAK / self._agc_envelope, _AGC_MAX_GAIN)
+        return audio * gain
 
 
 class NoiseReducer:

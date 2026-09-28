@@ -107,6 +107,23 @@ same audio played back from a recording, all fixed here:
    already-resampled audio right before it reaches the ring buffer, nothing
    upstream of this (including what the recorder writes) is touched by it.
 
+5. Even with 1-4 above, real-hardware testing still found the ring buffer's
+   *consumer* side (PortAudio's own callback thread, running _next_frames())
+   at plain SCHED_OTHER priority, the same class of bug AGENTS.md gotcha 11
+   found and fixed for the SDR acquisition thread: this callback is Python
+   code, so it needs the GIL like any other thread in the process, and a
+   SCHED_FIFO thread nearby (the acquisition thread) can keep winning the
+   race for it with no fairness guarantee - except here a single missed
+   callback is an *instant* audible glitch (PortAudio needs the next block
+   *now*, unlike a retune which just waits a bit longer), not merely a
+   slower sweep. Fix: _boost_priority_once() requests the same SCHED_FIFO
+   priority class for this thread too, the first time the callback actually
+   runs on it (can't be done at __init__ time like the acquisition thread -
+   PortAudio, not this class, creates and owns this thread, so the first
+   callback invocation is the earliest point code can run on it at all).
+   Best-effort, same as the acquisition thread's own version - a missing
+   CAP_SYS_NICE/rtprio limit just leaves it at normal priority.
+
 The output stream is always opened with 2 channels: mono audio (AM/NFM/WFM
 without stereo) is simply duplicated to L=R, and true stereo audio (WFM with
 "Stereo" enabled, see dsp.py) is passed straight through - so the stream
@@ -291,6 +308,10 @@ class AudioOutput:
         self._priming = True
         self._prime_len = 0
         self._empty_streak = 0
+        # See _boost_priority_once() - attempted lazily, once, from inside
+        # the callback itself, since PortAudio (not this class) owns and
+        # starts that thread.
+        self._priority_boosted = False
         # Pre-allocated fixed-size buffer, not a growing list - see the
         # _DEBUG constant's docstring for why that matters here specifically.
         self._capture: np.ndarray | None = None
@@ -382,9 +403,42 @@ class AudioOutput:
         fills the given buffer in place instead of returning bytes."""
         outdata[:] = self._next_frames(frames)
 
+    def _boost_priority_once(self) -> None:
+        """Best-effort real-time (SCHED_FIFO) priority request for whichever
+        thread PortAudio is actually calling this callback on - the same
+        fix, and the same reasoning, as AcquisitionThread._boost_priority()
+        in sdr_backend.py (see gotcha 11): this callback is Python code, so
+        it needs the GIL to run at all, same as every other thread in this
+        process - if it's left at plain SCHED_OTHER while the SDR
+        acquisition thread runs SCHED_FIFO nearby, the OS scheduler can
+        (and, per gotcha 11's own measurements on this exact machine, does)
+        keep preferring a runnable SCHED_FIFO thread over a normal-priority
+        one with no fairness guarantee, so this callback can sit waiting for
+        its turn at the GIL even though *audibly* it has an even harder
+        real-time deadline than a retune does: a single missed callback is
+        an instant, audible glitch, not just a slower sweep. Boosting this
+        thread to the same priority class removes that specific class of
+        starvation. Only attempted once (PortAudio always calls back on the
+        same OS thread for the life of one stream) - can't be done in
+        __init__ like AcquisitionThread does, since PortAudio (not this
+        class) creates and owns that thread; the first callback invocation
+        is the earliest point this code ever runs on it. Best-effort: a
+        missing CAP_SYS_NICE/rtprio limit silently leaves it at normal
+        priority, exactly like AcquisitionThread's own fallback."""
+        self._priority_boosted = True
+        if not hasattr(os, "sched_setscheduler"):
+            return
+        try:
+            tid = threading.get_native_id()
+            os.sched_setscheduler(tid, os.SCHED_FIFO, os.sched_param(10))
+        except (PermissionError, OSError):
+            pass
+
     def _next_frames(self, frame_count: int) -> np.ndarray:
         """The body shared by both PortAudio wrappers' callbacks - see
         _pa_callback's docstring."""
+        if not self._priority_boosted:
+            self._boost_priority_once()
         with self._buffer_lock:
             avail = self._buffer.shape[0]
             if avail == 0:
