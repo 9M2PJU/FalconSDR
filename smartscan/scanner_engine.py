@@ -946,7 +946,7 @@ class ScannerEngine(threading.Thread):
             if name:
                 name_map[freq] = name
 
-        def _extend_edges(windows: list[ScanWindow], step_hz: float) -> None:
+        def _extend_edges(windows: list[ScanWindow], step_hz: float, band_freqs: set[int] | None = None) -> None:
             """Widens a lane's own lowest- and highest-frequency window with
             a few opportunistic probe frequencies just past its true edge -
             "wyjdz na poprzednie/nastepne [okno]" - so a signal sitting right
@@ -958,13 +958,50 @@ class ScannerEngine(threading.Thread):
             (center_hz, and therefore _window_last_visit bookkeeping, is
             untouched - this only ever widens what a window watches).
             New probe frequencies inherit the modulation/weight of whichever
-            real channel currently sits at that edge."""
+            real channel currently sits at that edge.
+
+            ``band_freqs``, when given, restricts this to an edge that's
+            genuinely part of a swept band's own grid - never a standalone
+            Memory List point channel. Real user-reported bug: a *single*
+            plain Memory List channel (no band at all) still forms its own
+            one-channel window, whose "edge" is that exact frequency on both
+            sides - extend_boundary_window() then had no way to tell that
+            apart from a real band's edge, and happily proposed up to
+            ``_MAX_EXTEND_FRACTION`` (15%) of the *entire capture bandwidth*
+            worth of extra probe frequencies spaced at the channel's own
+            listen bandwidth (e.g. 28 fake candidates on *each* side at the
+            default 12.5 kHz memory-channel bandwidth) around a channel the
+            user picked *specifically and only* to watch that one exact
+            frequency - confirmed exactly reproducing both parts of the
+            report: a single 88.000 MHz channel also "detecting" 87.800 MHz
+            (16 x 12.5 kHz away, i.e. one of these fabricated probes, not
+            real adjacent-channel spectral leakage - AGENTS.md's channel-
+            spacing gotcha is a real, separate phenomenon but doesn't reach
+            200 kHz away), and a single 121.500 MHz channel with the trigger
+            deliberately dropped into the noise floor "detecting" 20
+            simultaneous transmissions at once - a band swept that low is
+            expected to trip many real grid channels (the user's own
+            expectation, stated explicitly), but a lone point channel has no
+            "grid" to sweep at all, so every single one of those 20 was a
+            fabricated probe frequency, not a real neighbouring channel the
+            user ever asked to watch. A standalone point channel has no
+            "edge of a range" concept in the first place - it *is* the whole
+            range, a single point - so there is nothing legitimate for this
+            to extend past for one, unlike a real band/VfoRangeConfig sweep
+            where "just past the configured start/stop" is a meaningful,
+            requested concept. Only the two call sites building windows
+            entirely out of one real band's own grid (weighted-band lanes,
+            and the tagged-band portion of the default-lane pool) ever pass
+            this; the default lane's ``plain_channels`` contribution never
+            does."""
             if not windows:
                 return
             lowest = min(windows, key=lambda w: min(w.freqs))
             highest = max(windows, key=lambda w: max(w.freqs))
             for window, direction in ((lowest, "below"), (highest, "above")):
                 edge_freq = min(window.freqs) if direction == "below" else max(window.freqs)
+                if band_freqs is not None and edge_freq not in band_freqs:
+                    continue
                 mod = mod_map.get(edge_freq, Modulation.AM)
                 weight = weight_map.get(edge_freq, 0.0)
                 added = False
@@ -1042,6 +1079,11 @@ class ScannerEngine(threading.Thread):
         # band=None; safe default (global settings), rather than guessing
         # which of the two "advanced" overrides should apply.
         freq_to_band: dict[int, VfoRangeConfig] = {}
+        # Frequencies that genuinely belong to a swept band's own grid - see
+        # _extend_edges()'s own docstring for why this matters: only these
+        # (never a standalone Memory List point channel) are legitimate
+        # candidates for the edge-extension it does.
+        band_freqs: set[int] = set()
         for c in plain_channels:
             if c.freq_hz not in bw_map:
                 _claim(c.freq_hz, mem_bw, c.modulation, c.name, c.weight)
@@ -1061,10 +1103,11 @@ class ScannerEngine(threading.Thread):
                     _claim(f, float(max(1, vr.step_hz)), band_mod, weight=vr.weight)
                 default_freqs.append(f)
                 freq_to_band[f] = vr
+                band_freqs.add(f)
 
         default_grouping_bw = max((bw_map[f] for f in default_freqs), default=25_000.0)
         default_windows = plan_windows(default_freqs, sample_rate, default_grouping_bw)
-        _extend_edges(default_windows, default_grouping_bw)
+        _extend_edges(default_windows, default_grouping_bw, band_freqs)
         for w in default_windows:
             # VfoRangeConfig is a plain (mutable, unhashable) dataclass, so
             # identity-compare (`is`) rather than building a set of them.

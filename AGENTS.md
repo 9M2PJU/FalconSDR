@@ -1311,6 +1311,50 @@ for exactly this reason. Add a new language by dropping one `.po` file — see
     finding for why a headless test alone can look perfectly healthy while
     a real GUI session isn't.
 
+31. **`_extend_edges()` (see gotcha 30's neighbour and `channelizer.extend_boundary_window()`)
+    must never extend past a standalone Memory List point channel's own
+    "edge" - only a real swept band's.** Real, clearly-reproduced user
+    report: a *single* plain Memory List channel with no band at all (e.g.
+    just 88.000 MHz) still forms its own one-channel window, whose lowest
+    and highest frequency are both that same exact Hz value -
+    `extend_boundary_window()` had no way to tell that apart from a real
+    band's edge, and proposed up to `_MAX_EXTEND_FRACTION` (15%) of the
+    *entire capture bandwidth* worth of fabricated probe frequencies spaced
+    at the channel's own listen bandwidth on *each* side (28 fake
+    candidates per side at the default 12.5 kHz memory-channel bandwidth) -
+    confirmed exactly reproducing both halves of the report: a lone
+    88.000 MHz channel also "detecting" 87.800 MHz (16 x 12.5 kHz away -
+    one of these fabricated probes, not real spectral leakage, which
+    doesn't reach 200 kHz), and a lone 121.500 MHz channel with the trigger
+    deliberately dropped into the noise floor "detecting" 20 simultaneous
+    transmissions at once, none of which the user had ever asked to watch.
+    The user's own framing nailed the distinction precisely: many
+    detections tripping at a very low threshold is expected *for a swept
+    band* (a real grid of many real channels), but a single point channel
+    has no "grid"/"edge of a range" concept at all - it *is* the whole
+    range, one point - so there was nothing legitimate to extend past.
+    Fixed by threading a `band_freqs: set[int]` (every frequency that
+    genuinely traces back to a real `VfoRangeConfig`'s own grid, built
+    alongside the existing `freq_to_band` map in `_rebuild_windows()`'s
+    default-lane block) through to `_extend_edges()`, which now skips an
+    edge entirely unless it's a member of that set. The two call sites that
+    build windows entirely out of one real band's own grid (a weighted
+    band's own lane; the tagged-band portion of the default-lane pool) are
+    unaffected - they still don't pass `band_freqs` (defaults to `None`,
+    meaning "extend unconditionally", correct for them since every
+    frequency there already *is* a real band member) - only the mixed
+    default-lane pool (which can contain standalone point channels) needed
+    the restriction. Verified directly (no hardware needed - this is pure,
+    deterministic window-planning logic): a lone 88.000/121.500 MHz channel
+    with no bands configured now scans *exactly* that one frequency and
+    nothing else; a real band (118.000-118.100 MHz, 25 kHz step) still gets
+    its edges extended exactly as before (28 extra probes, unchanged). If
+    you touch `_extend_edges()`/`_rebuild_windows()` again: a frequency only
+    ever deserves edge-extension if it came from an actual swept
+    `VfoRangeConfig`, never from a plain `Channel` in the Memory List -
+    check `band_freqs` (or thread the equivalent through) at every future
+    call site, don't assume "it's in the default lane" is enough.
+
 ## Testing without touching the user's real config/recordings
 
 There's no test suite yet. To smoke-test end to end, run the app with
