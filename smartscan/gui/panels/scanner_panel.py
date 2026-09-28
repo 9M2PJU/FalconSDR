@@ -14,7 +14,7 @@ from PySide6.QtWidgets import (
 
 from ...config import AppConfig, VfoRangeConfig
 from ...i18n import tr
-from ...military_presets import BAND_PRESETS
+from ...military_presets import get_all_presets
 from ...models import Channel
 from ...sdr_backend import DEFAULT_GAIN_RANGE_DB, enumerate_devices
 from ..widgets import BAND_OVERRIDE_ACCENT, LevelMeter, SliderSpin, SpectrumView, apply_emoji_font
@@ -752,11 +752,7 @@ class ScannerPanel(QGroupBox):
 
         preset_row = QHBoxLayout()
         self.preset_combo = QComboBox()
-        for preset in BAND_PRESETS:
-            self.preset_combo.addItem(tr(preset.label), preset.id)
-            self.preset_combo.setItemData(
-                self.preset_combo.count() - 1, tr(preset.tooltip), Qt.ItemDataRole.ToolTipRole
-            )
+        self.reload_preset_combo()
         add_preset_btn = QPushButton(tr("Add preset"))
         add_preset_btn.clicked.connect(self._on_add_preset)
         preset_row.addWidget(self.preset_combo, 1)
@@ -978,9 +974,28 @@ class ScannerPanel(QGroupBox):
         self._stop_editing_band()
         self.settings_changed.emit()
 
+    def reload_preset_combo(self) -> None:
+        """(Re)populates the preset dropdown from get_all_presets() - called
+        at construction and again whenever the Options preset editor saves a
+        change (see MainWindow), so an added/edited/deleted user preset
+        shows up here immediately, no restart needed."""
+        current_id = self.preset_combo.currentData() if self.preset_combo.count() else None
+        self.preset_combo.blockSignals(True)
+        self.preset_combo.clear()
+        for preset in get_all_presets():
+            self.preset_combo.addItem(tr(preset.label), preset.id)
+            self.preset_combo.setItemData(
+                self.preset_combo.count() - 1, tr(preset.tooltip), Qt.ItemDataRole.ToolTipRole
+            )
+        if current_id is not None:
+            idx = self.preset_combo.findData(current_id)  # plain str id - findData() is fine here (gotcha 2 is about tuple/object payloads)
+            if idx >= 0:
+                self.preset_combo.setCurrentIndex(idx)
+        self.preset_combo.blockSignals(False)
+
     def _on_add_preset(self) -> None:
         preset_id = self.preset_combo.currentData()
-        preset = next((p for p in BAND_PRESETS if p.id == preset_id), None)
+        preset = next((p for p in get_all_presets() if p.id == preset_id), None)
         if preset is None:
             return
         band = preset.to_band()

@@ -17,27 +17,19 @@ active via the Memory List tab.
 """
 from __future__ import annotations
 
-from dataclasses import dataclass
+import json
+import logging
+from dataclasses import asdict, dataclass
+from pathlib import Path
 
-from .config import VfoRangeConfig
+from .config import CONFIG_DIR, VfoRangeConfig
 from .models import Channel, Modulation
+
+logger = logging.getLogger(__name__)
 
 
 def _ch(freq_mhz: float, name: str, modulation: Modulation = Modulation.AM) -> Channel:
     return Channel(freq_hz=int(round(freq_mhz * 1e6)), name=name, modulation=modulation, enabled=True)
-
-
-# Wide sweeps (VFO range mode) --------------------------------------------
-# Poland's civil airband (unchanged default) plus the two military bands.
-# 8.33 kHz channel spacing is the European standard for civil aviation VHF
-# voice since the 2018 mandate (down from the old 25 kHz raster), so that's
-# the step this preset scans at.
-CIVIL_BAND = VfoRangeConfig(start_hz=118_000_000, stop_hz=136_975_000, step_hz=8_333)
-MILITARY_VHF_BAND = VfoRangeConfig(start_hz=137_000_000, stop_hz=143_975_000, step_hz=25_000)
-MILITARY_UHF_BAND = VfoRangeConfig(start_hz=225_000_000, stop_hz=399_975_000, step_hz=25_000)
-
-MILITARY_BANDS: list[VfoRangeConfig] = [MILITARY_VHF_BAND, MILITARY_UHF_BAND]
-AVIATION_MILITARY_BANDS: list[VfoRangeConfig] = [MILITARY_VHF_BAND, MILITARY_UHF_BAND]  # extras; CIVIL_BAND is primary
 
 
 @dataclass(frozen=True)
@@ -45,10 +37,12 @@ class BandPreset:
     """One entry in the "Add preset" picker for the band-list editor.
     ``label``/``tooltip`` here are the plain English source text - wrapped in
     ``tr()`` at the point of display (ScannerPanel._build_vfo_form), not
-    here: this list is built once, at module-import time, which happens
-    before ``i18n.set_language()`` ever runs (see main.py) - a tr() call
-    made here would always resolve to English regardless of the configured
-    language."""
+    here: presets are loaded once, at module-import time (or whenever
+    reload_presets()/save_user_presets() runs), which can happen before
+    ``i18n.set_language()`` ever runs (see main.py) - a tr() call made here
+    would always resolve to English regardless of the configured language.
+    Deliberately plain, JSON-serializable field types only (str/int) - see
+    to_dict()/from_dict()."""
     id: str
     label: str
     tooltip: str
@@ -63,77 +57,69 @@ class BandPreset:
             label=self.label, enabled=True, modulation=self.modulation,
         )
 
+    def to_dict(self) -> dict:
+        return asdict(self)
 
-# Preset catalogue offered in the Scanner tab's band-list editor. Picked for a
-# roof-mounted wideband (discone-type) antenna + RTL-SDR v4: everything here
-# sits in the VHF/UHF range the R828D tuner and that kind of antenna both
-# handle well (~24 MHz and up), and each band has a realistic chance of
-# catching real traffic rather than dead air.
-BAND_PRESETS: list[BandPreset] = [
-    BandPreset(
-        id="civil_air", label="Civil aviation (118-137 MHz)",
-        tooltip="Standard civil aviation band: towers, approach, area control.",
-        start_hz=CIVIL_BAND.start_hz, stop_hz=CIVIL_BAND.stop_hz, step_hz=CIVIL_BAND.step_hz,
-    ),
-    BandPreset(
-        id="mil_vhf", label="Military VHF (137-144 MHz)",
-        tooltip="Military VHF band adjacent to civil aviation.",
-        start_hz=MILITARY_VHF_BAND.start_hz, stop_hz=MILITARY_VHF_BAND.stop_hz,
-        step_hz=MILITARY_VHF_BAND.step_hz,
-    ),
-    BandPreset(
-        id="mil_uhf", label="Military UHF NATO (225-400 MHz)",
-        tooltip=(
-            "Harmonized NATO UHF band: air-to-air refueling,\n"
-            "QRA/Baltic Air Policing, exercises."
-        ),
-        start_hz=MILITARY_UHF_BAND.start_hz, stop_hz=MILITARY_UHF_BAND.stop_hz,
-        step_hz=MILITARY_UHF_BAND.step_hz,
-    ),
-    BandPreset(
-        id="pmr446", label="PMR446 (446.00625-446.19375 MHz)",
-        tooltip=(
-            "License-free PMR446 walkie-talkies (16 analog channels, NFM).\n"
-            "Very good chance of catching something nearby - popular on\n"
-            "trips, construction sites, at hotels/campsites."
-        ),
-        start_hz=446_006_250, stop_hz=446_193_750, step_hz=12_500, modulation="NFM",
-    ),
-    BandPreset(
-        id="ham_2m", label="Ham 2m (144-146 MHz)",
-        tooltip="2m amateur radio band (VHF, NFM): repeaters and simplex.",
-        start_hz=144_000_000, stop_hz=146_000_000, step_hz=12_500, modulation="NFM",
-    ),
-    BandPreset(
-        id="ham_70cm", label="Ham 70cm (430-440 MHz)",
-        tooltip="70cm amateur radio band (UHF, NFM): repeaters and simplex.",
-        start_hz=430_000_000, stop_hz=440_000_000, step_hz=12_500, modulation="NFM",
-    ),
-    BandPreset(
-        id="marine_vhf", label="Marine VHF (156-162 MHz)",
-        tooltip=(
-            "Marine VHF band (channels 1-88, including channel 16 - calling/\n"
-            "distress, NFM). Useful near a coast, harbor, or a lake with shipping traffic."
-        ),
-        start_hz=156_000_000, stop_hz=162_025_000, step_hz=25_000, modulation="NFM",
-    ),
-    BandPreset(
-        id="fm_broadcast", label="FM broadcast radio (87.5-108 MHz)",
-        tooltip=(
-            "FM broadcast band (WFM). Not ATC, but strong, always-on stations\n"
-            "make it easy to quickly check the antenna/receiver works correctly."
-        ),
-        start_hz=87_500_000, stop_hz=108_000_000, step_hz=100_000, modulation="WFM",
-    ),
-    # Deliberately no country-specific band presets here (e.g. Poland's
-    # PSP/OSP fire-brigade 148.6625-149.3375 MHz or PRM 168.5-169.2 MHz,
-    # both removed - see git history) - this list is meant to be useful
-    # everywhere by default. Poland-specific *discrete channels* still exist
-    # (MILITARY_CHANNELS/FIRE_CHANNELS below) - those are opt-in via
-    # explicit "Load Polish ..." buttons in the Channels tab, not auto-
-    # loaded and not in this wide-sweep picker, so they don't need the same
-    # bar for international relevance.
-]
+    @staticmethod
+    def from_dict(d: dict) -> "BandPreset":
+        return BandPreset(
+            id=str(d["id"]), label=str(d["label"]), tooltip=str(d.get("tooltip", "")),
+            start_hz=int(d["start_hz"]), stop_hz=int(d["stop_hz"]), step_hz=int(d["step_hz"]),
+            modulation=str(d.get("modulation", "AM")),
+        )
+
+
+# Built-in preset catalogue, shipped with the app as a plain, human-editable
+# JSON file (not hardcoded here) - punkt 9/finalization request: presets
+# should be easy for a user to inspect, tweak, back up and share, not
+# something only a code change can touch. Picked to be useful in most
+# countries by default (see AGENTS.md's own notes on this) - no country-
+# specific bands here; those live as opt-in *discrete channels*
+# (MILITARY_CHANNELS/FIRE_CHANNELS below) instead, loaded only on request.
+_BUILTIN_PRESETS_PATH = Path(__file__).resolve().parent / "presets" / "band_presets.json"
+# User's own additions/edits - never touched by an app update (that only
+# ever replaces _BUILTIN_PRESETS_PATH, which ships inside the package), and
+# never lost by one either. Absent entirely on a fresh install - see
+# load_user_presets()'s own empty-list fallback.
+USER_PRESETS_PATH = CONFIG_DIR / "band_presets.json"
+
+
+def _load_json_presets(path: Path) -> list[BandPreset]:
+    if not path.exists():
+        return []
+    try:
+        raw = json.loads(path.read_text(encoding="utf-8"))
+        return [BandPreset.from_dict(d) for d in raw]
+    except (OSError, json.JSONDecodeError, KeyError, TypeError, ValueError) as exc:
+        logger.warning("Couldn't read presets from %s: %s", path, exc)
+        return []
+
+
+def load_builtin_presets() -> list[BandPreset]:
+    return _load_json_presets(_BUILTIN_PRESETS_PATH)
+
+
+def load_user_presets() -> list[BandPreset]:
+    return _load_json_presets(USER_PRESETS_PATH)
+
+
+def save_user_presets(presets: list[BandPreset]) -> None:
+    CONFIG_DIR.mkdir(parents=True, exist_ok=True)
+    USER_PRESETS_PATH.write_text(
+        json.dumps([p.to_dict() for p in presets], indent=2, ensure_ascii=False), encoding="utf-8",
+    )
+
+
+def get_all_presets() -> list[BandPreset]:
+    """Built-ins first, then the user's own - called fresh at every point of
+    use (ScannerPanel's preset dropdown, the Options editor) rather than
+    cached in a module-level constant, so an edit made in the Options editor
+    shows up immediately without needing a restart - the exact same
+    "function, not a frozen constant" fix AGENTS.md already documents for
+    the i18n footgun, applied here for a different reason (live edits,
+    not translation) but the same underlying shape."""
+    return load_builtin_presets() + load_user_presets()
+
 
 # Curated discrete channels (Memory List mode) ------------------------------
 # Highest hit-rate picks: guard/emergency, NATO/USAF air-to-air refueling

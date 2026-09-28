@@ -1132,3 +1132,69 @@ msgstr "Rozumiem, kontynuuj"
 msgid "Cancel"
 msgstr "Anuluj"
 
+
+# --- preset manager panel (Options -> Band presets) ---
+
+msgid "Label:"
+msgstr "Etykieta:"
+
+msgid "Description (tooltip):"
+msgstr "Opis (dymek):"
+
+msgid "Start:"
+msgstr "Początek:"
+
+msgid "Stop:"
+msgstr "Koniec:"
+
+msgid "Step:"
+msgstr "Krok:"
+
+msgid "Band presets"
+msgstr "Presety pasm"
+
+msgid "Built-in presets come back on every update, so they can't be edited or deleted here - add your own instead. Presets you add are plain JSON, easy to back up or share - see Export/Import below."
+msgstr "Wbudowane presety wracają przy każdej aktualizacji, więc nie da się ich tu edytować ani usuwać - dodaj własny zamiast tego. Dodane przez Ciebie presety to zwykły JSON, łatwy do zbackupowania albo udostępnienia - zobacz Eksportuj/Importuj poniżej."
+
+msgid "Add…"
+msgstr "Dodaj…"
+
+msgid "Edit…"
+msgstr "Edytuj…"
+
+msgid "Export…"
+msgstr "Eksportuj…"
+
+msgid "Import…"
+msgstr "Importuj…"
+
+msgid "Delete preset"
+msgstr "Usuń preset"
+
+msgid "Export presets"
+msgstr "Eksportuj presety"
+
+msgid "Import presets"
+msgstr "Importuj presety"
+
+msgid "Edit preset"
+msgstr "Edytuj preset"
+
+msgid "You don't have any custom presets to export yet."
+msgstr "Nie masz jeszcze żadnych własnych presetów do wyeksportowania."
+
+msgid "Delete preset “{label}”? This only removes it from the dropdown - any band you already added from it stays as it is."
+msgstr "Usunąć preset „{label}”? To tylko usuwa go z listy rozwijanej - pasmo, które już z niego dodałeś/aś, zostaje bez zmian."
+
+msgid "Export failed"
+msgstr "Eksport nie powiódł się"
+
+msgid "Import failed"
+msgstr "Import nie powiódł się"
+
+msgid "Imported {count} preset(s)."
+msgstr "Zaimportowano presetów: {count}."
+
+msgid "built-in"
+msgstr "wbudowany"
+

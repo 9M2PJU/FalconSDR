@@ -20,6 +20,7 @@ from .panels.frequency_manager import FrequencyManager
 from .panels.language_panel import LanguagePanel
 from .panels.location_panel import LocationPanel
 from .panels.playback_panel import PlaybackPanel
+from .panels.preset_manager_panel import PresetManagerPanel
 from .panels.recency_boost_panel import RecencyBoostPanel
 from .panels.recording_panel import RecordingPanel
 from .panels.scanner_panel import ScannerPanel
@@ -80,6 +81,8 @@ class MainWindow(QMainWindow):
         options_layout.addWidget(self.transcription_panel)
         self.location_panel = LocationPanel(self.config.location)
         options_layout.addWidget(self.location_panel)
+        self.preset_manager_panel = PresetManagerPanel()
+        options_layout.addWidget(self.preset_manager_panel)
         self.language_panel = LanguagePanel(self.config)
         options_layout.addWidget(self.language_panel)
         options_layout.addStretch(1)
@@ -115,6 +118,7 @@ class MainWindow(QMainWindow):
         self.transcription_panel.restart_requested.connect(self._offer_restart_for_transcription)
         self.transcription_panel.installed_changed.connect(self.playback_panel.refresh_transcription_availability)
         self.playback_panel.transcription_enabled_changed.connect(self.transcription_panel.set_enabled)
+        self.preset_manager_panel.presets_changed.connect(self.scanner_panel.reload_preset_combo)
         self.location_panel.settings_changed.connect(self._save_config)
         self.language_panel.settings_changed.connect(self._save_config)
         self.language_panel.restart_requested.connect(self._offer_restart)

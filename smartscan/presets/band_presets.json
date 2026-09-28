@@ -1,0 +1,74 @@
+[
+  {
+    "id": "civil_air",
+    "label": "Civil aviation (118-137 MHz)",
+    "tooltip": "Standard civil aviation band: towers, approach, area control.",
+    "start_hz": 118000000,
+    "stop_hz": 136975000,
+    "step_hz": 8333,
+    "modulation": "AM"
+  },
+  {
+    "id": "mil_vhf",
+    "label": "Military VHF (137-144 MHz)",
+    "tooltip": "Military VHF band adjacent to civil aviation.",
+    "start_hz": 137000000,
+    "stop_hz": 143975000,
+    "step_hz": 25000,
+    "modulation": "AM"
+  },
+  {
+    "id": "mil_uhf",
+    "label": "Military UHF NATO (225-400 MHz)",
+    "tooltip": "Harmonized NATO UHF band: air-to-air refueling,\nQRA/Baltic Air Policing, exercises.",
+    "start_hz": 225000000,
+    "stop_hz": 399975000,
+    "step_hz": 25000,
+    "modulation": "AM"
+  },
+  {
+    "id": "pmr446",
+    "label": "PMR446 (446.00625-446.19375 MHz)",
+    "tooltip": "License-free PMR446 walkie-talkies (16 analog channels, NFM).\nVery good chance of catching something nearby - popular on\ntrips, construction sites, at hotels/campsites.",
+    "start_hz": 446006250,
+    "stop_hz": 446193750,
+    "step_hz": 12500,
+    "modulation": "NFM"
+  },
+  {
+    "id": "ham_2m",
+    "label": "Ham 2m (144-146 MHz)",
+    "tooltip": "2m amateur radio band (VHF, NFM): repeaters and simplex.",
+    "start_hz": 144000000,
+    "stop_hz": 146000000,
+    "step_hz": 12500,
+    "modulation": "NFM"
+  },
+  {
+    "id": "ham_70cm",
+    "label": "Ham 70cm (430-440 MHz)",
+    "tooltip": "70cm amateur radio band (UHF, NFM): repeaters and simplex.",
+    "start_hz": 430000000,
+    "stop_hz": 440000000,
+    "step_hz": 12500,
+    "modulation": "NFM"
+  },
+  {
+    "id": "marine_vhf",
+    "label": "Marine VHF (156-162 MHz)",
+    "tooltip": "Marine VHF band (channels 1-88, including channel 16 - calling/\ndistress, NFM). Useful near a coast, harbor, or a lake with shipping traffic.",
+    "start_hz": 156000000,
+    "stop_hz": 162025000,
+    "step_hz": 25000,
+    "modulation": "NFM"
+  },
+  {
+    "id": "fm_broadcast",
+    "label": "FM broadcast radio (87.5-108 MHz)",
+    "tooltip": "FM broadcast band (WFM). Not ATC, but strong, always-on stations\nmake it easy to quickly check the antenna/receiver works correctly.",
+    "start_hz": 87500000,
+    "stop_hz": 108000000,
+    "step_hz": 100000,
+    "modulation": "WFM"
+  }
+]

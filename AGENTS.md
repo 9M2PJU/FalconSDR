@@ -805,6 +805,59 @@ for exactly this reason. Add a new language by dropping one `.po` file — see
     recording-starting mechanism later: route it through
     `MainWindow._confirm_recording_disclaimer()` like the other three, not
     a new standalone check.
+21. **Band presets (`smartscan/military_presets.py`) are no longer a
+    hardcoded Python list - they're a bundled, human-editable JSON file
+    plus a user-editable one, merged live at every point of use.** By
+    explicit request, after the international-relevance pass that removed
+    the two Poland-only entries (`fire_vhf`/`prm` - see git history):
+    `load_builtin_presets()` reads `smartscan/presets/band_presets.json`
+    (ships with the app - the 8 internationally-relevant presets), and
+    `load_user_presets()`/`save_user_presets()` read/write
+    `CONFIG_DIR / "band_presets.json"` (absent on a fresh install, never
+    touched by an app update since it lives in the config dir, not the
+    package). `get_all_presets()` = builtins + user's own, called fresh
+    every time (`ScannerPanel`'s dropdown, `PresetManagerPanel`'s list) -
+    **deliberately not cached in a module-level constant** the way the old
+    `BAND_PRESETS` list was, for the same reason the i18n footgun elsewhere
+    in this file forces a function instead of a frozen constant (different
+    root cause here - live edits, not translation timing - but the exact
+    same shape of bug: a cached list can't reflect a change made after it
+    was built). `BandPreset` gained `to_dict()`/`from_dict()` (plain
+    `dataclasses.asdict()`/reconstruction - every field is already a JSON-
+    safe `str`/`int`) so a preset round-trips through a file with zero
+    custom serialization code, the same principle this project already
+    uses for `AppConfig` itself.
+    `PresetManagerPanel` (Options tab) is a real add/edit/delete/export/
+    import UI, not just a viewer - **built-in presets are shown but never
+    editable/deletable there** (they come back on the next app update
+    regardless, so "editing" one in place would be silently undone later -
+    add a new user preset instead, even one that starts from the same
+    numbers). Deleting a user preset only removes it from the dropdown -
+    it deliberately does **not** touch any band a user already added to
+    their own `config.json` from it (`VfoRangeConfig` copies the preset's
+    fields once, at "Add preset" time, via `BandPreset.to_band()` - there's
+    no ongoing link back to the preset it came from). Import never
+    silently overwrites an existing preset (built-in or user's own) on an
+    id collision - the imported one gets a fresh, distinct id instead (see
+    `_unique_id()`), so sharing/receiving a preset pack can't clobber
+    something the receiving user already had. `presets_changed` (emitted
+    only on an actual on-disk change - add/edit/delete/import, not just
+    opening the panel) is what lets `ScannerPanel.reload_preset_combo()`
+    (a public method now, called both at construction and from
+    `MainWindow` in response to this signal) refresh the Listen tab's
+    dropdown immediately - verified end-to-end: adding a preset from
+    Options is visible in the Listen tab's dropdown without a restart, in
+    the same test run.
+    The migration also fixed a real, separate i18n bug found while
+    reviewing presets for international relevance: `AppConfig`'s default
+    fresh-install band had its `label` hardcoded as `"Lotnictwo cywilne"`
+    (Polish) directly in the `bands` field's `default_factory` - every
+    fresh install, in every language, saw Polish text in its very first
+    band. Fixed to plain English (`"Civil aviation (118-137 MHz)"`), not
+    wrapped in `tr()`: a band's `label` is free, user-editable text shown
+    as-is everywhere (`QLineEdit(entry.label)`), exactly like every other
+    band's label already works - only the *default seed value itself* was
+    wrong, not the display mechanism.
 
 ## Testing without touching the user's real config/recordings
 
