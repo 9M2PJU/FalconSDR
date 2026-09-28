@@ -482,9 +482,11 @@ for exactly this reason. Add a new language by dropping one `.po` file — see
     dedicated `raw_iq/` subfolder of the recordings output dir instead,
     kept out of the audio library/organizer entirely on purpose. Manual,
     momentary control only (a "Record raw IQ"/"■ Stop recording IQ" button
-    in Options -> Recording, mirroring gotcha 13's audio Record button
-    pattern) - deliberately *not* an auto-record toggle, since uncompressed
-    IQ is large (~sample_rate x 8 bytes/second - ~19 MB/s at this project's
+    in the Listen tab, same `record_row` as the manual audio Record button -
+    moved there from Options by explicit request, see git history -
+    mirroring gotcha 13's pattern) - deliberately *not* an auto-record
+    toggle, since uncompressed IQ is large (~sample_rate x 8 bytes/second -
+    ~19 MB/s at this project's
     default 2.4 MSPS capture bandwidth), which the button's own tooltip
     says explicitly. `ScannerEngine._teardown()` force-stops it (alongside
     the manual audio recorder) so a Stop click always finalizes the SigMF
@@ -858,6 +860,62 @@ for exactly this reason. Add a new language by dropping one `.po` file — see
     as-is everywhere (`QLineEdit(entry.label)`), exactly like every other
     band's label already works - only the *default seed value itself* was
     wrong, not the display mechanism.
+    **Follow-up, same session, by explicit request ("skoro ktoś zmieni
+    sobie nazwę presetu to ją sobie ustawi na własne potrzeby - od wtedy
+    jego preset będzie traktowany tak jak preset własny"):** a built-in
+    preset can now be edited or deleted too, from the very same
+    `PresetManagerPanel` - **`_BUILTIN_PRESETS_PATH` (the file that ships in
+    the package) is never written to** by either operation; both are
+    represented purely in the user's own file instead, and
+    `get_all_presets()` is the one place that reconciles them:
+    - **Edit**: the edited version is saved into the user-presets list
+      *under the same id* the built-in had - a built-in whose id also
+      appears in the user list is excluded from `get_all_presets()`'s
+      built-in half, so the user version "shadows" it. From that point on
+      it's indistinguishable from (and managed exactly like) a preset
+      created from scratch, matching the request literally.
+    - **Delete**: `hide_builtin_preset()` adds the id to a
+      `hidden_builtin_ids` set (now part of the same user JSON file -
+      `{"presets": [...], "hidden_builtin_ids": [...]}`, with
+      `_load_user_data_raw()` staying backward-compatible with this
+      feature's own first-cut format, a bare list with no hidden-ids
+      concept) instead of touching the user-presets list at all - nothing
+      to "shadow", it's just gone from `get_all_presets()`.
+    `is_user_owned_preset(id)` (checks only the user-presets list, not
+    hidden ids) is what `PresetManagerPanel` uses to label an item
+    "(built-in)" in the list - purely informational now, not a permission
+    check: **every preset's Edit/Delete buttons are enabled regardless**.
+    Deleting a still-pure built-in and deleting an already-shadowed
+    (edited) one take different code paths for exactly this reason (a
+    shadowed one has a real user-list entry to remove; a pure built-in
+    doesn't - it only gets hidden). If you touch this again: never make
+    `get_all_presets()` write anything - it's a pure read/merge function,
+    every mutation happens in `hide_builtin_preset()`/`save_user_presets()`/
+    `save_user_data()` instead, called only from the panel's own
+    button handlers.
+22. **Options -> "Reset to defaults" (`MainWindow._on_reset_to_defaults()`)
+    resets in-memory state *before* restarting, never after.** `_shutdown()`
+    (which `_restart_app()` always calls first) unconditionally persists
+    whatever's currently in `self.config`/`self.channels`/`self.blacklist`
+    to disk - if this reset were done in the opposite order (restart, then
+    reset), `_shutdown()`'s own save calls would silently overwrite the
+    fresh defaults right back with the still-old values on the way out.
+    So: `self.config = AppConfig()`, `self.channels = []`,
+    `self.blacklist = []`, delete `military_presets.USER_PRESETS_PATH` if
+    it exists (clears both custom presets and hidden-builtin-ids together,
+    gotcha 21), *then* `self._restart_app()` - which both persists the
+    now-already-reset in-memory state for real and reloads the whole app
+    from those fresh files, the same restart mechanism gotcha 18/language-
+    change already use for "a bunch of state changed, cleanest way to make
+    every widget reflect it is to just reload". Deliberately does **not**
+    touch anything under the recordings output directory (quality/
+    transcription caches, favorites, the recordings themselves) - "reset to
+    defaults" means settings/Memory-List/blacklist/presets, never a
+    user's actual recorded library, and the confirmation dialog says so
+    explicitly. A real confirmation gate (Yes/No, defaulting to No) sits in
+    front of this - it's genuinely irreversible (no undo, no backup made
+    first) and was verified to leave state completely untouched on a "No"
+    answer, not just "asks and proceeds anyway".
 
 ## Testing without touching the user's real config/recordings
 

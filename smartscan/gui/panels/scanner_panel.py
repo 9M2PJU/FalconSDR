@@ -608,7 +608,32 @@ class ScannerPanel(QGroupBox):
         btn_row.addWidget(self.mute_btn, 1)
         root.addLayout(btn_row)
 
-        raw_iq_row = QHBoxLayout()
+        record_row = QHBoxLayout()
+        self.manual_record_btn = QPushButton(tr("● Record"))
+        self.manual_record_btn.setCheckable(True)
+        self.manual_record_btn.setMinimumHeight(36)
+        self.manual_record_btn.setEnabled(False)  # only while the scanner is running - see set_running()
+        self.manual_record_btn.setToolTip(tr(
+            "Continuously records everything audible on the current live\n"
+            "channel - silence included - independent of whether the scanner\n"
+            "currently considers a signal detected. Starts a new file now,\n"
+            "stops it when you click again (or when the scanner itself stops)."
+        ))
+        self.manual_record_btn.toggled.connect(self._on_manual_record_toggled)
+        record_row.addWidget(self.manual_record_btn, 2)
+
+        self.auto_recording_check = QCheckBox(tr("Auto-recording"))
+        self.auto_recording_check.setToolTip(tr(
+            "Automatically records every transmission the scanner detects -\n"
+            "the same setting as in the Options tab. Off by default."
+        ))
+        self.auto_recording_check.toggled.connect(self._on_auto_recording_toggled)
+        record_row.addWidget(self.auto_recording_check, 1)
+
+        # Right of Auto-recording, roughly under MUTE (the rightmost button
+        # in btn_row above) - moved here from its own dedicated row by
+        # explicit request, so it reads as "another live scanning control
+        # next to Record", not a separate section.
         self.raw_iq_btn = QPushButton(tr("Record raw IQ"))
         self.raw_iq_btn.setCheckable(True)
         self.raw_iq_btn.setEnabled(False)  # only while the scanner is running - see set_running()
@@ -622,33 +647,7 @@ class ScannerPanel(QGroupBox):
             "default 2.4 MSPS capture bandwidth)."
         ))
         self.raw_iq_btn.toggled.connect(self.raw_iq_record_toggled.emit)
-        self.raw_iq_label = QLabel("")
-        self.raw_iq_label.setStyleSheet("color: #9aa0a6;")
-        raw_iq_row.addWidget(self.raw_iq_btn)
-        raw_iq_row.addWidget(self.raw_iq_label, 1)
-        root.addLayout(raw_iq_row)
-
-        record_row = QHBoxLayout()
-        self.manual_record_btn = QPushButton(tr("● Record"))
-        self.manual_record_btn.setCheckable(True)
-        self.manual_record_btn.setMinimumHeight(36)
-        self.manual_record_btn.setEnabled(False)  # only while the scanner is running - see set_running()
-        self.manual_record_btn.setToolTip(tr(
-            "Continuously records everything audible on the current live\n"
-            "channel - silence included - independent of whether the scanner\n"
-            "currently considers a signal detected. Starts a new file now,\n"
-            "stops it when you click again (or when the scanner itself stops)."
-        ))
-        self.manual_record_btn.toggled.connect(self._on_manual_record_toggled)
-        record_row.addWidget(self.manual_record_btn, 1)
-
-        self.auto_recording_check = QCheckBox(tr("Auto-recording"))
-        self.auto_recording_check.setToolTip(tr(
-            "Automatically records every transmission the scanner detects -\n"
-            "the same setting as in the Options tab. Off by default."
-        ))
-        self.auto_recording_check.toggled.connect(self._on_auto_recording_toggled)
-        record_row.addWidget(self.auto_recording_check, 1)
+        record_row.addWidget(self.raw_iq_btn, 1)
         root.addLayout(record_row)
         return w
 
@@ -1141,7 +1140,6 @@ class ScannerPanel(QGroupBox):
         self.raw_iq_btn.setChecked(active)
         self.raw_iq_btn.blockSignals(False)
         self.raw_iq_btn.setText(tr("■ Stop recording IQ") if active else tr("Record raw IQ"))
-        self.raw_iq_label.setText(tr("Recording raw IQ...") if active else "")
 
     def set_auto_recording(self, enabled: bool) -> None:
         """Syncs state after the Auto-recording toggle changes in the Options tab."""

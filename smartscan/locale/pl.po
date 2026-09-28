@@ -1153,8 +1153,8 @@ msgstr "Krok:"
 msgid "Band presets"
 msgstr "Presety pasm"
 
-msgid "Built-in presets come back on every update, so they can't be edited or deleted here - add your own instead. Presets you add are plain JSON, easy to back up or share - see Export/Import below."
-msgstr "Wbudowane presety wracają przy każdej aktualizacji, więc nie da się ich tu edytować ani usuwać - dodaj własny zamiast tego. Dodane przez Ciebie presety to zwykły JSON, łatwy do zbackupowania albo udostępnienia - zobacz Eksportuj/Importuj poniżej."
+msgid "Editing or deleting a built-in preset makes it yours from then on - it won't be reset back by an app update. Your own presets are plain JSON, easy to back up or share - see Export/Import below."
+msgstr "Edycja albo usunięcie wbudowanego presetu sprawia, że staje się on Twój od tego momentu - aktualizacja programu już go nie przywróci. Twoje własne presety to zwykły JSON, łatwy do zbackupowania albo udostępnienia - zobacz Eksportuj/Importuj poniżej."
 
 msgid "Add…"
 msgstr "Dodaj…"
@@ -1198,3 +1198,15 @@ msgstr "Zaimportowano presetów: {count}."
 msgid "built-in"
 msgstr "wbudowany"
 
+
+
+# --- Options: Reset to defaults (main_window.py) ---
+
+msgid "Reset to defaults…"
+msgstr "Przywróć domyślne…"
+
+msgid "Resets all settings, the Memory List, blacklist, and any custom/hidden band presets back to a fresh install. Recordings themselves are never touched."
+msgstr "Przywraca wszystkie ustawienia, listę pamięci, czarną listę i wszelkie własne/ukryte presety pasm do stanu świeżej instalacji. Same nagrania nigdy nie są ruszane."
+
+msgid "This resets every setting, the Memory List, the blacklist, and any custom or hidden band presets back to a fresh install. Your recordings themselves are never touched. This cannot be undone."
+msgstr "To przywraca każde ustawienie, listę pamięci, czarną listę i wszelkie własne lub ukryte presety pasm do stanu świeżej instalacji. Twoje nagrania nigdy nie są ruszane. Tej operacji nie da się cofnąć."

@@ -7,12 +7,13 @@ from pathlib import Path
 
 from PySide6.QtGui import QIcon
 from PySide6.QtWidgets import (
-    QMainWindow, QMessageBox, QScrollArea, QTabWidget, QVBoxLayout, QWidget,
+    QMainWindow, QMessageBox, QPushButton, QScrollArea, QTabWidget, QVBoxLayout, QWidget,
 )
 
 from .. import storage
 from ..config import AppConfig
 from ..i18n import tr
+from ..military_presets import USER_PRESETS_PATH
 from ..models import Channel
 from ..scanner_engine import ScannerEngine
 from .legal_disclaimer import confirm_recording_disclaimer, maybe_show_launch_disclaimer
@@ -86,6 +87,14 @@ class MainWindow(QMainWindow):
         self.language_panel = LanguagePanel(self.config)
         options_layout.addWidget(self.language_panel)
         options_layout.addStretch(1)
+        reset_btn = QPushButton(tr("Reset to defaults…"))
+        reset_btn.setToolTip(tr(
+            "Resets all settings, the Memory List, blacklist, and any custom/"
+            "hidden band presets back to a fresh install. Recordings "
+            "themselves are never touched."
+        ))
+        reset_btn.clicked.connect(self._on_reset_to_defaults)
+        options_layout.addWidget(reset_btn)
 
         self.tabs = QTabWidget()
         self.tabs.addTab(self.listen_scroll, tr("Listen"))
@@ -415,6 +424,38 @@ class MainWindow(QMainWindow):
             "restart SmartScanATC now to start using it? Any recording in "
             "progress will be stopped first, same as a normal Stop."
         ))
+
+    def _on_reset_to_defaults(self) -> None:
+        """Options -> "Reset to defaults" - a real factory reset (settings,
+        Memory List, blacklist, custom/hidden band presets), never the
+        recordings themselves - those live in the user's chosen output
+        folder on disk, entirely independent of anything this resets.
+        Resets in-memory state first, *then* restarts (see _restart_app()/
+        _shutdown()) rather than the other way around - _shutdown() itself
+        persists whatever's currently in self.config/self.channels/
+        self.blacklist, so doing that *before* resetting them would silently
+        overwrite the reset with the still-old values right back."""
+        reply = QMessageBox.question(
+            self, tr("Reset to defaults"),
+            tr(
+                "This resets every setting, the Memory List, the blacklist, "
+                "and any custom or hidden band presets back to a fresh "
+                "install. Your recordings themselves are never touched. "
+                "This cannot be undone."
+            ),
+            QMessageBox.StandardButton.Yes | QMessageBox.StandardButton.No,
+            QMessageBox.StandardButton.No,
+        )
+        if reply != QMessageBox.StandardButton.Yes:
+            return
+        self.config = AppConfig()
+        self.channels = []
+        self.blacklist = []
+        try:
+            USER_PRESETS_PATH.unlink()
+        except FileNotFoundError:
+            pass
+        self._restart_app()
 
     def _restart_app(self) -> None:
         """Shuts down cleanly, then re-execs this same process - the same

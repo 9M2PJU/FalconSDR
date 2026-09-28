@@ -1,11 +1,15 @@
 """Options tab: manage the band-preset catalogue (the "Add preset" dropdown
-in the Listen tab's band-list editor) - add/edit/delete your own presets,
-and import/export them as a plain JSON file to back up or share with
-someone else. Built-in presets (shipped with the app, see
-military_presets.load_builtin_presets()) are shown but not editable/
-deletable here - they come back on every app update by design, so editing
-one in place would just be silently undone later; add your own instead
-(possibly starting from the same numbers) if you want something different.
+in the Listen tab's band-list editor) - add, edit or delete ANY preset,
+built-in ones included, and import/export presets as a plain JSON file to
+back up or share with someone else.
+
+Editing or deleting a built-in preset never touches the file it shipped in
+(every app update would just restore that anyway) - see
+military_presets.get_all_presets()'s own docstring for exactly how an
+edited/deleted built-in is represented purely in the user's own file
+instead. The practical effect, by explicit request: the moment you edit or
+delete a built-in, it's yours from then on, indistinguishable from (and
+managed exactly like) a preset you created from scratch.
 """
 from __future__ import annotations
 
@@ -21,7 +25,8 @@ from PySide6.QtWidgets import (
 
 from ...i18n import tr
 from ...military_presets import (
-    BandPreset, get_all_presets, load_builtin_presets, load_user_presets, save_user_presets,
+    BandPreset, get_all_presets, hide_builtin_preset, is_user_owned_preset,
+    load_user_presets, save_user_presets,
 )
 
 _ID_ROLE = Qt.ItemDataRole.UserRole
@@ -124,8 +129,8 @@ class PresetManagerPanel(QGroupBox):
         root.addWidget(self.list_widget)
 
         info = QLabel(tr(
-            "Built-in presets come back on every update, so they can't be "
-            "edited or deleted here - add your own instead. Presets you add "
+            "Editing or deleting a built-in preset makes it yours from then "
+            "on - it won't be reset back by an app update. Your own presets "
             "are plain JSON, easy to back up or share - see Export/Import below."
         ))
         info.setWordWrap(True)
@@ -152,9 +157,8 @@ class PresetManagerPanel(QGroupBox):
     # -- internals ---------------------------------------------------
     def _reload_list(self) -> None:
         self.list_widget.clear()
-        builtin_ids = {p.id for p in load_builtin_presets()}
         for preset in get_all_presets():
-            is_builtin = preset.id in builtin_ids
+            is_builtin = not is_user_owned_preset(preset.id)
             suffix = " (" + tr("built-in") + ")" if is_builtin else ""
             item = QListWidgetItem(preset.label + suffix)
             item.setData(_ID_ROLE, preset.id)
@@ -163,17 +167,20 @@ class PresetManagerPanel(QGroupBox):
         self._update_button_states()
 
     def _update_button_states(self, *_args) -> None:
-        item = self.list_widget.currentItem()
-        is_user_preset = item is not None and not item.data(_IS_BUILTIN_ROLE)
-        self.edit_btn.setEnabled(is_user_preset)
-        self.delete_btn.setEnabled(is_user_preset)
+        # Every preset is editable/deletable now, built-in or not - see the
+        # module docstring. The "(built-in)" suffix in the list is purely
+        # informational (it tells you editing/deleting will "claim" it),
+        # not a restriction.
+        has_selection = self.list_widget.currentItem() is not None
+        self.edit_btn.setEnabled(has_selection)
+        self.delete_btn.setEnabled(has_selection)
 
-    def _current_user_preset(self) -> BandPreset | None:
+    def _current_preset(self) -> BandPreset | None:
         item = self.list_widget.currentItem()
-        if item is None or item.data(_IS_BUILTIN_ROLE):
+        if item is None:
             return None
         preset_id = item.data(_ID_ROLE)
-        return next((p for p in load_user_presets() if p.id == preset_id), None)
+        return next((p for p in get_all_presets() if p.id == preset_id), None)
 
     def _persist(self, user_presets: list[BandPreset]) -> None:
         save_user_presets(user_presets)
@@ -191,7 +198,7 @@ class PresetManagerPanel(QGroupBox):
         self._persist(user_presets)
 
     def _on_edit(self) -> None:
-        preset = self._current_user_preset()
+        preset = self._current_preset()
         if preset is None:
             return
         dlg = _PresetEditDialog(preset, parent=self)
@@ -199,12 +206,18 @@ class PresetManagerPanel(QGroupBox):
             return
         existing_ids = {p.id for p in get_all_presets()} - {preset.id}
         updated = dlg.result_preset(existing_ids)
+        # Editing a still-pure built-in has no existing entry to replace -
+        # it's *added* to the user list under the same id, which is exactly
+        # what shadows the built-in from now on (see get_all_presets()).
         user_presets = load_user_presets()
-        user_presets = [updated if p.id == preset.id else p for p in user_presets]
+        if any(p.id == preset.id for p in user_presets):
+            user_presets = [updated if p.id == preset.id else p for p in user_presets]
+        else:
+            user_presets.append(updated)
         self._persist(user_presets)
 
     def _on_delete(self) -> None:
-        preset = self._current_user_preset()
+        preset = self._current_preset()
         if preset is None:
             return
         reply = QMessageBox.question(
@@ -216,8 +229,17 @@ class PresetManagerPanel(QGroupBox):
         )
         if reply != QMessageBox.StandardButton.Yes:
             return
-        user_presets = [p for p in load_user_presets() if p.id != preset.id]
-        self._persist(user_presets)
+        if is_user_owned_preset(preset.id):
+            user_presets = [p for p in load_user_presets() if p.id != preset.id]
+            self._persist(user_presets)
+        else:
+            # A still-pure built-in - nothing in the user list to remove,
+            # record the id as hidden instead (see hide_builtin_preset()'s
+            # own docstring for why the built-in file itself is never
+            # touched).
+            hide_builtin_preset(preset.id)
+            self._reload_list()
+            self.presets_changed.emit()
 
     def _on_export(self) -> None:
         user_presets = load_user_presets()
@@ -248,7 +270,7 @@ class PresetManagerPanel(QGroupBox):
             QMessageBox.warning(self, tr("Import failed"), str(exc))
             return
         user_presets = load_user_presets()
-        existing_ids = {p.id for p in user_presets} | {p.id for p in load_builtin_presets()}
+        existing_ids = {p.id for p in get_all_presets()}
         added = 0
         for preset in imported:
             preset_id = preset.id

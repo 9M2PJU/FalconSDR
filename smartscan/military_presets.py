@@ -77,48 +77,124 @@ class BandPreset:
 # specific bands here; those live as opt-in *discrete channels*
 # (MILITARY_CHANNELS/FIRE_CHANNELS below) instead, loaded only on request.
 _BUILTIN_PRESETS_PATH = Path(__file__).resolve().parent / "presets" / "band_presets.json"
-# User's own additions/edits - never touched by an app update (that only
-# ever replaces _BUILTIN_PRESETS_PATH, which ships inside the package), and
-# never lost by one either. Absent entirely on a fresh install - see
-# load_user_presets()'s own empty-list fallback.
+# User's own additions/edits/hides - never touched by an app update (that
+# only ever replaces _BUILTIN_PRESETS_PATH, which ships inside the package),
+# and never lost by one either. Absent entirely on a fresh install - see
+# load_user_data()'s own empty-defaults fallback. A user CAN edit or delete
+# a built-in preset (explicit request - "once someone renames it, it's
+# theirs from then on") - see get_all_presets()'s docstring for exactly how
+# that's represented without ever touching the built-in file itself.
 USER_PRESETS_PATH = CONFIG_DIR / "band_presets.json"
 
 
-def _load_json_presets(path: Path) -> list[BandPreset]:
+def _load_user_data_raw(path: Path) -> tuple[list[BandPreset], set[str]]:
     if not path.exists():
-        return []
+        return [], set()
     try:
         raw = json.loads(path.read_text(encoding="utf-8"))
-        return [BandPreset.from_dict(d) for d in raw]
+        if isinstance(raw, list):
+            # Pre-"delete built-ins" format (this feature's own first cut) -
+            # just a plain list of presets, no hidden-ids concept yet.
+            return [BandPreset.from_dict(d) for d in raw], set()
+        presets = [BandPreset.from_dict(d) for d in raw.get("presets", [])]
+        hidden = set(raw.get("hidden_builtin_ids", []))
+        return presets, hidden
     except (OSError, json.JSONDecodeError, KeyError, TypeError, ValueError) as exc:
         logger.warning("Couldn't read presets from %s: %s", path, exc)
-        return []
+        return [], set()
 
 
 def load_builtin_presets() -> list[BandPreset]:
-    return _load_json_presets(_BUILTIN_PRESETS_PATH)
+    if not _BUILTIN_PRESETS_PATH.exists():
+        return []
+    try:
+        raw = json.loads(_BUILTIN_PRESETS_PATH.read_text(encoding="utf-8"))
+        return [BandPreset.from_dict(d) for d in raw]
+    except (OSError, json.JSONDecodeError, KeyError, TypeError, ValueError) as exc:
+        logger.warning("Couldn't read built-in presets from %s: %s", _BUILTIN_PRESETS_PATH, exc)
+        return []
 
 
 def load_user_presets() -> list[BandPreset]:
-    return _load_json_presets(USER_PRESETS_PATH)
+    presets, _hidden = _load_user_data_raw(USER_PRESETS_PATH)
+    return presets
 
 
-def save_user_presets(presets: list[BandPreset]) -> None:
+def load_hidden_builtin_ids() -> set[str]:
+    _presets, hidden = _load_user_data_raw(USER_PRESETS_PATH)
+    return hidden
+
+
+def save_user_data(presets: list[BandPreset], hidden_builtin_ids: set[str]) -> None:
     CONFIG_DIR.mkdir(parents=True, exist_ok=True)
     USER_PRESETS_PATH.write_text(
-        json.dumps([p.to_dict() for p in presets], indent=2, ensure_ascii=False), encoding="utf-8",
+        json.dumps(
+            {
+                "presets": [p.to_dict() for p in presets],
+                "hidden_builtin_ids": sorted(hidden_builtin_ids),
+            },
+            indent=2, ensure_ascii=False,
+        ),
+        encoding="utf-8",
     )
 
 
+def save_user_presets(presets: list[BandPreset]) -> None:
+    """Convenience wrapper keeping the current hidden-ids set untouched -
+    every write from the Options editor that isn't a delete-a-built-in goes
+    through this one instead of building the tuple by hand each time."""
+    save_user_data(presets, load_hidden_builtin_ids())
+
+
+def hide_builtin_preset(preset_id: str) -> None:
+    """"Deletes" a built-in preset - the built-in JSON file itself is never
+    touched (it's part of the installed package, restored by every update
+    regardless), so a deletion is recorded here instead and filtered out by
+    get_all_presets(). Restored by "Reset to defaults" (MainWindow) clearing
+    this whole file, or by re-importing/re-adding a preset with the same id
+    (which shadows it back "visible" again via the same mechanism as an
+    edit - see get_all_presets())."""
+    hidden = load_hidden_builtin_ids()
+    hidden.add(preset_id)
+    save_user_data(load_user_presets(), hidden)
+
+
 def get_all_presets() -> list[BandPreset]:
-    """Built-ins first, then the user's own - called fresh at every point of
-    use (ScannerPanel's preset dropdown, the Options editor) rather than
-    cached in a module-level constant, so an edit made in the Options editor
-    shows up immediately without needing a restart - the exact same
-    "function, not a frozen constant" fix AGENTS.md already documents for
-    the i18n footgun, applied here for a different reason (live edits,
-    not translation) but the same underlying shape."""
-    return load_builtin_presets() + load_user_presets()
+    """Built-ins (minus any hidden or shadowed - see below) followed by the
+    user's own - called fresh at every point of use (ScannerPanel's preset
+    dropdown, the Options editor) rather than cached in a module-level
+    constant, so an edit made in the Options editor shows up immediately
+    without needing a restart - the exact same "function, not a frozen
+    constant" fix AGENTS.md already documents for the i18n footgun, applied
+    here for a different reason (live edits, not translation) but the same
+    underlying shape.
+
+    Editing or deleting a *built-in* preset (both explicitly requested -
+    "once someone renames it, it's theirs from then on") never touches
+    _BUILTIN_PRESETS_PATH (part of the installed package - every app update
+    would just restore it anyway). Both are represented purely in the
+    user's own file instead:
+    - **Edit**: PresetManagerPanel saves the edited version into the user
+      presets list *under the same id* the built-in had. A built-in whose
+      id also appears in the user list is excluded here - the user version
+      "shadows" it - so from that point on it's indistinguishable from (and
+      editable/deletable exactly like) a preset the user created from
+      scratch, matching the explicit request.
+    - **Delete**: the id goes into hidden_builtin_ids instead (see
+      hide_builtin_preset()) and is excluded here too, with no
+      corresponding user-list entry - "gone", not "shadowed by nothing"."""
+    user_presets = load_user_presets()
+    hidden = load_hidden_builtin_ids()
+    user_ids = {p.id for p in user_presets}
+    visible_builtins = [p for p in load_builtin_presets() if p.id not in hidden and p.id not in user_ids]
+    return visible_builtins + user_presets
+
+
+def is_user_owned_preset(preset_id: str) -> bool:
+    """True once a preset (built-in-sourced originally or not) has a user-
+    file entry under this id - i.e. it's editable/deletable in
+    PresetManagerPanel. A still-pure built-in (never edited) is False."""
+    return preset_id in {p.id for p in load_user_presets()}
 
 
 # Curated discrete channels (Memory List mode) ------------------------------
