@@ -444,6 +444,13 @@ class ScannerEngine(threading.Thread):
         # the primary slot's audio) - see _feed_manual_recording().
         self._manual_recorder: Recorder | None = None
         self._manual_recorder_lock = threading.Lock()
+        # First real (non-idle-silence) frequency captured during the
+        # current manual recording, if any - "first-wins" latch, reset only
+        # when a new manual recording starts. Used to rename the file from
+        # its generic "..._session.wav" name to the same "..._<freq_khz>.wav"
+        # naming auto-recordings use, once we actually know what it was -
+        # see start_manual_recording()/stop_manual_recording().
+        self._manual_recording_first_freq: int | None = None
 
         # Raw wideband IQ recording (see start_raw_iq_recording()) - only
         # ever touched by the GUI thread (start/stop) and the main loop
@@ -547,6 +554,7 @@ class ScannerEngine(threading.Thread):
             recorder = Recorder(manual_config, AUDIO_RATE)
             recorder.start_session()
             self._manual_recorder = recorder
+            self._manual_recording_first_freq = None
         self.signals.manual_recording_changed.emit(True, recorder.current_path)
 
     def stop_manual_recording(self) -> None:
@@ -555,8 +563,14 @@ class ScannerEngine(threading.Thread):
             if recorder is None:
                 return
             self._manual_recorder = None
+            first_freq = self._manual_recording_first_freq
+            self._manual_recording_first_freq = None
         path = recorder.current_path
         recorder.stop_session()
+        if path and first_freq is not None:
+            renamed = Recorder.rename_session_file_with_frequency(Path(path), first_freq)
+            if renamed is not None:
+                path = str(renamed)
         if path and self.config.recording.output_format == "mp3":
             mp3_path = transcode_to_mp3(Path(path))
             if mp3_path is not None:
@@ -569,12 +583,17 @@ class ScannerEngine(threading.Thread):
         with self._manual_recorder_lock:
             return self._manual_recorder is not None
 
-    def _feed_manual_recording(self, audio: np.ndarray) -> None:
+    def _feed_manual_recording(self, audio: np.ndarray, freq_hz: int | None = None) -> None:
         """Mirrors ``audio`` (AUDIO_RATE-domain, mono) into an in-progress
         manual recording, if any - a cheap no-op (one lock check) otherwise,
-        safe to call unconditionally from every tick."""
+        safe to call unconditionally from every tick. ``freq_hz`` (only ever
+        passed by _play_and_record_slot()'s real-audio path, never the idle-
+        silence tick) records the *first* one seen this recording - see
+        stop_manual_recording(), which renames the file to it once known."""
         with self._manual_recorder_lock:
             recorder = self._manual_recorder
+            if recorder is not None and freq_hz is not None and self._manual_recording_first_freq is None:
+                self._manual_recording_first_freq = freq_hz
         if recorder is not None:
             recorder.write_audio(audio, real=True)
 
@@ -1834,8 +1853,11 @@ class ScannerEngine(threading.Thread):
             # Manual recording mirrors the primary slot's real audio
             # regardless of mute - like the automatic recording below, it's
             # meant to capture what's actually happening, not just what's
-            # currently being listened to live.
-            self._feed_manual_recording(mono)
+            # currently being listened to live. freq_hz here is real
+            # content (unlike the squelched branch above, which mirrors
+            # silence) - this is what stop_manual_recording() renames the
+            # file to, once the recording ends.
+            self._feed_manual_recording(mono, freq_hz=slot.freq_hz)
         if self.config.recording.enabled:
             slot.recorder.write_audio(mono)
 

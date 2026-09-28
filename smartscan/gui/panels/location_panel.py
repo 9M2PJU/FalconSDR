@@ -37,7 +37,7 @@ class LocationPanel(QGroupBox):
 
         hint = QLabel(tr(
             "Approximate coordinates of the receiver - used only to build "
-            "the FlightRadar24/ADSBExchange playback links in Odtwarzacz "
+            "the FlightRadar24/ADSBExchange playback links in Playback "
             "(“what was flying near here at this recording's time”). "
             "Nothing is sent anywhere else; this never leaves your machine "
             "except when you click one of those two buttons, which opens "

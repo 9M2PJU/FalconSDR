@@ -42,7 +42,7 @@ class TranscriptionPanel(QGroupBox):
         # -- "not installed yet" state --------------------------------
         self.install_intro_label = QLabel(tr(
             "Optional: automatic speech-to-text for recordings (Whisper), "
-            "shown in the Odtwarzacz tab. Not installed - it's a large, "
+            "shown in the Playback tab. Not installed - it's a large, "
             "separate download (models + engine), so it's opt-in rather "
             "than bundled with the app."
         ))

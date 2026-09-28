@@ -424,6 +424,34 @@ for exactly this reason. Add a new language by dropping one `.po` file — see
     doesn't know or care about manual recording), so a user who only ever
     used the manual button isn't confused about why their auto-recorded
     library is empty.
+    **Follow-up, same session, by explicit request ("manualne nagrywanie
+    powinno zapisywać pierwszą w nagraniu częstotliwość"):** a manual
+    recording that actually captures a real signal is renamed, once it
+    stops, from the generic `models.MANUAL_FREQ_KHZ` "_session" naming
+    (gotcha 19) to the same frequency-tagged naming split-mode auto-
+    recordings use - `ScannerEngine._manual_recording_first_freq` is a
+    first-wins latch (set only once per recording, never overwritten by a
+    later different frequency, reset in `start_manual_recording()`) updated
+    from `_feed_manual_recording()`'s `freq_hz` parameter - passed only by
+    `_play_and_record_slot()`'s *real*-audio mirror (`slot.freq_hz` when
+    `slot.freq_hz == self._primary_freq`), never by the squelched-silence
+    mirror just above it in the same function, and never by
+    `_main_loop()`'s idle-tick silence feed - both of those correctly leave
+    it at its `None` default, since neither represents a real captured
+    frequency. `stop_manual_recording()` reads the latch (and resets it)
+    *before* calling `recorder.stop_session()`'s mp3 transcode step (gotcha
+    14) - `Recorder.rename_session_file_with_frequency()` (a `@staticmethod`
+    living next to `_single_file_path()`/`_split_file_path()`, the naming
+    convention's other two sources of truth) does the actual rename on the
+    closed `.wav`, *before* any mp3 transcode, so the mp3's filename
+    inherits the frequency too rather than the transcode needing its own
+    separate renaming logic. A recording that never captured a real
+    frequency (e.g. tuned to a range with no active traffic the whole time)
+    keeps the existing "_session"/"Manual recording" fallback exactly as
+    before - verified deterministically (a custom band with no simulated
+    activity in it at all, not just "got lucky/unlucky with timing"), not
+    just the common case. A failed rename (filesystem error) leaves the
+    original "_session" name in place rather than losing the recording.
 14. **MP3 output (`RecordingConfig.output_format`) is a transcode that runs
     strictly *after* a WAV file is fully closed, at the engine's own
     finish-line call sites — never inside `Recorder`, and never before this

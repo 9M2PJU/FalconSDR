@@ -642,7 +642,7 @@ class ScannerPanel(QGroupBox):
             "this app demodulates from, in the SigMF format (readable by GNU "
             "Radio, Inspectrum, SDR++, ...) - independent of any specific "
             "channel or trigger. Saved to a 'raw_iq' subfolder, separate from "
-            "the Odtwarzacz library. Warning: uncompressed IQ is large - "
+            "the Playback library. Warning: uncompressed IQ is large - "
             "roughly sample_rate x 8 bytes/second (~19 MB/s at this app's "
             "default 2.4 MSPS capture bandwidth)."
         ))

@@ -9,7 +9,7 @@ msgid "Location"
 msgstr "Lokalizacja"
 
 msgid "Approximate coordinates of the receiver - used only to build "
-"the FlightRadar24/ADSBExchange playback links in Odtwarzacz "
+"the FlightRadar24/ADSBExchange playback links in Playback "
 "(“what was flying near here at this recording's time”). "
 "Nothing is sent anywhere else; this never leaves your machine "
 "except when you click one of those two buttons, which opens "
@@ -789,7 +789,7 @@ msgstr "Liczba"
 msgid "Last heard"
 msgstr "Ostatnio słyszana"
 
-msgid "Click: show this frequency's details on the side (hours/weekdays).\nDouble-click: jump to it in the Odtwarzacz tab."
+msgid "Click: show this frequency's details on the side (hours/weekdays).\nDouble-click: jump to it in the Playback tab."
 msgstr "Klik: pokaż specyfikę tej częstotliwości obok (godziny/dni tygodnia).\nPodwójny klik: przejdź do niej w zakładce Odtwarzacz."
 
 msgid "Recordings per day"
@@ -1064,7 +1064,7 @@ msgstr "Nie znaleziono ffmpeg w systemie - nagrania będą zapisywane jako WAV, 
 msgid "Record raw IQ"
 msgstr "Nagraj surowy sygnał IQ"
 
-msgid "Advanced/technical: records the actual wideband complex samples this app demodulates from, in the SigMF format (readable by GNU Radio, Inspectrum, SDR++, ...) - independent of any specific channel or trigger. Saved to a 'raw_iq' subfolder, separate from the Odtwarzacz library. Warning: uncompressed IQ is large - roughly sample_rate x 8 bytes/second (~19 MB/s at this app's default 2.4 MSPS capture bandwidth)."
+msgid "Advanced/technical: records the actual wideband complex samples this app demodulates from, in the SigMF format (readable by GNU Radio, Inspectrum, SDR++, ...) - independent of any specific channel or trigger. Saved to a 'raw_iq' subfolder, separate from the Playback library. Warning: uncompressed IQ is large - roughly sample_rate x 8 bytes/second (~19 MB/s at this app's default 2.4 MSPS capture bandwidth)."
 msgstr "Zaawansowane/techniczne: nagrywa faktyczne szerokopasmowe próbki zespolone, z których program demoduluje sygnał, w formacie SigMF (odczytywalnym przez GNU Radio, Inspectrum, SDR++...) - niezależnie od konkretnego kanału czy triggera. Zapisywane w podfolderze 'raw_iq', osobno od biblioteki Odtwarzacza. Uwaga: nieskompresowany IQ zajmuje dużo miejsca - w przybliżeniu sample_rate x 8 bajtów/sekundę (~19 MB/s przy domyślnym paśmie przechwytywania 2,4 MSPS tego programu)."
 
 msgid "■ Stop recording IQ"
@@ -1076,7 +1076,7 @@ msgstr "Nagrywanie surowego IQ..."
 
 # --- optional transcription install flow (transcription_panel/playback_panel/transcription_install) ---
 
-msgid "Optional: automatic speech-to-text for recordings (Whisper), shown in the Odtwarzacz tab. Not installed - it's a large, separate download (models + engine), so it's opt-in rather than bundled with the app."
+msgid "Optional: automatic speech-to-text for recordings (Whisper), shown in the Playback tab. Not installed - it's a large, separate download (models + engine), so it's opt-in rather than bundled with the app."
 msgstr "Opcjonalnie: automatyczna transkrypcja mowy na tekst dla nagrań (Whisper), widoczna w zakładce Odtwarzacz. Niezainstalowane - to duży, osobny download (modele + silnik), więc jest opcjonalne, a nie dołączone do programu."
 
 msgid "Also install GPU (NVIDIA/CUDA) support"

@@ -107,7 +107,7 @@ class StatsTab(QWidget):
         self.freq_table.setSortingEnabled(True)
         self.freq_table.setToolTip(tr(
             "Click: show this frequency's details on the side (hours/weekdays).\n"
-            "Double-click: jump to it in the Odtwarzacz tab."
+            "Double-click: jump to it in the Playback tab."
         ))
         self.freq_table.cellDoubleClicked.connect(self._on_freq_row_activated)
         self.freq_table.itemSelectionChanged.connect(self._on_freq_selection_changed)

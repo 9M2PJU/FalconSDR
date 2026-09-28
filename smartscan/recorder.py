@@ -136,6 +136,36 @@ class Recorder:
         stamp = dt.datetime.now().strftime("%Y-%m-%d_%H-%M-%S")
         return Path(self.config.output_dir) / f"{stamp}_session.wav"
 
+    @staticmethod
+    def rename_session_file_with_frequency(path: Path, freq_hz: int) -> Path | None:
+        """Renames an already-closed "..._session.<ext>" file (single/manual
+        mode - see _single_file_path()) to "..._<freq_khz>.<ext>", the same
+        naming split-mode auto-recordings use - see
+        ScannerEngine.stop_manual_recording(), the only caller: once a
+        manual recording is known to have actually captured a real
+        frequency (tracked separately - a closed file has no metadata of
+        its own to inspect), it should read as a normal frequency-tagged
+        recording in the Odtwarzacz library instead of the generic "Manual
+        recording" fallback (models.MANUAL_FREQ_KHZ) that name would
+        otherwise parse to. Left in the output root rather than moved into
+        a date subfolder here - organizer.organize() already does that for
+        any recognized loose filename (frequency-tagged or "_session") on
+        the next library refresh, so this doesn't need to duplicate that.
+        Returns None (leaving the original "_session" name in place) if the
+        name doesn't actually contain that marker, or on any filesystem
+        error - a failed rename must never be treated as the recording
+        itself having failed."""
+        khz = round(freq_hz / 1000)
+        new_name = path.name.replace("_session", f"_{khz}")
+        if new_name == path.name:
+            return None
+        new_path = path.with_name(new_name)
+        try:
+            path.rename(new_path)
+        except OSError:
+            return None
+        return new_path
+
     def _split_file_path(self, freq_hz: int) -> Path:
         now = dt.datetime.now()
         # Microsecond precision, not just seconds: two separate transmissions
