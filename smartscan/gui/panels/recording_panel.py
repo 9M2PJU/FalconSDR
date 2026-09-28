@@ -1,4 +1,4 @@
-"""Recording panel: Record Only On Signal toggle, Single/Split mode, REC lamp, output dir."""
+"""Recording panel: Record Only On Signal toggle, WAV/MP3 format, REC lamp, output dir."""
 from __future__ import annotations
 
 from PySide6.QtCore import Signal
@@ -42,14 +42,6 @@ class RecordingPanel(QGroupBox):
         self.enable_check.toggled.connect(self._push_settings)
         root.addWidget(self.enable_check)
 
-        mode_row = QHBoxLayout()
-        self.single_radio = QRadioButton(tr("Single File (one continuous file)"))
-        self.split_radio = QRadioButton(tr("Split Files (a separate file per transmission)"))
-        self.single_radio.toggled.connect(self._push_settings)
-        mode_row.addWidget(self.single_radio)
-        mode_row.addWidget(self.split_radio)
-        root.addLayout(mode_row)
-
         format_row = QHBoxLayout()
         self.wav_radio = QRadioButton(tr("WAV (uncompressed)"))
         self.mp3_radio = QRadioButton(tr("MP3 (compressed, requires ffmpeg)"))
@@ -86,8 +78,6 @@ class RecordingPanel(QGroupBox):
 
     def _load_from_config(self) -> None:
         self.enable_check.setChecked(self.config.enabled)
-        self.single_radio.setChecked(self.config.mode == "single")
-        self.split_radio.setChecked(self.config.mode == "split")
         self.wav_radio.setChecked(self.config.output_format != "mp3")
         self.mp3_radio.setChecked(self.config.output_format == "mp3")
         self.dir_edit.setText(self.config.output_dir)
@@ -116,7 +106,6 @@ class RecordingPanel(QGroupBox):
         enabled = self.enable_check.isChecked()
         changed = enabled != self.config.enabled
         self.config.enabled = enabled
-        self.config.mode = "single" if self.single_radio.isChecked() else "split"
         self.config.output_format = "mp3" if self.mp3_radio.isChecked() else "wav"
         self._update_format_warning()
         self.settings_changed.emit()
@@ -132,8 +121,6 @@ class RecordingPanel(QGroupBox):
 
     def set_running(self, running: bool) -> None:
         self.enable_check.setEnabled(not running)
-        self.single_radio.setEnabled(not running)
-        self.split_radio.setEnabled(not running)
         self.wav_radio.setEnabled(not running)
         self.mp3_radio.setEnabled(not running)
         if not running:

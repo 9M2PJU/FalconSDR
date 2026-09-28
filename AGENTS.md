@@ -386,8 +386,9 @@ for exactly this reason. Add a new language by dropping one `.po` file — see
     trigger state machine — it is not just a manual override of auto-recording.**
     `ScannerEngine.start_manual_recording()`/`stop_manual_recording()`/
     `is_manual_recording()` own a second, separate `Recorder` instance
-    (`self._manual_recorder`, forced `mode="single"` — a manual session is
-    always one file, split-mode doesn't apply) guarded by its own
+    (`self._manual_recorder`, constructed with `Recorder(..., single_file=True)`
+    — see gotcha 23 - a manual session is always one file, the per-
+    transmission file-per-slot behaviour doesn't apply) guarded by its own
     `self._manual_recorder_lock`, entirely independent of the per-slot
     `Recorder`s that `SIGNAL_DETECTED`/`LINGER` drive. It's fed from two call
     sites: `_play_and_record_slot()` mirrors the primary slot's demodulated
@@ -944,6 +945,61 @@ for exactly this reason. Add a new language by dropping one `.po` file — see
     front of this - it's genuinely irreversible (no undo, no backup made
     first) and was verified to leave state completely untouched on a "No"
     answer, not just "asks and proceeds anyway".
+
+23. **"Single File" auto-recording mode was removed entirely, not fixed - by
+    explicit user request after a design discussion, not a silent
+    refactor.** Investigated first because the user asked "co właściwie
+    robi single file, jak działa i czy ma sens?" - the empirical finding
+    (a real simulated test, not just reading the code) was that it never
+    did what its own label promised: `_open_slot()` creates a brand-new
+    `Recorder` per detected transmission regardless of mode (gotcha 12's
+    per-slot isolation design), so "Single File" produced one file *per
+    transmission* exactly like Split - just with no frequency in the
+    filename (mislabeled "Manual recording" in Odtwarzacz, gotcha 19), no
+    metadata chunk (gotcha 14's `_close_slot()` skip), and a pointless
+    1200Hz/0.12s marker tone prepended to every file (dead code path,
+    `begin_transmission()`'s marker-insertion branch, confirmed
+    unreachable in practice since every `Recorder` only ever got exactly
+    one `begin_transmission()` call). After presenting both a "build a real
+    session-wide continuous-file architecture" option and a "just remove
+    it, manual Record already covers one-continuous-file" option, the user
+    chose removal: "No to wywalamy tryb single file całkowicie, usuń też
+    całkowicie z opcji wybór."
+    What was removed: `RecordingConfig.mode`/`insert_marker` fields
+    entirely (see `RecordingConfig`'s own comment - manual recording's
+    genuine "one continuous file" need is unrelated to this config and
+    keeps working via `Recorder`'s own constructor flag, see below);
+    `recorder.py`'s `_marker_tone()` function; `RecordingPanel`'s
+    Single/Split `QRadioButton` pair and its `mode_row` layout entirely
+    (format choice is WAV/MP3 only now); the two now-orphaned Polish
+    catalog entries for the removed radio button labels
+    (`smartscan/locale/pl.po`); `_close_slot()`'s dead `single_mode_path`
+    branch (was transcoding a file from a mode that no longer exists).
+    `Recorder.__init__` gained a real `single_file: bool = False`
+    constructor parameter that replaces the old config-driven mode concept
+    for the one legitimate remaining single-file use case: manual
+    recording (`ScannerEngine.start_manual_recording()` passes
+    `single_file=True` explicitly - see gotcha 13 - never derived from
+    `config`). With `single_file=True`, `start_session()` opens the one
+    file immediately and `begin_transmission()`/`end_transmission()` are
+    simply never called by that caller; with the default `False` (every
+    per-slot auto-recording `Recorder`), behavior is unconditionally what
+    Split always did - `start_session()` opens nothing, each transmission
+    gets its own file via `begin_transmission()`.
+    Backward compatibility: `AppConfig.load()` pops the now-stale `"mode"`
+    and `"insert_marker"` keys out of an existing user's saved
+    `recording` JSON block before constructing `RecordingConfig` (same
+    pattern as the pre-existing stale `"audio_format"` key from an earlier,
+    never-shipped mp3 attempt) - verified against the actual real
+    `~/.config/SmartScanATC/config.json` on the dev machine (which does
+    contain both stale keys from before this change) that it still loads
+    without crashing, silently dropping the two dead settings instead of
+    erroring or losing every other recording setting in the same block.
+    If you touch this again: manual recording's `single_file=True` is the
+    *only* remaining reason `Recorder` supports single-file behavior at
+    all - don't reintroduce a second, config-driven path to the same flag
+    without re-solving the per-slot-fresh-`Recorder` problem that made the
+    original version not actually work.
 
 ## Testing without touching the user's real config/recordings
 

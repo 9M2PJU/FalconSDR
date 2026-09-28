@@ -82,9 +82,18 @@ class RecordingConfig:
     # ScannerPanel's "Auto-recording" toggle (both control this same field,
     # kept in sync - see MainWindow) and PlaybackPanel's notice when it's off.
     enabled: bool = False
-    mode: str = "split"          # "single" or "split"
+    # Auto-recording is always one file per transmission now - the old
+    # "Single File (one continuous file)" mode never actually did that (see
+    # git history: every new transmission opened a fresh Recorder/file
+    # regardless of this setting, since each _Slot owns its own Recorder -
+    # gotcha 12 - so it behaved like Split with a worse filename, no
+    # metadata, and a pointless marker tone at the start of every file) -
+    # removed rather than fixed, since manual recording (ScannerEngine.
+    # start_manual_recording(), forced single-file internally via
+    # Recorder's own single_file=True constructor flag, nothing to do with
+    # this config) already covers the genuine "one continuous file"
+    # use case correctly. `output_dir` below still applies to both.
     output_dir: str = DEFAULT_RECORDINGS_DIR
-    insert_marker: bool = True
     # "wav" (default, always available) or "mp3" (requires ffmpeg on PATH -
     # see audio_transcode.py; falls back to keeping the WAV silently if
     # ffmpeg isn't installed, never loses the recording). WAV is still always
@@ -240,9 +249,16 @@ class AppConfig:
             bands += [VfoRangeConfig(**r) for r in raw.get("extra_vfo_ranges", [])]
         # An early, never-shipped mp3 attempt used the key "audio_format" -
         # drop it if present so it doesn't collide with RecordingConfig's
-        # current, differently-named "output_format" field.
+        # current, differently-named "output_format" field. "mode" and
+        # "insert_marker" are stale keys from the removed "Single File"
+        # auto-recording option (see RecordingConfig's own comment) - an
+        # existing user's config.json may still have either, which would
+        # otherwise crash RecordingConfig(**recording_raw) below with an
+        # unexpected-keyword error.
         recording_raw = dict(raw.get("recording", {}))
         recording_raw.pop("audio_format", None)
+        recording_raw.pop("mode", None)
+        recording_raw.pop("insert_marker", None)
         return AppConfig(
             device=DeviceConfig(**raw.get("device", {})),
             bands=bands,

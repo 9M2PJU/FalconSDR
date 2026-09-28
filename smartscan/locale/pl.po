@@ -57,12 +57,6 @@ msgstr "Nagrywanie"
 msgid "Record Only On Signal (only record while a signal is detected)"
 msgstr "Nagrywaj tylko przy sygnale (nagrywaj tylko, gdy wykryto sygnał)"
 
-msgid "Single File (one continuous file)"
-msgstr "Jeden plik (jeden ciągły plik)"
-
-msgid "Split Files (a separate file per transmission)"
-msgstr "Osobne pliki (osobny plik na transmisję)"
-
 msgid "Choose folder..."
 msgstr "Wybierz katalog..."
 

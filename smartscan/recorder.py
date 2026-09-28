@@ -13,22 +13,18 @@ import numpy as np
 from .config import RecordingConfig
 
 
-def _marker_tone(audio_rate: int, freq_hz: float = 1200.0, duration_s: float = 0.12) -> np.ndarray:
-    t = np.arange(int(audio_rate * duration_s)) / audio_rate
-    tone = 0.25 * np.sin(2 * np.pi * freq_hz * t)
-    fade = min(200, tone.size // 4)
-    if fade:
-        env = np.ones_like(tone)
-        env[:fade] = np.linspace(0, 1, fade)
-        env[-fade:] = np.linspace(1, 0, fade)
-        tone *= env
-    return tone.astype(np.float32)
-
-
 class Recorder:
-    def __init__(self, config: RecordingConfig, audio_rate: int):
+    def __init__(self, config: RecordingConfig, audio_rate: int, single_file: bool = False):
+        """``single_file`` is never set from ``config`` (which no longer has
+        a "mode" concept at all - see RecordingConfig's own comment) - it's
+        an explicit, separate flag only ScannerEngine.start_manual_recording()
+        ever passes ``True`` for. Every other caller (auto-recording's
+        per-slot Recorder, one per transmission - see gotcha 12) leaves it
+        ``False``, unconditionally split-mode: one file per transmission,
+        opened in begin_transmission(), never in start_session()."""
         self.config = config
         self.audio_rate = audio_rate
+        self._single_file = single_file
         self._wav: wave.Wave_write | None = None
         self._current_path: Path | None = None
         self._session_active = False
@@ -58,10 +54,13 @@ class Recorder:
         return self._wav is not None
 
     def start_session(self) -> None:
-        """Called when the scanner starts running."""
+        """Called when the scanner starts running (auto-recording) or a
+        manual recording starts. Only opens a file immediately for the
+        ``single_file=True`` case (manual recording) - auto-recording's own
+        per-transmission file opens later, in begin_transmission()."""
         self._session_active = True
         Path(self.config.output_dir).mkdir(parents=True, exist_ok=True)
-        if self.config.mode == "single":
+        if self._single_file:
             self._open_file(self._single_file_path())
 
     def stop_session(self) -> None:
@@ -70,12 +69,13 @@ class Recorder:
         self._session_active = False
 
     def begin_transmission(self, freq_hz: int) -> None:
+        """Opens a new per-transmission file - never called for a
+        ``single_file=True`` Recorder (manual recording writes straight to
+        the one file start_session() already opened, no per-transmission
+        concept at all)."""
         if not self._session_active:
             return
-        if self.config.mode == "split":
-            self._open_file(self._split_file_path(freq_hz))
-        elif self._wav is not None and self.config.insert_marker:
-            self._write_raw(_marker_tone(self.audio_rate))
+        self._open_file(self._split_file_path(freq_hz))
 
     def write_audio(self, audio: np.ndarray, real: bool = True) -> None:
         """Writes ``audio`` (mono) to the current file - or, for
@@ -103,9 +103,11 @@ class Recorder:
         self._has_real_audio = True
 
     def end_transmission(self) -> Path | None:
-        """Closes the current per-transmission file (split mode only).
-        Returns the finished file's path so the caller can hand it straight
-        to the Odtwarzacz library instead of waiting for a periodic rescan.
+        """Closes the current per-transmission file. Returns the finished
+        file's path so the caller can hand it straight to the Odtwarzacz
+        library instead of waiting for a periodic rescan. Never called on a
+        ``single_file=True`` Recorder (manual recording uses stop_session()
+        directly instead - there's no per-transmission concept to end).
 
         Deletes the file and returns None instead if it never received any
         *real* audio (see write_audio()'s ``real`` param) - a real, observed
@@ -118,8 +120,6 @@ class Recorder:
         that produced an all-silent WAV that still got catalogued into the
         Odtwarzacz library as a genuine recording - pure clutter with
         nothing to hear."""
-        if self.config.mode != "split":
-            return None
         path = self._current_path
         had_real_audio = self._has_real_audio
         self._close_file()

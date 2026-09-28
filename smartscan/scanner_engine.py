@@ -547,11 +547,8 @@ class ScannerEngine(threading.Thread):
         with self._manual_recorder_lock:
             if self._manual_recorder is not None:
                 return
-            manual_config = RecordingConfig(
-                enabled=True, mode="single",
-                output_dir=self.config.recording.output_dir, insert_marker=False,
-            )
-            recorder = Recorder(manual_config, AUDIO_RATE)
+            manual_config = RecordingConfig(enabled=True, output_dir=self.config.recording.output_dir)
+            recorder = Recorder(manual_config, AUDIO_RATE, single_file=True)
             recorder.start_session()
             self._manual_recorder = recorder
             self._manual_recording_first_freq = None
@@ -1695,13 +1692,6 @@ class ScannerEngine(threading.Thread):
             return
         finished_path = None
         if self.config.recording.enabled:
-            # Single mode: end_transmission() is a split-mode-only concept
-            # (see its own docstring, always returns None otherwise) - grab
-            # the path before stop_session() closes it so mp3 output still
-            # applies to it below, even though (pre-existing, unrelated to
-            # mp3) single mode gets no metadata chunk or recording_finished
-            # signal either way.
-            single_mode_path = slot.recorder.current_path
             finished_path = slot.recorder.end_transmission()
             slot.recorder.stop_session()
             if finished_path is not None:
@@ -1722,8 +1712,6 @@ class ScannerEngine(threading.Thread):
                     mp3_path = transcode_to_mp3(Path(finished_path))
                     if mp3_path is not None:
                         finished_path = mp3_path
-            elif single_mode_path and self.config.recording.output_format == "mp3":
-                transcode_to_mp3(Path(single_mode_path))
         if finished_path is not None:
             self.signals.recording_finished.emit(str(finished_path))
         if reason == "linger":
