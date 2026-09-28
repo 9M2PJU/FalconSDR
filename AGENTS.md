@@ -1355,6 +1355,51 @@ for exactly this reason. Add a new language by dropping one `.po` file — see
     check `band_freqs` (or thread the equivalent through) at every future
     call site, don't assume "it's in the default lane" is enough.
 
+32. **Gotcha 31's fix was real but incomplete: a "band" with `start_hz ==
+    stop_hz` is the exact same degenerate "single point, no real edge"
+    case as a standalone Memory List channel, and edge-extension was still
+    reachable through it.** `ScannerPanel._on_add_frequency()` (the
+    "Quick-add a frequency" box in the Listen tab) creates exactly this:
+    `VfoRangeConfig(start_hz=freq_hz, stop_hz=freq_hz, step_hz=25_000, ...)`
+    - a real, common way for a user to add one frequency, architecturally
+    a "band" per this project's own "single frequencies (start_hz ==
+    stop_hz) all live in this one list" design (see the Architecture
+    section's note on `AppConfig.bands`), but with zero actual sweep range.
+    Real, exactly-reproduced follow-up report: a single "Quick-add"ed
+    100.1 MHz immediately showed 9 simultaneous "active" candidates
+    (100.0750/100.1000/100.1250 MHz + 6 more, each 25 kHz apart - the
+    band's own `step_hz`) and the resulting pile of simultaneously-
+    demodulated/recorded slots was exactly what made the live-audio path
+    (gotcha 28's primary-slot-priority fix only *orders* the work, it can't
+    make genuinely unnecessary work disappear) audibly struggle again -
+    the user's own framing ("program słabo sobie radzi z nagrywaniem wielu
+    kanałów naraz") was really this same fabricated-candidate bug wearing
+    a different config-list's clothes than gotcha 31's Memory List case.
+    Gotcha 31's `band_freqs` restriction didn't catch this because a
+    degenerate single-point band's own frequency genuinely *is* a member
+    of "the band's own grid" (`_band_grid()` of a zero-width range returns
+    exactly `[start_hz]`) - the missing check is one level up: whether the
+    *band itself* (`vr.start_hz != vr.stop_hz`) represents a real range at
+    all, not just whether a given frequency traces back to some band
+    object. Fixed at both places a band's own edges get extended:
+    - The default-lane pool (plain, unweighted bands): `band_freqs.add(f)`
+      is now skipped entirely for a `vr` with `start_hz == stop_hz`.
+    - The weighted-band priority lane: `_extend_edges(windows, ...)` is
+      now skipped entirely for the same condition (this path has no
+      `band_freqs`-style filter at all - it call unconditionally for every
+      weighted band - so a user giving a "Quick-add"ed frequency a
+      priority weight would have hit this exact same bug independently of
+      the default-lane fix).
+    Verified directly (no hardware needed, same as gotcha 31): a
+    "Quick-add"ed 100.1 MHz frequency, both unweighted and weighted, now
+    scans *exactly* that one frequency; a real (non-degenerate) weighted
+    band still gets its edges extended exactly as before (28 extra probes,
+    unchanged). If you add a third place that builds windows from a
+    `VfoRangeConfig`'s own grid: check `start_hz != stop_hz` there too
+    before ever calling `_extend_edges`/populating anything equivalent to
+    `band_freqs` - "came from a `VfoRangeConfig`" is not by itself
+    sufficient evidence that edge-extension is legitimate for it.
+
 ## Testing without touching the user's real config/recordings
 
 There's no test suite yet. To smoke-test end to end, run the app with

@@ -1063,7 +1063,19 @@ class ScannerEngine(threading.Thread):
                 if f not in bw_map:
                     _claim(f, float(max(1, vr.step_hz)), band_mod, weight=vr.weight)
             windows = plan_windows(freqs, sample_rate, max(1, vr.step_hz))
-            _extend_edges(windows, float(max(1, vr.step_hz)))
+            # A "band" with start_hz == stop_hz (e.g. ScannerPanel's
+            # "Quick-add a frequency" button - see _on_add_frequency(),
+            # which really does create a VfoRangeConfig this way) is a
+            # single point wearing a band's clothing - it has no real sweep
+            # grid/edge of its own any more than a standalone Memory List
+            # channel does (gotcha 31's own bug, just reachable through the
+            # *other* config list this time - real, reproduced report: a
+            # single "Quick-add"ed 100.1 MHz frequency also "detecting" a
+            # neighbour every 25 kHz - step_hz's own default here - out to
+            # roughly 14 fabricated probes per side). Skip edge-extension
+            # for it exactly like gotcha 31 does for a plain channel.
+            if vr.start_hz != vr.stop_hz:
+                _extend_edges(windows, float(max(1, vr.step_hz)))
             for w in windows:
                 w.band = vr  # unambiguous: this whole lane is one band's own grid
             priority_lanes.append(_Lane(weight=vr.weight, windows=windows, is_range=True))
@@ -1103,7 +1115,13 @@ class ScannerEngine(threading.Thread):
                     _claim(f, float(max(1, vr.step_hz)), band_mod, weight=vr.weight)
                 default_freqs.append(f)
                 freq_to_band[f] = vr
-                band_freqs.add(f)
+                # Same exclusion as the weighted-band lane above: a
+                # start_hz == stop_hz "band" (ScannerPanel's "Quick-add a
+                # frequency") is a single point, not a real swept range - no
+                # legitimate edge to extend past, exactly like a plain
+                # Memory List channel (gotcha 31).
+                if vr.start_hz != vr.stop_hz:
+                    band_freqs.add(f)
 
         default_grouping_bw = max((bw_map[f] for f in default_freqs), default=25_000.0)
         default_windows = plan_windows(default_freqs, sample_rate, default_grouping_bw)
