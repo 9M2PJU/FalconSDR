@@ -101,19 +101,22 @@ class RecordingConfig:
     # fully closed (scanner_engine.py's _close_slot/stop_manual_recording),
     # never on the per-chunk recording path.
     output_format: str = "wav"
-    # 0 = unlimited (default, no behavior change). When >0, ScannerEngine
-    # won't open a *new* auto-recording slot once this many are already
-    # active simultaneously - the candidate is simply reconsidered on a
-    # later tick once one of the existing ones closes (LINGER expiry) and
-    # frees capacity again. Added as a safety valve against a busy band (or
-    # one strong transmission's own spectral leakage into tightly-spaced
-    # neighbour channels - see channelizer.py's per-channel power window
-    # having no guard band) fragmenting into many simultaneous slots/files
-    # at once. Only gates *recording* - has no effect when `enabled` is
-    # False, and never caps how many channels can be scanned/demodulated
-    # live (only one of them ever reaches the speaker anyway - see
-    # ScannerEngine._open_slot's primary/weight logic).
-    max_concurrent_recordings: int = 0
+    # 0 = unlimited. When >0, ScannerEngine won't open a *new* auto-recording
+    # slot once this many are already active simultaneously - the candidate
+    # is simply reconsidered on a later tick once one of the existing ones
+    # closes (LINGER expiry) and frees capacity again. Added as a safety
+    # valve against a busy band (or one strong transmission's own spectral
+    # leakage into tightly-spaced neighbour channels - see channelizer.py's
+    # per-channel power window having no guard band) fragmenting into many
+    # simultaneous slots/files at once. Only gates *recording* - has no
+    # effect when `enabled` is False, and never caps how many channels can
+    # be scanned/demodulated live (only one of them ever reaches the
+    # speaker anyway - see ScannerEngine._open_slot's primary/weight logic).
+    # Defaulted to 3 (not unlimited) - a sane out-of-the-box ceiling for a
+    # fresh install, since unlimited is exactly what let the spectral-
+    # leakage/fabricated-candidate bugs (see AGENTS.md gotcha 31/32) balloon
+    # into a dozen-plus simultaneous recordings before those were found.
+    max_concurrent_recordings: int = 3
 
 
 @dataclass

@@ -549,10 +549,17 @@ class AcquisitionThread:
     margin, comfortably more than any transient consumer stall should need.
     """
 
-    def __init__(self, backend: "SdrBackend", chunk_size: int, max_queued: int = 64):
+    def __init__(self, backend: "SdrBackend", chunk_size: int, max_queued: int = 64, debug: bool = False):
         self._backend = backend
         self._chunk_size = chunk_size
         self._max_queued = max_queued
+        # Gates the RT-priority outcome line and the periodic health summary
+        # below (see _boost_priority()/_maybe_report_health()) - both are
+        # genuinely useful when actually chasing a live-audio/timing report,
+        # but pure console noise for every other launch, so they're now tied
+        # to AppConfig.debug_mode (passed in by ScannerEngine) rather than
+        # firing unconditionally for every user.
+        self._debug = debug
         self._queue: deque[np.ndarray] = deque()
         self._lock = threading.Lock()
         self._cond = threading.Condition(self._lock)
@@ -595,48 +602,51 @@ class AcquisitionThread:
         self._thread = threading.Thread(target=self._run, name="sdr-acquisition", daemon=True)
         self._thread.start()
 
-    @staticmethod
-    def _boost_priority() -> None:
+    def _boost_priority(self) -> None:
         """Same best-effort SCHED_FIFO real-time priority request as
         ScannerEngine._maybe_boost_priority() - see its docstring. Even more
         directly relevant here: this is now the one thread whose own
         promptness the whole fix depends on. Safe now to combine with the
         single-owner design above - see this class's docstring update on
         why that wasn't true of the shared-lock version this replaced.
+        Always attempted regardless of ``self._debug`` - only the outcome
+        print (below) is gated on it, not the actual scheduling call.
 
-        Prints its own outcome unconditionally (not gated behind
-        SMARTSCAN_DEBUG_LIVE_AUDIO) - a real, user-reported case: this
-        silently landing on the "except: pass" branch (missing rtprio
-        ulimit/CAP_SYS_NICE - common when an app is launched from a desktop
-        icon rather than a login-shell terminal, since desktop sessions
-        don't always go through the same PAM limits.conf application) is
-        indistinguishable from the outside, and looks exactly like "the fix
-        didn't work" with no way to tell that apart from "it wasn't even
-        applied" short of attaching a debugger. One line at startup either
-        way costs nothing and turns an otherwise-silent, hard-to-diagnose
-        gap into something visible in whatever terminal launched the app."""
+        Prints its own outcome when ``self._debug`` (AppConfig.debug_mode)
+        is on - a real, user-reported case: this silently landing on the
+        "except: pass" branch (missing rtprio ulimit/CAP_SYS_NICE - common
+        when an app is launched from a desktop icon rather than a login-
+        shell terminal, since desktop sessions don't always go through the
+        same PAM limits.conf application) is indistinguishable from the
+        outside, and looks exactly like "the fix didn't work" with no way
+        to tell that apart from "it wasn't even applied" short of attaching
+        a debugger - but for everyone else this was just console noise on
+        every single launch, so it's opt-in now rather than unconditional."""
         if not hasattr(os, "sched_setscheduler"):
-            print("[sdr-acquisition] real-time priority: unavailable on this platform", flush=True)
+            if self._debug:
+                print("[sdr-acquisition] real-time priority: unavailable on this platform", flush=True)
             return
         try:
             tid = threading.get_native_id()
             os.sched_setscheduler(tid, os.SCHED_FIFO, os.sched_param(10))
         except (PermissionError, OSError) as exc:
-            print(
-                f"[sdr-acquisition] real-time priority NOT granted ({exc}) - running at normal "
-                "priority; check `ulimit -r` (needs >0) if live audio/scan speed seems inconsistent",
-                flush=True,
-            )
+            if self._debug:
+                print(
+                    f"[sdr-acquisition] real-time priority NOT granted ({exc}) - running at normal "
+                    "priority; check `ulimit -r` (needs >0) if live audio/scan speed seems inconsistent",
+                    flush=True,
+                )
         else:
-            print("[sdr-acquisition] real-time priority: OK (SCHED_FIFO)", flush=True)
+            if self._debug:
+                print("[sdr-acquisition] real-time priority: OK (SCHED_FIFO)", flush=True)
 
     _HEALTH_REPORT_INTERVAL_S = 20.0
 
     def _maybe_report_health(self) -> None:
-        """Always-on (never gated behind SMARTSCAN_DEBUG_LIVE_AUDIO)
-        periodic summary of this thread's own read timing and queue-drop
-        counters - added chasing a real user report of live audio glitches
-        plus recordings measurably shorter than the real elapsed time they
+        """Gated on ``self._debug`` (AppConfig.debug_mode) - periodic
+        summary of this thread's own read timing and queue-drop counters,
+        added chasing a real user report of live audio glitches plus
+        recordings measurably shorter than the real elapsed time they
         spanned (missing *samples*, not just a live-monitoring buffering
         artifact - see AGENTS.md gotcha 30). ``_chunks_dropped`` is the one
         number that distinguishes "genuinely lost data" (this queue
@@ -652,6 +662,8 @@ class AcquisitionThread:
         counter is cumulative since this thread started, not reset per
         report - a single dropped chunk anywhere in a session should never
         quietly age out of visibility ~20s later."""
+        if not self._debug:
+            return
         now = time.monotonic()
         if now - self._health_reported_at < self._HEALTH_REPORT_INTERVAL_S:
             return

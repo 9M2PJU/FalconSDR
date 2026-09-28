@@ -66,16 +66,14 @@ class RecordingPanel(QGroupBox):
             "scanning/listening is never capped by this, only recording."
         ))
         self.max_concurrent_spin.valueChanged.connect(self._push_settings)
-        self.max_concurrent_spin.valueChanged.connect(self._update_max_concurrent_hint)
-        # A live, always-visible label instead of making the user discover
-        # "0 = unlimited" from the tooltip alone - real user feedback after
-        # the tooltip-only version shipped: "User też nie wie że 0 znaczy
-        # bez limitu" (a user has no way to know 0 means unlimited).
-        self.max_concurrent_hint = QLabel()
-        self.max_concurrent_hint.setStyleSheet("color: #9aa0a6;")
-        limit_row.addWidget(QLabel(tr("Max simultaneous recordings:")))
+        # "(0 = unlimited)" lives directly in the label text now, always
+        # visible regardless of the current value - real user feedback after
+        # a tooltip-only version shipped: "User też nie wie że 0 znaczy bez
+        # limitu" (a user has no way to know 0 means unlimited). A separate
+        # value-dependent hint label next to the spinbox was tried first and
+        # removed again - redundant once the label itself always says it.
+        limit_row.addWidget(QLabel(tr("Max simultaneous recordings (0 = unlimited):")))
         limit_row.addWidget(self.max_concurrent_spin)
-        limit_row.addWidget(self.max_concurrent_hint)
         limit_row.addStretch(1)
         root.addLayout(limit_row)
 
@@ -116,14 +114,10 @@ class RecordingPanel(QGroupBox):
     def _load_from_config(self) -> None:
         self.enable_check.setChecked(self.config.enabled)
         self.max_concurrent_spin.setValue(self.config.max_concurrent_recordings)
-        self._update_max_concurrent_hint(self.config.max_concurrent_recordings)
         self.wav_radio.setChecked(self.config.output_format != "mp3")
         self.mp3_radio.setChecked(self.config.output_format == "mp3")
         self.dir_edit.setText(self.config.output_dir)
         self._update_format_warning()
-
-    def _update_max_concurrent_hint(self, value: int) -> None:
-        self.max_concurrent_hint.setText(tr("(unlimited)") if value == 0 else "")
 
     def _update_format_warning(self) -> None:
         if self.mp3_radio.isChecked() and not ffmpeg_available():

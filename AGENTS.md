@@ -241,8 +241,8 @@ the `scanner_panel.py` call site).
     bool` constructor flag now, used only by manual recording (gotcha 13),
     the one legitimate "one continuous file" case. `AppConfig.load()` pops
     the stale `mode`/`insert_marker` keys for backward compat.
-24. **`RecordingConfig.max_concurrent_recordings`** (0 = unlimited) caps
-    simultaneously-recorded transmissions — checked in
+24. **`RecordingConfig.max_concurrent_recordings`** (default 3, 0 = unlimited)
+    caps simultaneously-recorded transmissions — checked in
     `ScannerEngine._at_recording_capacity()`, gating `_open_slot()`. Only
     gates auto-recording (`recording.enabled` must be `True`); never caps
     live scanning/listening, and doesn't affect manual/raw-IQ recording
@@ -326,7 +326,13 @@ the `scanner_panel.py` call site).
     the SDR device dropdown** — real users shouldn't be able to pick it by
     accident instead of their actual hardware. `ScannerPanel.refresh_device_list()`
     repopulates the combo (preserving the current selection if still valid)
-    when the Options checkbox toggles it live.
+    when the Options checkbox toggles it live. Also gates the RT-priority
+    outcome prints (gotcha 26/29) and `AcquisitionThread`'s periodic health
+    summary (gotcha 30) — `debug=self.config.debug_mode` passed into both
+    at construction in `ScannerEngine._setup_static()`/`_open_backend()`.
+    The actual `sched_setscheduler()` calls always still happen regardless;
+    only the `print()`s are conditional, so a normal launch has zero
+    diagnostic console noise.
 33. **`device_combo`/`bandwidth_spin` are correctly locked while the scanner
     is running** (`set_running()`) — unlike gotcha 24's max_concurrent_recordings
     spinbox, changing SDR hardware or capture bandwidth genuinely requires

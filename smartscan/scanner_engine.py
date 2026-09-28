@@ -773,7 +773,7 @@ class ScannerEngine(threading.Thread):
     def _setup_static(self) -> None:
         """Everything that doesn't depend on the SDR hardware being present."""
         dev = self.config.device
-        self._audio_out = AudioOutput(AUDIO_RATE, dev.audio_output_device)
+        self._audio_out = AudioOutput(AUDIO_RATE, dev.audio_output_device, debug=self.config.debug_mode)
         _checkpoint(f"AudioOutput created, available={self._audio_out.available}")
         if not self._audio_out.available:
             self.signals.log.emit(tr("No audio output (PyAudio) - live monitoring disabled."))
@@ -815,7 +815,7 @@ class ScannerEngine(threading.Thread):
         # self._backend below is unaffected - AcquisitionThread proxies
         # label/gain_range_db/stream_mtu/set_frequency/set_gain/read/close
         # with the same contract a raw SdrBackend has.
-        self._backend = AcquisitionThread(raw_backend, self._chunk_size())
+        self._backend = AcquisitionThread(raw_backend, self._chunk_size(), debug=self.config.debug_mode)
         _checkpoint(f"_open_backend: constructed (label={self._backend.label})")
         self._applied_gain_mode, self._applied_gain_db = dev.gain_mode, dev.gain_db
         self.signals.gain_range_changed.emit(*self._backend.gain_range_db)

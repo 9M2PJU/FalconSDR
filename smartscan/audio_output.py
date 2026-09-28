@@ -277,9 +277,13 @@ def _retime(audio: np.ndarray, target_len: int) -> np.ndarray:
 
 
 class AudioOutput:
-    def __init__(self, sample_rate: int, device_index: int = -1):
+    def __init__(self, sample_rate: int, device_index: int = -1, debug: bool = False):
         self.sample_rate = sample_rate
         self.output_rate = sample_rate
+        # Gates the RT-priority outcome print in _boost_priority_once() -
+        # see AcquisitionThread's own ``_debug`` for why this is now tied to
+        # AppConfig.debug_mode instead of firing unconditionally.
+        self._debug_priority = debug
         self._pa = None
         self._stream = None
         self._resample_up = 1
@@ -425,25 +429,29 @@ class AudioOutput:
         is the earliest point this code ever runs on it. Best-effort: a
         missing CAP_SYS_NICE/rtprio limit silently leaves it at normal
         priority, exactly like AcquisitionThread's own fallback - and, like
-        that fallback, prints its own outcome unconditionally rather than
-        swallowing it silently (see AcquisitionThread._boost_priority's
-        docstring for why: a user-reported case where the fix couldn't be
-        told apart from "never applied" without this)."""
+        that fallback, prints its own outcome when ``self._debug_priority``
+        (AppConfig.debug_mode) is on, not unconditionally (see
+        AcquisitionThread._boost_priority's docstring: useful when actually
+        chasing a live-audio report, pure console noise otherwise). The
+        scheduling call itself is always attempted regardless."""
         self._priority_boosted = True
         if not hasattr(os, "sched_setscheduler"):
-            print("[audio-output] real-time priority: unavailable on this platform", flush=True)
+            if self._debug_priority:
+                print("[audio-output] real-time priority: unavailable on this platform", flush=True)
             return
         try:
             tid = threading.get_native_id()
             os.sched_setscheduler(tid, os.SCHED_FIFO, os.sched_param(10))
         except (PermissionError, OSError) as exc:
-            print(
-                f"[audio-output] real-time priority NOT granted ({exc}) - running at normal "
-                "priority; check `ulimit -r` (needs >0) if live audio stutters",
-                flush=True,
-            )
+            if self._debug_priority:
+                print(
+                    f"[audio-output] real-time priority NOT granted ({exc}) - running at normal "
+                    "priority; check `ulimit -r` (needs >0) if live audio stutters",
+                    flush=True,
+                )
         else:
-            print("[audio-output] real-time priority: OK (SCHED_FIFO)", flush=True)
+            if self._debug_priority:
+                print("[audio-output] real-time priority: OK (SCHED_FIFO)", flush=True)
 
     def _next_frames(self, frame_count: int) -> np.ndarray:
         """The body shared by both PortAudio wrappers' callbacks - see
