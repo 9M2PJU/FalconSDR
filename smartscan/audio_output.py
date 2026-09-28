@@ -424,15 +424,26 @@ class AudioOutput:
         class) creates and owns that thread; the first callback invocation
         is the earliest point this code ever runs on it. Best-effort: a
         missing CAP_SYS_NICE/rtprio limit silently leaves it at normal
-        priority, exactly like AcquisitionThread's own fallback."""
+        priority, exactly like AcquisitionThread's own fallback - and, like
+        that fallback, prints its own outcome unconditionally rather than
+        swallowing it silently (see AcquisitionThread._boost_priority's
+        docstring for why: a user-reported case where the fix couldn't be
+        told apart from "never applied" without this)."""
         self._priority_boosted = True
         if not hasattr(os, "sched_setscheduler"):
+            print("[audio-output] real-time priority: unavailable on this platform", flush=True)
             return
         try:
             tid = threading.get_native_id()
             os.sched_setscheduler(tid, os.SCHED_FIFO, os.sched_param(10))
-        except (PermissionError, OSError):
-            pass
+        except (PermissionError, OSError) as exc:
+            print(
+                f"[audio-output] real-time priority NOT granted ({exc}) - running at normal "
+                "priority; check `ulimit -r` (needs >0) if live audio stutters",
+                flush=True,
+            )
+        else:
+            print("[audio-output] real-time priority: OK (SCHED_FIFO)", flush=True)
 
     def _next_frames(self, frame_count: int) -> np.ndarray:
         """The body shared by both PortAudio wrappers' callbacks - see

@@ -46,7 +46,16 @@ class RecordingPanel(QGroupBox):
         limit_row = QHBoxLayout()
         self.max_concurrent_spin = QSpinBox()
         self.max_concurrent_spin.setRange(0, 50)
-        self.max_concurrent_spin.setSpecialValueText(tr("Unlimited"))
+        # Deliberately *not* setSpecialValueText("Unlimited") for 0 - a real
+        # user-reported bug: QSpinBox's validator treats the special-value
+        # text as the field's literal displayed text, so typing a digit
+        # directly (without first selecting-all to clear "Unlimited") is
+        # silently rejected as unparseable - confirmed reproducing this
+        # exactly (typing "5" at the end of "Unlimited" left the field
+        # unchanged; only the tiny spin-arrows/scroll wheel worked, which
+        # isn't how most people try to edit a number field first). Plain "0"
+        # has no such trap - typing over it always works - and the tooltip
+        # below already says what 0 means.
         self.max_concurrent_spin.setToolTip(tr(
             "Caps how many transmissions can be recorded at the same time. "
             "Once this many recordings are already active, a newly detected "

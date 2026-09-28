@@ -589,14 +589,33 @@ class AcquisitionThread:
         directly relevant here: this is now the one thread whose own
         promptness the whole fix depends on. Safe now to combine with the
         single-owner design above - see this class's docstring update on
-        why that wasn't true of the shared-lock version this replaced."""
+        why that wasn't true of the shared-lock version this replaced.
+
+        Prints its own outcome unconditionally (not gated behind
+        SMARTSCAN_DEBUG_LIVE_AUDIO) - a real, user-reported case: this
+        silently landing on the "except: pass" branch (missing rtprio
+        ulimit/CAP_SYS_NICE - common when an app is launched from a desktop
+        icon rather than a login-shell terminal, since desktop sessions
+        don't always go through the same PAM limits.conf application) is
+        indistinguishable from the outside, and looks exactly like "the fix
+        didn't work" with no way to tell that apart from "it wasn't even
+        applied" short of attaching a debugger. One line at startup either
+        way costs nothing and turns an otherwise-silent, hard-to-diagnose
+        gap into something visible in whatever terminal launched the app."""
         if not hasattr(os, "sched_setscheduler"):
+            print("[sdr-acquisition] real-time priority: unavailable on this platform", flush=True)
             return
         try:
             tid = threading.get_native_id()
             os.sched_setscheduler(tid, os.SCHED_FIFO, os.sched_param(10))
-        except (PermissionError, OSError):
-            pass
+        except (PermissionError, OSError) as exc:
+            print(
+                f"[sdr-acquisition] real-time priority NOT granted ({exc}) - running at normal "
+                "priority; check `ulimit -r` (needs >0) if live audio/scan speed seems inconsistent",
+                flush=True,
+            )
+        else:
+            print("[sdr-acquisition] real-time priority: OK (SCHED_FIFO)", flush=True)
 
     def _run(self) -> None:
         self._boost_priority()

@@ -1612,20 +1612,35 @@ class ScannerEngine(threading.Thread):
         linger_time_ms = self._effective_linger_time_ms(window)
         primary_level = None
 
-        # Demod/noise-reduction/file-write for every active slot is
-        # dispatched to self._slot_pool instead of running one slot after
-        # another on this thread - see AGENTS.md gotcha 12 for the real-
-        # hardware measurements that led to this (many simultaneously
-        # active slots alone was enough to blow the per-tick real-time
-        # budget several times over, backing up the acquisition queue -
-        # see AcquisitionThread - until it started dropping chunks, same
-        # audible symptom as the driver-level overflow that fix solved,
-        # just moved one layer up). Safe to parallelize: each slot owns its
-        # own Demodulator/NoiseReducer/Recorder (see _Slot's docstring), so
+        # Demod/noise-reduction/file-write for every *non-primary* slot is
+        # dispatched to self._slot_pool, run in parallel with each other -
+        # see AGENTS.md gotcha 12 for the real-hardware measurements that
+        # led to this (many simultaneously active slots alone was enough to
+        # blow the per-tick real-time budget several times over, backing up
+        # the acquisition queue - see AcquisitionThread - until it started
+        # dropping chunks). Safe to parallelize: each slot owns its own
+        # Demodulator/NoiseReducer/Recorder (see _Slot's docstring), so
         # there's no shared *mutable* state between these tasks - only
         # ``iq`` itself is shared, but every task only ever reads it.
-        # ``self._audio_out`` is shared too, but AudioOutput.write() already
-        # holds its own lock internally.
+        #
+        # The *primary* slot (the one and only one that ever reaches the
+        # live speaker - see _open_slot's weight logic) is handled
+        # differently: processed synchronously, first, directly on this
+        # thread, *before* any non-primary slot is even submitted to the
+        # pool - see AGENTS.md gotcha 28 for the real-hardware/real-user
+        # finding that motivated splitting this out. A recording-only
+        # slot's own processing landing a tick late is inaudible and
+        # harmless; the primary slot's is the one truly real-time-critical
+        # path in this whole tick (a live-audio glitch is instantly
+        # audible), and the old design gave it no priority at all - it was
+        # just one more task in the same pool batch as everything else, so
+        # more simultaneously-recording (non-primary) slots directly added
+        # GIL/CPU contention to the one slot a listener actually hears, even
+        # though those other slots have no real-time deadline of their own.
+        # Doing primary's own work before any pool task even starts means
+        # nothing else in this tick is yet competing for the GIL while it
+        # runs. ``self._audio_out`` is shared with the pool tasks too, but
+        # AudioOutput.write() already holds its own lock internally.
         tasks = []
         for freq_hz, slot in list(self._slots.items()):
             # Corrected for the linger/level-meter decision (see
@@ -1633,8 +1648,6 @@ class ScannerEngine(threading.Thread):
             # shouldn't have to cling to a lower real level than one near
             # the center just to avoid lingering out.
             level = raw_powers.get(freq_hz, -120.0) + self._correction_db(slot.offset_hz)
-            if freq_hz == self._primary_freq:
-                primary_level = level
             # Squelch (see _effective_squelch_dbfs) mutes the live speaker
             # AND skips writing this block to the recording (see
             # _play_and_record_slot) - but never the LINGER timer/slot-close
@@ -1644,11 +1657,17 @@ class ScannerEngine(threading.Thread):
             # is still >= trigger - i.e. never while the state machine
             # itself says SIGNAL_DETECTED.
             squelched = squelch_dbfs is not None and level < squelch_dbfs
-            future = self._slot_pool.submit(self._process_one_slot, slot, iq, squelched)
-            tasks.append((freq_hz, slot, level, future))
+            if freq_hz == self._primary_freq:
+                primary_level = level
+                self._process_one_slot(slot, iq, squelched)
+                tasks.append((freq_hz, slot, level, None))
+            else:
+                future = self._slot_pool.submit(self._process_one_slot, slot, iq, squelched)
+                tasks.append((freq_hz, slot, level, future))
 
         for freq_hz, slot, level, future in tasks:
-            future.result()  # re-raises whatever that slot's own processing raised, same as the old sequential call would have
+            if future is not None:
+                future.result()  # re-raises whatever that slot's own processing raised, same as the old sequential call would have
             if level >= trigger_dbfs:
                 slot.linger_deadline = None
             elif slot.linger_deadline is None:

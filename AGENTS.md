@@ -1134,6 +1134,85 @@ for exactly this reason. Add a new language by dropping one `.po` file — see
     from the engine - "auto" is purely an engine-side policy now, the
     backend only ever sees concrete numeric gain values.
 
+28. **`_service_active_slots()` runs the *primary* slot (the one and only
+    one that ever reaches the live speaker) synchronously, first, on the
+    scanner's own thread - never submitted to `self._slot_pool` alongside
+    everything else, unlike every non-primary (recording-only) slot.** Real
+    user report, after gotchas 26/27 shipped: live audio still stuttered
+    noticeably on the user's own machine despite working cleanly during
+    real-hardware testing here, and the user's own diagnosis nailed the
+    correlation before any code was touched - "chyba jak jest tylko jedna
+    [transmisja] to jest lepiej" (seems better with just one transmission) -
+    i.e. more simultaneously-active (recording) slots made *live listening*
+    measurably worse, even though only the primary slot's audio ever reaches
+    `AudioOutput`. Root cause: gotcha 12's original design dispatched *every*
+    active slot (primary included) into the same `self._slot_pool` batch,
+    awaited together - the primary slot had no priority over any other, it
+    was just one more task among N, so more non-primary slots directly added
+    GIL/CPU contention to the one slot whose latency is actually real-time
+    critical (a live-audio glitch is instantly audible; a recording file's
+    write landing a tick late never is - it has no deadline at all). Fixed
+    by processing primary's own `_process_one_slot()` call directly, to
+    completion, *before* any non-primary slot is even submitted to the pool
+    - during primary's own demod/noise-reduction/`AudioOutput.write()` work,
+    nothing else in this tick is yet competing for the GIL. Non-primary
+    slots are still parallelized among themselves exactly as gotcha 12
+    established, just no longer sharing a batch with primary. Trade-off:
+    one tick's total wall-clock cost is now `primary_time +
+    max(non-primary times run in parallel)` instead of
+    `max(all times run in parallel)` - strictly more sequential, but every
+    real-hardware measurement taken while chasing this (up to 8 simultaneous
+    WFM slots) stayed well under the 30ms tick budget either way, and a
+    non-primary slot's own timing was never real-time-critical to begin
+    with. If you touch this again: never let a non-primary slot's processing
+    start before primary's own call has already returned - that ordering,
+    not just "primary happens to be parallelized too", is what actually
+    protects the live-audio path.
+    **Also see gotcha 27's own real-hardware finding for a second,
+    independent contributor to the exact same "more simultaneous slots =
+    worse live audio" symptom**: the pre-gotcha-27 hardware "auto" gain
+    could itself inflate the slot count (spectral leakage/overload spuriously
+    tripping neighbour channels - 7-8 "active" slots measured for what was
+    really one strong station, vs. 2-3 real ones once the overload itself
+    was fixed) - the `max_concurrent_recordings` option (added the same
+    session) is a direct, user-facing lever for capping this regardless of
+    root cause, and was itself found to have a real UI bug while
+    troubleshooting this report - see the immediately following note.
+    **`RecordingPanel`'s "Max simultaneous recordings" `QSpinBox` used
+    `setSpecialValueText(tr("Unlimited"))` for 0, which turned out to make
+    the field silently un-typeable**: `QSpinBox`'s validator treats the
+    special-value text as the field's literal displayed text, so typing a
+    digit directly (the natural first thing anyone tries) gets rejected as
+    an unparseable edit to the string "Unlimited" - only the tiny spin-
+    arrows/scroll wheel (which don't go through the text validator at all)
+    actually worked, reproduced exactly via a real user report ("nie jestem
+    w stanie nic tutaj wpisać/zmienić"). Fixed by dropping
+    `setSpecialValueText` entirely - the field just shows a plain "0", which
+    has no such trap, and the tooltip already explains "0 = unlimited". If
+    you add another spinbox with a sentinel value like this: don't reach for
+    `setSpecialValueText` for anything a user is expected to type over
+    directly - it's fine for a value only ever reached via the spin
+    arrows/programmatically, but not for a field whose main sentinel *is*
+    its default/common value.
+29. **Both real-time-priority boosts (`AcquisitionThread._boost_priority`,
+    gotcha 11; `AudioOutput._boost_priority_once`, gotcha 26) now print
+    their own outcome unconditionally, not just under
+    `SMARTSCAN_DEBUG_LIVE_AUDIO`.** Added chasing the exact same user report
+    as gotcha 28: a missing rtprio ulimit/CAP_SYS_NICE silently lands on the
+    existing `except (PermissionError, OSError): pass` branch, which is
+    completely indistinguishable from the outside from "the fix worked but
+    didn't help" - a real, plausible gap specifically because a desktop-
+    icon-launched session doesn't always apply the same PAM
+    `limits.conf`/`rtprio` entry a login-shell terminal session does, so the
+    exact same user account can get real SCHED_FIFO when *this developer*
+    tests interactively from a terminal and silently not get it when the
+    user's own everyday launch path differs. One `print(..., flush=True)`
+    line either way, at the point each boost is attempted, turns this from
+    "unfalsifiable without a debugger" into "grep the terminal output" - if
+    you're ever debugging a live-audio/scan-speed report again, check for
+    these two lines *first*, before assuming either fix is actually active
+    in whatever session is misbehaving.
+
 ## Testing without touching the user's real config/recordings
 
 There's no test suite yet. To smoke-test end to end, run the app with
