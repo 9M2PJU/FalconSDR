@@ -322,6 +322,27 @@ the `scanner_panel.py` call site).
     builds windows from a `VfoRangeConfig`'s own grid must apply this same
     `start_hz != stop_hz` check before ever calling `_extend_edges()`.**
 
+32. **`AppConfig.debug_mode` (default off) gates the "Simulation" entry in
+    the SDR device dropdown** — real users shouldn't be able to pick it by
+    accident instead of their actual hardware. `ScannerPanel.refresh_device_list()`
+    repopulates the combo (preserving the current selection if still valid)
+    when the Options checkbox toggles it live.
+33. **`device_combo`/`bandwidth_spin` are correctly locked while the scanner
+    is running** (`set_running()`) — unlike gotcha 24's max_concurrent_recordings
+    spinbox, changing SDR hardware or capture bandwidth genuinely requires
+    closing and reopening the device stream, which isn't supported live.
+    Don't unlock these; if this confuses users again, improve the tooltip,
+    not the lock.
+34. **`compute_waveform_peaks()` (Playback waveform preview) normalizes so
+    the recording's own loudest bucket reaches full bar height**, not its
+    raw fraction of digital full scale — a weak/distant station's real
+    peaks can sit at 5-15% of full scale even where speech is clearly
+    audible, which drew a waveform too flat to tell speech from silence at
+    a glance. Only the *drawn* peaks are rescaled; playback level and
+    `analyze_wav()`'s SNR scoring (already relative to the file's own
+    content) are untouched. Guards divide-by-zero for a genuinely all-
+    silent file (stays all-zero).
+
 ## Testing without touching the user's real config/recordings
 
 There's no test suite yet. To smoke-test end to end, run the app with

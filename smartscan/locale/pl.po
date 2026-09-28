@@ -495,8 +495,11 @@ msgstr "Urządzenie SDR:"
 msgid " MHz capture"
 msgstr " MHz przechwytu"
 
-msgid "Bandwidth captured by the SDR in one shot (e.g. 2.4 MHz for RTL-SDR,\nup to tens of MHz for HackRF/LimeSDR/Airspy/SDRplay/USRP).\nThe scanner groups the whole range/channel list into as few such windows\nas possible instead of retuning channel by channel."
-msgstr "Szerokość pasma jednorazowo przechwytywanego przez SDR (np. 2.4 MHz dla RTL-SDR,\naż do kilkudziesięciu MHz dla HackRF/LimeSDR/Airspy/SDRplay/USRP).\nSkaner grupuje cały zakres/listę kanałów w jak najmniej takich okien zamiast\nprzestrajać się kanał-po-kanale."
+msgid "Bandwidth captured by the SDR in one shot (e.g. 2.4 MHz for RTL-SDR,\nup to tens of MHz for HackRF/LimeSDR/Airspy/SDRplay/USRP).\nThe scanner groups the whole range/channel list into as few such windows\nas possible instead of retuning channel by channel.\nLocked while the scanner is running - it needs a Stop first."
+msgstr "Szerokość pasma jednorazowo przechwytywanego przez SDR (np. 2.4 MHz dla RTL-SDR,\naż do kilkudziesięciu MHz dla HackRF/LimeSDR/Airspy/SDRplay/USRP).\nSkaner grupuje cały zakres/listę kanałów w jak najmniej takich okien zamiast\nprzestrajać się kanał-po-kanale.\nZablokowane podczas pracy skanera - wymaga najpierw Stop."
+
+msgid "Locked while the scanner is running - switching hardware means closing and reopening the SDR stream, which needs a Stop first."
+msgstr "Zablokowane podczas pracy skanera - zmiana sprzętu oznacza zamknięcie i ponowne otwarcie strumienia SDR, co wymaga najpierw Stop."
 
 msgid "Tuning Time:"
 msgstr "Tuning Time:"
@@ -1213,3 +1216,12 @@ msgstr "Przywraca wszystkie ustawienia, listę pamięci, czarną listę i wszelk
 
 msgid "This resets every setting, the Memory List, the blacklist, and any custom or hidden band presets back to a fresh install. Your recordings themselves are never touched. This cannot be undone."
 msgstr "To przywraca każde ustawienie, listę pamięci, czarną listę i wszelkie własne lub ukryte presety pasm do stanu świeżej instalacji. Twoje nagrania nigdy nie są ruszane. Tej operacji nie da się cofnąć."
+
+
+# --- Options: Debug mode (main_window.py) ---
+
+msgid "Debug mode (shows the Simulation device)"
+msgstr "Tryb debug (pokazuje urządzenie Symulacja)"
+
+msgid "Adds a \"Simulation (no hardware)\" entry to the SDR device list in the Listen tab, for testing without a real receiver. Hidden by default so it can't be picked by accident instead of your actual hardware."
+msgstr "Dodaje pozycję \"Symulacja (brak sprzętu)\" do listy urządzeń SDR w zakładce Nasłuch, do testowania bez prawdziwego odbiornika. Domyślnie ukryte, żeby nie dało się jej wybrać przez pomyłkę zamiast prawdziwego sprzętu."

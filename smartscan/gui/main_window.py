@@ -7,7 +7,7 @@ from pathlib import Path
 
 from PySide6.QtGui import QIcon
 from PySide6.QtWidgets import (
-    QMainWindow, QMessageBox, QPushButton, QScrollArea, QTabWidget, QVBoxLayout, QWidget,
+    QCheckBox, QMainWindow, QMessageBox, QPushButton, QScrollArea, QTabWidget, QVBoxLayout, QWidget,
 )
 
 from .. import storage
@@ -87,6 +87,16 @@ class MainWindow(QMainWindow):
         self.language_panel = LanguagePanel(self.config)
         options_layout.addWidget(self.language_panel)
         options_layout.addStretch(1)
+        self.debug_mode_check = QCheckBox(tr("Debug mode (shows the Simulation device)"))
+        self.debug_mode_check.setToolTip(tr(
+            "Adds a \"Simulation (no hardware)\" entry to the SDR device list "
+            "in the Listen tab, for testing without a real receiver. Hidden "
+            "by default so it can't be picked by accident instead of your "
+            "actual hardware."
+        ))
+        self.debug_mode_check.setChecked(self.config.debug_mode)
+        self.debug_mode_check.toggled.connect(self._on_debug_mode_toggled)
+        options_layout.addWidget(self.debug_mode_check)
         reset_btn = QPushButton(tr("Reset to defaults…"))
         reset_btn.setToolTip(tr(
             "Resets all settings, the Memory List, blacklist, and any custom/"
@@ -424,6 +434,11 @@ class MainWindow(QMainWindow):
             "restart SmartScanATC now to start using it? Any recording in "
             "progress will be stopped first, same as a normal Stop."
         ))
+
+    def _on_debug_mode_toggled(self, checked: bool) -> None:
+        self.config.debug_mode = checked
+        self._save_config()
+        self.scanner_panel.refresh_device_list()
 
     def _on_reset_to_defaults(self) -> None:
         """Options -> "Reset to defaults" - a real factory reset (settings,

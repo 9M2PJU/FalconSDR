@@ -126,6 +126,9 @@ def compute_waveform_peaks(path: Path, n_buckets: int = 400) -> np.ndarray | Non
         n_buckets = 1
     trimmed = np.abs(data[:edge]) / full_scale
     peaks = trimmed.reshape(n_buckets, -1).max(axis=1)
+    peak_max = float(peaks.max()) if peaks.size else 0.0
+    if peak_max > 1e-4:
+        peaks = peaks / peak_max
     return np.clip(peaks, 0.0, 1.0).astype(np.float32)
 
 

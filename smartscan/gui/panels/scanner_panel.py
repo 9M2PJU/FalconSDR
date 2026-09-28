@@ -415,6 +415,10 @@ class ScannerPanel(QGroupBox):
         top_row = QHBoxLayout()
         self.device_combo = QComboBox()
         self._populate_devices()
+        self.device_combo.setToolTip(tr(
+            "Locked while the scanner is running - switching hardware means "
+            "closing and reopening the SDR stream, which needs a Stop first."
+        ))
         top_row.addWidget(QLabel(tr("SDR device:")))
         top_row.addWidget(self.device_combo, 1)
 
@@ -436,7 +440,8 @@ class ScannerPanel(QGroupBox):
             "Bandwidth captured by the SDR in one shot (e.g. 2.4 MHz for RTL-SDR,\n"
             "up to tens of MHz for HackRF/LimeSDR/Airspy/SDRplay/USRP).\n"
             "The scanner groups the whole range/channel list into as few such windows\n"
-            "as possible instead of retuning channel by channel."
+            "as possible instead of retuning channel by channel.\n"
+            "Locked while the scanner is running - it needs a Stop first."
         ))
         self.bandwidth_spin.valueChanged.connect(self._push_settings)
         top_row.addWidget(self.bandwidth_spin)
@@ -795,7 +800,32 @@ class ScannerPanel(QGroupBox):
             label = dev.get("label") or dev.get("driver", "device")
             args = ",".join(f"{k}={v}" for k, v in dev.items())
             self.device_combo.addItem(label, (dev.get("driver", "auto"), args))
-        self.device_combo.addItem(tr("Simulation (no hardware)"), ("simulated", ""))
+        # "Simulation" is deliberately hidden from real users by default (see
+        # AppConfig.debug_mode's own comment) - a real RTL-SDR owner
+        # shouldn't be able to accidentally select it and wonder why the
+        # scanner is hearing fake bursts instead of their actual hardware.
+        if self.config.debug_mode:
+            self.device_combo.addItem(tr("Simulation (no hardware)"), ("simulated", ""))
+
+    def refresh_device_list(self) -> None:
+        """Re-populates the device dropdown after `config.debug_mode`
+        changes in Options (MainWindow wires this to the checkbox there) -
+        preserves the current selection if it's still in the list, falls
+        back to "Automatic" if not (e.g. debug mode just turned off while
+        "Simulation" was selected)."""
+        current = self.device_combo.currentData()
+        self.device_combo.blockSignals(True)
+        self.device_combo.clear()
+        self._populate_devices()
+        matched = False
+        for i in range(self.device_combo.count()):
+            if self.device_combo.itemData(i) == current:
+                self.device_combo.setCurrentIndex(i)
+                matched = True
+                break
+        if not matched:
+            self.device_combo.setCurrentIndex(0)
+        self.device_combo.blockSignals(False)
 
     def _load_from_config(self) -> None:
         self.bandwidth_spin.setValue(self.config.device.sample_rate_hz / 1e6)

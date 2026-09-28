@@ -242,6 +242,13 @@ class AppConfig:
     # a change needs a restart - see MainWindow._restart_app().
     language: str = "auto"
     legal_disclaimer: LegalDisclaimerConfig = field(default_factory=LegalDisclaimerConfig)
+    # Off by default - a real user shouldn't stumble into "Simulation (no
+    # hardware)" in the device dropdown and wonder why the scanner is
+    # hearing fake bursts instead of their actual RTL-SDR. Gates only the
+    # device list's own "Simulation" entry (see ScannerPanel._populate_devices()/
+    # refresh_device_list()) - purely a UI visibility toggle, not a behavior
+    # flag anything else in the app reads.
+    debug_mode: bool = False
 
     @staticmethod
     def load() -> "AppConfig":
@@ -291,6 +298,7 @@ class AppConfig:
             wfm_stereo_enabled=raw.get("wfm_stereo_enabled", False),
             language=raw.get("language", "auto"),
             legal_disclaimer=LegalDisclaimerConfig(**raw.get("legal_disclaimer", {})),
+            debug_mode=raw.get("debug_mode", False),
         )
 
     def save(self) -> None:
