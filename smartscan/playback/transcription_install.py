@@ -81,13 +81,23 @@ class TranscriptionInstallWorker(QThread):
         # packaging/linux-deb/README.md for why this is a known, documented
         # gap in the packaged build rather than something silently broken.
         if getattr(sys, "frozen", False):
-            self.finished_install.emit(
-                False, False,
+            message = (
                 "Transcription can't be installed from this packaged build - "
                 "there's no real Python/pip inside it to install into. Use "
                 "the pip/source install (see the project's README) if you "
-                "need transcription.",
+                "need transcription."
             )
+            # TranscriptionPanel._on_install_finished() only ever shows a
+            # generic "see the log above" status label on failure (true for
+            # every failure path here, not just this one) - the actual
+            # explanation always has to go through output_line into the
+            # visible install_log box, or there's nothing for that label to
+            # be pointing at. A real, reported bug: this branch originally
+            # skipped straight to finished_install.emit() with nothing ever
+            # written to the log, so the user saw an empty box under a
+            # message telling them to read it.
+            self.output_line.emit(message)
+            self.finished_install.emit(False, False, message)
             return
         # An existing .venv means this machine already needed the fallback
         # once before (or a previous install attempt got this far) - go

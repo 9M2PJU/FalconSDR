@@ -1,0 +1,29 @@
+#!/bin/sh
+# Reloads udev rules so the freshly-installed RTL-SDR permission rule takes
+# effect without needing a reboot - a device already plugged in at install
+# time still needs a replug (or `udevadm trigger`) to actually get the new
+# permissions applied to its existing device node, which this also attempts.
+#
+# Every udevadm/rmmod call below is wrapped in `timeout` - a real, found-
+# by-testing failure mode: `udevadm control --reload-rules` can hang
+# indefinitely (not just fail fast) in an environment with no running udev
+# daemon (a container, a minimal chroot, ...), which would otherwise wedge
+# the entire `apt install` transaction. A package's postinst must never be
+# able to hang the install - best-effort only, `|| true` either way.
+set -e
+
+if command -v udevadm >/dev/null 2>&1; then
+    timeout 5 udevadm control --reload-rules >/dev/null 2>&1 || true
+    timeout 5 udevadm trigger --subsystem-match=usb >/dev/null 2>&1 || true
+fi
+
+# The DVB-T blacklist only takes effect for a kernel module that isn't
+# already loaded - if some other software already grabbed the dongle as a
+# TV tuner before this package was installed, unload it now so a replug (or
+# this app's own "auto" device detection right after install) sees the
+# device free rather than needing a manual `rmmod`/reboot first.
+if command -v rmmod >/dev/null 2>&1; then
+    timeout 5 rmmod dvb_usb_rtl28xxu >/dev/null 2>&1 || true
+fi
+
+exit 0

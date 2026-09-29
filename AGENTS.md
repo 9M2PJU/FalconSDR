@@ -366,7 +366,28 @@ the `scanner_panel.py` call site).
       the whole GUI a second time instead of running pip. The transcription
       installer now fails with a clear message in a frozen build instead of
       doing that. Any future code path that shells out to `sys.executable`
-      expecting a real interpreter needs the same guard.
+      expecting a real interpreter needs the same guard. **That error
+      message must also go through `output_line.emit()`, not just
+      `finished_install.emit()`** - `TranscriptionPanel._on_install_finished()`
+      shows only a generic "see the log above" label on any failure (every
+      failure path, not just this one); the real explanation only ever
+      reaches the user via the `install_log` box, fed by `output_line`.
+    - **A fresh install has no udev rule granting a plain user access to an
+      RTL-SDR dongle's USB device, and nothing stops the kernel's own DVB-T
+      driver from claiming it first** - the `rtl-sdr` apt package normally
+      provides both, but this self-contained build intentionally depends on
+      no system package. Real, reported symptom: the device "isn't
+      detected" and the app silently falls back to `Simulated` (its "auto"
+      driver mode does that on *any* open failure, including a plain
+      permission error - gotcha 8), indistinguishable from a genuine
+      hardware problem. Fixed by shipping `60-rtl-sdr.rules` (udev,
+      0bda:2832/2838 → group `plugdev`) and `blacklist-rtl-dvb.conf`
+      (modprobe blacklist for `dvb_usb_rtl28xxu`/`rtl2832`/`rtl2830`) via
+      `postinst`. **Every `udevadm`/`rmmod` call in `postinst` is wrapped in
+      `timeout`** - `udevadm control --reload-rules` can hang indefinitely
+      (not just fail) with no running udev daemon (confirmed hanging the
+      whole `apt install` in a bare Docker container) - a postinst must
+      never be able to block an install.
 
 ## Testing without touching the user's real config/recordings
 

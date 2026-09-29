@@ -83,6 +83,8 @@ mkdir -p "$DEBROOT/usr/bin"
 mkdir -p "$DEBROOT/usr/share/applications"
 mkdir -p "$DEBROOT/usr/share/icons/hicolor/scalable/apps"
 mkdir -p "$DEBROOT/usr/share/doc/$PKG"
+mkdir -p "$DEBROOT/etc/udev/rules.d"
+mkdir -p "$DEBROOT/etc/modprobe.d"
 
 cp -r "$BUILD/dist/$PKG/." "$DEBROOT/opt/$PKG/"
 
@@ -96,6 +98,19 @@ cp "$SCRIPT_DIR/smartscanatc.desktop" "$DEBROOT/usr/share/applications/"
 cp "$REPO_ROOT/smartscan/gui/resources/app_icon.svg" \
    "$DEBROOT/usr/share/icons/hicolor/scalable/apps/smartscanatc.svg"
 cp "$SCRIPT_DIR/README.md" "$DEBROOT/usr/share/doc/$PKG/packaging-README.md"
+
+# Real user-reported gap: a fresh Ubuntu install has no udev rule granting a
+# plain user access to an RTL-SDR dongle's USB device node (the `rtl-sdr`
+# apt package normally ships one, but this self-contained build
+# deliberately doesn't depend on any system package - see README.md) - the
+# open() failure that causes looks identical to "no hardware detected" from
+# the user's side, since this app's "auto" driver mode silently falls back
+# to Simulated on any open failure (gotcha 8). Same for the kernel's own
+# DVB-T driver claiming the dongle before this app ever gets a chance to.
+cp "$SCRIPT_DIR/60-rtl-sdr.rules" "$DEBROOT/etc/udev/rules.d/"
+cp "$SCRIPT_DIR/blacklist-rtl-dvb.conf" "$DEBROOT/etc/modprobe.d/"
+cp "$SCRIPT_DIR/postinst" "$DEBROOT/DEBIAN/postinst"
+chmod 755 "$DEBROOT/DEBIAN/postinst"
 
 INSTALLED_SIZE_KB="$(du -sk "$DEBROOT/opt/$PKG" | cut -f1)"
 

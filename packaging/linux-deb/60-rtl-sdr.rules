@@ -1,0 +1,20 @@
+# Grants non-root users (group "plugdev", which a normal desktop user
+# account is a member of on Debian/Ubuntu by default) read/write access to
+# RTL2832U-based SDR dongles - without this, opening the device as a plain
+# user fails with a permission error, and since this app's "auto" driver
+# mode silently falls back to the Simulated backend on ANY open failure
+# (by design - see AGENTS.md gotcha 8, so a genuinely missing/unplugged
+# device doesn't wedge the scanner), that permission failure looks
+# identical to "no hardware detected" from the user's side - a real,
+# reported case on a fresh Ubuntu VM with no other RTL-SDR software
+# ever installed to provide this rule already (e.g. the `rtl-sdr` apt
+# package ships an equivalent rule, but this self-contained .deb
+# deliberately doesn't depend on it - see packaging/linux-deb/README.md).
+#
+# 0bda:2832 / 0bda:2838 are the two RTL2832U-based Vendor:Product IDs the
+# overwhelming majority of real RTL-SDR dongles (including RTL-SDR Blog
+# V3/V4) report as - covers what this project's own hardware was tested
+# against. A different SDR (HackRF, LimeSDR, ...) needs SoapySDR anyway
+# (not supported by this build - see README.md), so isn't covered here.
+SUBSYSTEM=="usb", ATTRS{idVendor}=="0bda", ATTRS{idProduct}=="2832", GROUP="plugdev", MODE="0666"
+SUBSYSTEM=="usb", ATTRS{idVendor}=="0bda", ATTRS{idProduct}=="2838", GROUP="plugdev", MODE="0666"

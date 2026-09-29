@@ -71,7 +71,14 @@ class MainWindow(QMainWindow):
             self.channels, self.blacklist, self.config.default_blacklist_margin_hz, self.channel_folders,
         )
 
-        # Options groups settings not directly tied to running the scanner.
+        # Options groups settings not directly tied to running the scanner -
+        # wrapped in a QScrollArea for the same reason as listen_scroll above:
+        # this tab's own content (Recording, Recency boost, Transcription,
+        # Location, Band presets, Language, Debug mode, Reset to defaults)
+        # easily exceeds a smaller/VM-default screen's height with nothing
+        # to scroll it - a real user-reported case (couldn't reach the
+        # bottom of Options at all on a small VM display, no Guest Additions
+        # for proper resizing).
         self.options_tab = QWidget()
         options_layout = QVBoxLayout(self.options_tab)
         self.recording_panel = RecordingPanel(self.config.recording)
@@ -106,12 +113,16 @@ class MainWindow(QMainWindow):
         reset_btn.clicked.connect(self._on_reset_to_defaults)
         options_layout.addWidget(reset_btn)
 
+        self.options_scroll = QScrollArea()
+        self.options_scroll.setWidgetResizable(True)
+        self.options_scroll.setWidget(self.options_tab)
+
         self.tabs = QTabWidget()
         self.tabs.addTab(self.listen_scroll, tr("Listen"))
         self.tabs.addTab(self.playback_panel, tr("Playback"))
         self.tabs.addTab(self.freq_manager, tr("Channels"))
         self.tabs.addTab(self.playback_panel.stats_tab, tr("Statistics"))
-        self.tabs.addTab(self.options_tab, tr("Options"))
+        self.tabs.addTab(self.options_scroll, tr("Options"))
         self.setCentralWidget(self.tabs)
 
         self.statusBar().showMessage(tr("Ready."))
@@ -229,7 +240,7 @@ class MainWindow(QMainWindow):
         FlightRadar24/ADSBExchange with no location configured yet - switch
         to Options and put the cursor right on the field that needs filling
         in, instead of just landing on the tab and leaving them to hunt for it."""
-        self.tabs.setCurrentWidget(self.options_tab)
+        self.tabs.setCurrentWidget(self.options_scroll)
         self.location_panel.focus_input()
 
     def _on_channel_saved(self, channel: Channel) -> None:

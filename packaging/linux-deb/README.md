@@ -15,6 +15,16 @@ system, which is exactly the "works on my machine, not on theirs" gap a
 "thin" package (one that just declares `python3-pyside6` etc. as `apt`
 dependencies) is exposed to across different Ubuntu/Debian releases.
 
+Also installs (`postinst`, `60-rtl-sdr.rules`, `blacklist-rtl-dvb.conf`):
+a udev rule granting a plain user access to an RTL2832U dongle's USB device
+(0bda:2832/2838), and a modprobe blacklist for the kernel's own DVB-T TV-
+tuner driver, which otherwise claims the dongle before this app ever gets a
+chance to. A real, reported case without these: on a fresh install with no
+other RTL-SDR software ever installed to provide them, the device silently
+looked "not detected" (this app's "auto" driver mode falls back to
+Simulated on *any* open failure, including a plain permission error) -
+matching neither a hardware problem nor a debug-mode one.
+
 ## Known limitations of this build (by design, not bugs)
 
 - **RTL-SDR only.** SoapySDR-based hardware (HackRF, LimeSDR, Airspy,
@@ -48,6 +58,25 @@ Builds in a **throwaway venv** (`packaging/linux-deb/build-venv/`, gitignored)
 — never the project's own `.venv` — specifically so nothing from your dev
 setup can leak into the frozen bundle by accident. Output:
 `packaging/linux-deb/out/smartscanatc_<date>_<arch>.deb`.
+
+## Testing in a VirtualBox VM
+
+- **Can't fullscreen / window won't resize with the VM window** — install
+  the VirtualBox Guest Additions inside the guest (`Devices` menu → "Insert
+  Guest Additions CD image…", then run the installer from the mounted CD).
+  This is a VM display-integration thing, unrelated to this app.
+- **RTL-SDR passthrough**: the host needs a VirtualBox Extension Pack
+  version that *exactly* matches the installed VirtualBox version (USB
+  2.0/3.0 passthrough silently doesn't work otherwise), the host user needs
+  to be in the `vboxusers` group, and the VM needs a USB device filter for
+  the dongle (Settings → USB → add filter, or
+  `VBoxManage usbfilter add 0 --target "<vm name>" --name "RTL-SDR" --vendorid 0bda --productid 2838`).
+- Once attached, `lsusb` inside the guest should show the dongle. If the app
+  still doesn't see it, this package's own udev rule/DVB blacklist (see
+  above) should already handle the two most common causes - if it's still
+  simulated after that, check `dmesg` in the guest for a USB error, and
+  confirm the device wasn't grabbed by the DVB-T driver anyway
+  (`lsmod | grep dvb`).
 
 ## Testing it without fooling yourself
 
