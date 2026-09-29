@@ -348,6 +348,25 @@ the `scanner_panel.py` call site).
     `analyze_wav()`'s SNR scoring (already relative to the file's own
     content) are untouched. Guards divide-by-zero for a genuinely all-
     silent file (stays all-zero).
+35. **`packaging/linux-deb/build.sh`** builds a self-contained PyInstaller
+    `--onedir` bundle wrapped in a .deb (RTL-SDR + sounddevice only - no
+    SoapySDR, no system PyAudio - see its own header comment and README.md
+    for the full rationale/known limitations). Two real, clean-container-
+    verified gotchas any other frozen build (Windows .exe, AppImage) will
+    also hit:
+    - **`tzdata` needs `--collect-data tzdata` explicitly** - it ships only
+      data files, so PyInstaller's static import analysis never sees
+      `zoneinfo`'s own runtime fallback to it and silently drops it,
+      reopening the exact `ZoneInfoNotFoundError` this package was added to
+      requirements.txt to prevent in the first place.
+    - **`main.py`'s venv re-exec check and `transcription_install.py`'s
+      installer both gate on `getattr(sys, "frozen", False)`** - a frozen
+      build's own `sys.executable` *is* the app itself, not a real Python;
+      calling `[sys.executable, "-m", "pip", ...]` would try to re-launch
+      the whole GUI a second time instead of running pip. The transcription
+      installer now fails with a clear message in a frozen build instead of
+      doing that. Any future code path that shells out to `sys.executable`
+      expecting a real interpreter needs the same guard.
 
 ## Testing without touching the user's real config/recordings
 

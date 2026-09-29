@@ -12,3 +12,8 @@ __pycache__/
 
 # OS cruft
 .DS_Store
+
+# Packaging build artifacts (built fresh by packaging/*/build.sh - never committed)
+packaging/linux-deb/build-venv/
+packaging/linux-deb/build/
+packaging/linux-deb/out/

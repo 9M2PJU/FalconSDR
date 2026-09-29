@@ -5,7 +5,21 @@ import sys
 from pathlib import Path
 
 sys.path.insert(0, str(Path(__file__).resolve().parent))
-from smartscan.venv_paths import VENV_DIR, VENV_PYTHON
+
+# A PyInstaller-frozen build (see packaging/linux-deb/) has no real Python
+# installation to re-exec into or later pip-install a venv alongside - the
+# whole point of freezing is that there's no on-disk site-packages/pip left
+# to talk about, and the bundle is typically installed somewhere a normal
+# user can't write to anyway (e.g. /opt/smartscanatc via the .deb). Skipping
+# this check under `sys.frozen` avoids depending on VENV_PYTHON simply
+# happening not to exist inside the bundle - the transcription install flow
+# (transcription_install.py) has this exact same guard for the same reason;
+# the in-app "Install transcription" button in a frozen build reports a
+# clear error instead of silently trying to create a venv it can't use.
+if not getattr(sys, "frozen", False):
+    from smartscan.venv_paths import VENV_DIR, VENV_PYTHON
+else:
+    VENV_DIR = VENV_PYTHON = None
 
 # The transcription tab (smartscan/playback/transcription_engine.py) needs
 # faster-whisper. On a plain (non-externally-managed) Python it's installed
@@ -23,7 +37,7 @@ from smartscan.venv_paths import VENV_DIR, VENV_PYTHON
 # VENV_PYTHON wouldn't tell us anything - whether we're actually running
 # "inside" this venv is what sys.prefix says instead, set by the interpreter
 # itself from the pyvenv.cfg next to whichever binary it was started with.
-if VENV_PYTHON.exists() and Path(sys.prefix).resolve() != VENV_DIR.resolve():
+if VENV_PYTHON is not None and VENV_PYTHON.exists() and Path(sys.prefix).resolve() != VENV_DIR.resolve():
     os.execv(str(VENV_PYTHON), [str(VENV_PYTHON), str(Path(__file__).resolve()), *sys.argv[1:]])
 
 # Real crashes have been observed (journalctl, when launched from the .desktop

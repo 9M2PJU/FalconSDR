@@ -71,6 +71,24 @@ class TranscriptionInstallWorker(QThread):
         return self._run_streamed([python_exe, "-m", "pip", "install", "--upgrade", *self._packages()])
 
     def run(self) -> None:
+        # A PyInstaller-frozen build's own sys.executable *is* the app
+        # itself, not a real Python interpreter - `[sys.executable, "-m",
+        # "pip", ...]` wouldn't run pip at all, it would try to re-launch
+        # this whole GUI a second time (frozen entry points ignore -m the
+        # way a real python3 binary understands it). Fail loudly and
+        # immediately here rather than let that happen - see main.py's own
+        # matching `sys.frozen` guard on the venv re-exec check, and
+        # packaging/linux-deb/README.md for why this is a known, documented
+        # gap in the packaged build rather than something silently broken.
+        if getattr(sys, "frozen", False):
+            self.finished_install.emit(
+                False, False,
+                "Transcription can't be installed from this packaged build - "
+                "there's no real Python/pip inside it to install into. Use "
+                "the pip/source install (see the project's README) if you "
+                "need transcription.",
+            )
+            return
         # An existing .venv means this machine already needed the fallback
         # once before (or a previous install attempt got this far) - go
         # straight there instead of re-discovering the same PEP 668 error.
