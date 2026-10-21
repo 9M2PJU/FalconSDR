@@ -1,5 +1,5 @@
 """Whether faster-whisper is importable right now - the one thing the whole
-optional-transcription UI (TranscriptionPanel, PlaybackPanel's notice,
+optional-transcription paths (worker.py, the Settings page,
 TranscriptionWorker's guard) needs to agree on, so it lives in one place
 instead of every caller re-implementing its own check.
 """

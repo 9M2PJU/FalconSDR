@@ -104,7 +104,7 @@ class Recorder:
 
     def end_transmission(self) -> Path | None:
         """Closes the current per-transmission file. Returns the finished
-        file's path so the caller can hand it straight to the Odtwarzacz
+        file's path so the caller can hand it straight to the recording
         library instead of waiting for a periodic rescan. Never called on a
         ``single_file=True`` Recorder (manual recording uses stop_session()
         directly instead - there's no per-transmission concept to end).
@@ -118,7 +118,7 @@ class Recorder:
         _play_and_record_slot), leaving the slot "open" for the full LINGER
         grace period with nothing but silence ever written. Without this,
         that produced an all-silent WAV that still got catalogued into the
-        Odtwarzacz library as a genuine recording - pure clutter with
+        recording library as a genuine recording - pure clutter with
         nothing to hear."""
         path = self._current_path
         had_real_audio = self._has_real_audio
@@ -148,7 +148,7 @@ class Recorder:
         manual recording is known to have actually captured a real
         frequency (tracked separately - a closed file has no metadata of
         its own to inspect), it should read as a normal frequency-tagged
-        recording in the Odtwarzacz library instead of the generic "Manual
+        recording in the recording library instead of the generic "Manual
         recording" fallback (models.MANUAL_FREQ_KHZ) that name would
         otherwise parse to. Renamed in place, inside its date folder (see
         _single_file_path()).
@@ -184,7 +184,7 @@ class Recorder:
         # playback/ for the matching (backward-compatible) parser change.
         stamp = now.strftime("%Y-%m-%d_%H-%M-%S-") + f"{now.microsecond:06d}"
         khz = round(freq_hz / 1000)
-        # Written straight into the date folder the Odtwarzacz library
+        # Written straight into the date folder the recording library
         # expects (see organizer.py) - no more loose files needing a later
         # "organize" pass before they show up.
         date_dir = Path(self.config.output_dir) / now.strftime("%Y-%m-%d")

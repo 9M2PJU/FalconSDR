@@ -4,69 +4,90 @@ Guidance for AI coding agents working in this repository.
 
 ## What this is
 
-SmartScanATC (`smartscanatc/`) is a PySide6 desktop app that scans a radio band
-(default: airband ATC 118–136 MHz) via SoapySDR (Linux) or a native librtlsdr
-backend (Windows/macOS — gotcha 16) and records audio **only** for
-transmissions the scanner actually stops on — never the retuning noise.
-`smartscan/scanner_engine.py`'s state machine is the authoritative spec.
+SmartScanATC scans a radio band (default: airband ATC 118–136 MHz) via
+SoapySDR (Linux) or a native librtlsdr backend (Windows/macOS — gotcha 16)
+and records audio **only** for transmissions the scanner actually stops on —
+never the retuning noise. `smartscan/scanner_engine.py`'s state machine is
+the authoritative spec.
+
+The UI is a **web app** served by the program itself (Python standard
+library HTTP server + vanilla JS/CSS, no framework, no build step). One
+program, three modes (`main.py`):
+
+- **local** (default) — this computer scans; UI on `http://127.0.0.1:8765`,
+  opened in the browser automatically. A second launch just reopens it.
+- **server** (`--server`, systemd `smartscanatc-receiver.service`) — same,
+  reachable from the whole network (phones too). `sdr-mode` (the owner's
+  mode switcher on the receiver) starts/stops exactly this unit — keep the
+  unit name and its clean SIGTERM shutdown (gotcha 41).
+- **client** — `AppConfig.remote_receiver.enabled`: this computer doesn't
+  scan; it runs a `Worker` for a server (local Whisper transcription and/or
+  a verified local copy of the recordings) and opens the server's UI.
 
 ## Running it
 
 ```
-cd smartscanatc
-python3 main.py
+python3 main.py                 # local; --server for the network; --local ignores a saved server
+python3 -m unittest tests/test_core.py
 ```
 
-`PySide6`, `numpy`, `scipy`, `pyqtgraph`, `pyrtlsdr`/`pyrtlsdrlib`,
-`sounddevice` — `pip install -r requirements.txt` covers Windows/macOS fully.
-`SoapySDR`/`PyAudio` need system packages on Linux (see `requirements.txt`),
-optional-but-preferred elsewhere. No SDR hardware/library at all, with
+`numpy`, `scipy`, `pyrtlsdr`/`pyrtlsdrlib`, `tzdata` —
+`pip install -r requirements.txt`. `SoapySDR` needs system packages on Linux
+(see `requirements.txt`). No SDR hardware/library at all, with
 `AppConfig.debug_mode` on → `SimulatedBackend` fallback rather than failing
 to start; with debug off (the default), a real connection failure stays
 visible (retry/backoff state) instead of silently simulating — gotcha 8.
 
 **License: GPL-3.0-or-later** (`LICENSE`) — forced by `pyrtlsdr` (GPL-3.0-or-later)
 and the bundled `librtlsdr` (GPL-2.0-or-later); every other dependency is
-permissive or LGPL. A new dependency must be GPLv3-compatible.
+permissive. A new dependency must be GPLv3-compatible.
 
-PySide6, not PyQt6 — `Signal`/`Slot`, not `pyqtSignal`. Set
-`PYQTGRAPH_QT_LIB=PySide6` if both bindings are ever installed side by side.
-
-**i18n**: every user string goes through `tr()` (`smartscan/i18n.py`);
-translations are `.po` files under `smartscan/locale/`, parsed by a small
-hand-rolled reader (no `gettext`/`.mo` build step — see
-`smartscan/locale/README.md` to add a language). `AppConfig.language`
-resolves once at startup via `QLocale.system()`. **Never build a
-module-level constant from `tr()` calls** — imports run before
-`i18n.set_language()`, so it freezes to English forever; wrap it in a
-function called at point of use instead (`military_presets.py`'s labels hit
-the same trap from the other direction — plain English, translated only at
-the `scanner_panel.py` call site).
+**i18n**: Python strings go through `tr()`, browser strings through `t()`
+(`static/js/core.js`) — both use the English text as the key into the same
+`.po` files under `smartscan/locale/` (hand-rolled reader, no `gettext`/`.mo`;
+`GET /api/i18n` hands the browser its catalog — "auto" language = the
+browser's). Every new UI string needs a `pl.po` entry. **Never build a
+module-level constant from `tr()`/`t()` calls** — they'd freeze before the
+catalog loads; wrap them in a function called at point of use
+(`military_presets.py`'s labels are plain English, translated in the UI).
 
 ## Architecture
 
+- `main.py` — CLI/modes, single-instance check, clean shutdown on
+  SIGTERM/SIGINT, mode switches (gotcha 41).
+- `smartscan/web/server.py` — `ThreadingHTTPServer` + JSON API + live-audio
+  stream + recording files (HTTP Range) + worker protocol; auth/CSRF in
+  `_route` (gotcha 38). `web/static/` — `index.html`, `app.css`,
+  `js/core.js` (DOM/i18n/dialogs), `js/state.js` (settings, live polling,
+  legal notices), `js/live-audio.js` (gotcha 40), `js/views/*.js` (Listen,
+  Recordings, Channels, Statistics, Settings).
+- `smartscan/controller.py` — `Controller`: owns `AppConfig`, Memory List,
+  blacklist, the one `ScannerEngine`, its live snapshot, audio fan-out and
+  the `Library`; config edits arrive as JSON patches (`merge_patch`).
+- `smartscan/playback/index.py` — `Library`: in-memory index of closed
+  recordings + quality/transcript/favorite/mirrored state, queries, facets,
+  stats, retention, and the server side of the worker protocol (gotcha 37).
+- `smartscan/worker.py` — `Worker`: transcription jobs (leased), mirroring,
+  one-shot upload/import of a client's own library, install command.
 - `smartscan/models.py` — `ScannerState`, `Channel`, `BlacklistEntry`.
-- `smartscan/config.py` — `AppConfig`, persisted to
-  `~/.config/SmartScanATC/config.json`. `device.sample_rate_hz` is the
-  wideband **capture bandwidth**; `memory_channel_bandwidth_hz` is the
-  per-channel power-window width for Memory List channels (a band uses its
-  own `step_hz` instead).
+- `smartscan/config.py` — `AppConfig`, persisted (atomically) to
+  `~/.config/SmartScanATC/config.json`; unknown keys ignored on load.
+  `device.sample_rate_hz` is the wideband **capture bandwidth**;
+  `memory_channel_bandwidth_hz` is the per-channel power-window width for
+  Memory List channels (a band uses its own `step_hz` instead).
 - `smartscan/storage.py` — CSV read/write for `channels.csv`/`blacklist.csv`.
 - `smartscan/channelizer.py` — `plan_windows()` groups channel frequencies
   into the fewest capture windows; `channel_powers_dbfs()`/
   `channel_powers_from_spectrum()` do one FFT per block and sum power per
-  channel's bins; `spectrum_snapshot()` feeds the GUI spectrum;
+  channel's bins; `spectrum_snapshot()` feeds the UI spectrum;
   `extend_boundary_window()` probes just past a *swept band's* edge (gotcha
   31/32 — never a single point).
-- `smartscan/dsp.py` — `Demodulator` (AM/NFM/WFM → audio, gotcha 7/25) and
-  `NoiseReducer` (spectral-gate, minimum-statistics noise floor).
+- `smartscan/dsp.py` — `Demodulator` (AM/NFM/WFM/SSB → mono audio, gotcha
+  7/25) and `NoiseReducer` (spectral-gate, minimum-statistics noise floor).
 - `smartscan/sdr_backend.py` — `SoapyBackend`, `RtlSdrBackend` (gotcha 16),
   `SimulatedBackend`, `AcquisitionThread` (gotcha 11 — this is what
   `ScannerEngine._backend` actually is). `open_real_backend()`/
   `create_backend()` pick/fall back (gotcha 8/9/10).
-- `smartscan/audio_output.py` — `AudioOutput`: live speaker via PyAudio or
-  `sounddevice`, own ring buffer + drift correction + RT-priority callback
-  (gotcha 26).
 - `smartscan/agc.py` — `SoftwareAgc`, software-driven RF gain control
   (gotcha 27).
 - `smartscan/recorder.py` — WAV writer only (gotcha 14: mp3 is a post-close
@@ -75,23 +96,17 @@ the `scanner_panel.py` call site).
   `CALCULATE_NEXT_FREQ → TUNING → SCANNING → SIGNAL_DETECTED ⇄ LINGER`.
   Retunes to a whole capture window, not a single channel; `SCANNING` picks
   the strongest non-blacklisted candidate per tick, `_service_active_slots()`
-  advances every already-open slot (gotcha 12/28). Talks to the GUI via
-  `ScannerSignals(QObject)`.
-- `smartscan/gui/` — `main_window.py` wires `panels/scanner_panel.py`,
-  `panels/frequency_manager.py`, `panels/recording_panel.py`, plus
-  `widgets.py` (`LevelMeter`, `RecIndicator`, `SliderSpin`, `SpectrumView` —
-  gotcha 30) and `theme.py`.
+  advances every already-open slot (gotcha 12/28). Reports through
+  `ScannerSignals` (plain callbacks — gotcha 36).
 
 ## Known gotchas (hit these once already — don't reintroduce)
 
-1. **Signal-loading guard.** A GUI panel that both loads `AppConfig` into
-   widgets on construction and wires those widgets' change signals to a
-   persist-to-config slot must set `self._loading = True` while populating,
-   `False` after (see `scanner_panel.py`/`recording_panel.py`) — otherwise
-   mid-load `setValue()` calls fire with sibling widgets still at
-   constructor defaults and write half-initialized state to disk.
-2. **Never use `QComboBox.findData()` with tuple/object payloads** —
-   unreliable. Do a manual linear scan over `itemData(i)`.
+1. **(Retired with the Qt UI.)** The web UI loads settings once per view
+   and writes only what a control changes (`state.js`'s `patchConfig`) — no
+   half-initialized widget state can reach disk.
+
+2. **(Retired with the Qt UI.)**
+
 3. **`SimulatedBackend.read()` must sleep for `num_samples/sample_rate`** or
    the engine spins the SCANNING dwell thousands of times/sec. Burst timing
    is a deterministic function of wall-clock time + a frequency hash, not
@@ -183,7 +198,7 @@ the `scanner_panel.py` call site).
     mechanism** — not audio, not `Recorder`-based. Writes SigMF from the
     *shared* window capture (never a second hardware read). Manual/
     momentary only (uncompressed IQ ≈ 19 MB/s at 2.4 MSPS). Doesn't go
-    through `recording_finished` (that feeds the Playback library, which
+    through `recording_finished` (that feeds the recording library, which
     expects WAV/MP3) — separate `raw_iq_recording_changed` signal, files in
     a `raw_iq/` subfolder, excluded from the audio library.
 16. **Windows/macOS get real RTL-SDR via `RtlSdrBackend`** (native
@@ -208,22 +223,25 @@ the `scanner_panel.py` call site).
 17. **Other SoapySDR hardware (HackRF/LimeSDR/Airspy/SDRplay/USRP) already
     works via `SoapyBackend`** with no code changes once the matching
     `soapysdr-module-*` is installed — nothing in it is RTL-SDR-specific.
-    `bandwidth_spin`'s range is `(0.25, 61.44)` MHz (not a hardware limit,
+    The UI's capture-width field accepts `0.25–61.44` MHz (not a hardware limit,
     just a generous bound — raise it if a real device needs more). Windows/
     macOS stay RTL-SDR-only for the zero-install path; conda-forge SoapySDR
     is a documented, unautomated path for other hardware there.
 18. **Transcription (faster-whisper) is an in-app-installable optional
-    extra**, not in `requirements.txt`. `is_transcription_installed()`
+    extra**, not in `requirements.txt`, and runs in a `Worker` (gotcha 37) on
+    whichever computer has it switched on — never assume the scanning
+    machine can run Whisper. `is_transcription_installed()`
     (`transcription_availability.py` — `importlib.invalidate_caches()` then
     `find_spec`) is the one source of truth; don't grow a second ad-hoc
-    `import faster_whisper` try/except elsewhere.
-    `TranscriptionInstallWorker` tries a plain `pip install` into the
-    running interpreter first; only falls back to a `--system-site-packages`
-    venv (`venv_paths.VENV_DIR`) on a PEP-668 `externally-managed-environment`
-    error — that fallback is the only path needing a restart.
-    `PlaybackPanel` gates on `is_transcription_installed()` before queuing
-    any transcription work, or a missing install retries forever
-    (`TranscriptionWorker` treats `"error"` status as never durable).
+    `import faster_whisper` try/except elsewhere. `install_transcription()`
+    tries a plain `pip install` into the running interpreter first; only
+    falls back to a `--system-site-packages` venv (`venv_paths.VENV_DIR`) on
+    a PEP-668 `externally-managed-environment` error — that fallback is the
+    only path needing a restart. A worker without Whisper never claims
+    jobs, and an `"error"` result isn't re-queued automatically within the
+    same server session (`Library._failed`), or a broken install would
+    retry forever.
+
 19. **A frequency-less filename (`..._session.wav` — manual recording,
     gotcha 13) must be recognized by `FILENAME_REGEX`/`parse_filename()`**
     (`playback/config.py`/`organizer.py`), mapped to `models.MANUAL_FREQ_KHZ`
@@ -237,15 +255,15 @@ the `scanner_panel.py` call site).
     ffmpeg to an in-memory WAV first (`_mp3_to_wav_bytes()`). Duration must
     come from actual bytes read, not the WAV header's declared frame count —
     ffmpeg's non-seekable-pipe muxer writes a sentinel `0x7FFFFFFF` there.
-20. **Legal disclaimers (`gui/legal_disclaimer.py`) are tracked per UI
-    language** (`AppConfig.legal_disclaimer`'s two seen-language lists), not
-    once-ever — a language switch means seeing them again, by design.
-    `maybe_show_launch_disclaimer()` is informational, once per language at
-    startup. `confirm_recording_disclaimer()` is a real gate (Continue/
-    Cancel) shared by *every* recording-starting action (auto-recording
-    both tabs, manual Record, raw IQ) — a decline must revert the
-    triggering toggle/button and have zero side effects (return before
-    enabling anything).
+20. **Legal disclaimers are tracked per UI language**
+    (`AppConfig.legal_disclaimer`'s two seen-language lists), not once-ever
+    — a language switch means seeing them again, by design. In the browser
+    (`state.js`): `maybeShowLaunchNotice()` is informational, once per
+    language at startup; `confirmRecording()` is a real gate (Continue/
+    Cancel) shared by *every* recording-starting action (auto-recording on
+    Listen and in Settings, manual Record, raw IQ) — a decline must revert
+    the triggering toggle/button and have zero side effects.
+
 21. **Band presets (`military_presets.py`) are JSON, not a hardcoded list**:
     bundled `smartscan/presets/band_presets.json` + user's
     `CONFIG_DIR/band_presets.json` (edits/additions/hidden-builtin-ids),
@@ -255,12 +273,14 @@ the `scanner_panel.py` call site).
     `hidden_builtin_ids`; the shipped JSON is never modified — the two cases
     take different code paths since only a shadowed one has a real user-list
     entry to remove. Import never overwrites on id collision (generates a
-    new id).
-22. **"Reset to defaults" must reset in-memory config/channels/blacklist/
-    presets BEFORE calling `_restart_app()`** — `_shutdown()` (which restart
-    calls first) persists whatever's currently in memory, so resetting
-    after would get overwritten right back. Never touches the recordings
-    directory itself.
+    new id). `upsert_preset()`/`delete_preset()`/`import_presets()` hold
+    these rules — the UI only calls the API.
+22. **"Reset to defaults" (`Controller.reset_to_defaults`) keeps the
+    recordings folder, the access password, connected computers and the
+    legal-notice state** — resetting `output_dir` would orphan the library
+    from the UI, resetting the password could lock the user out of a
+    headless server. Never touches the recordings themselves.
+
 23. **"Single File" auto-recording mode was removed, not fixed** — the
     per-slot fresh-`Recorder`-per-transmission design (gotcha 12) meant it
     never produced one continuous file. `Recorder` has a real `single_file:
@@ -282,12 +302,9 @@ the `scanner_panel.py` call site).
     per-chunk version dragged noise-only chunks up to the same loudness as
     voice chunks whenever their own peak cleared the floor, destroying real
     SNR before `analyze_wav()` ever measured it.
-26. **`AudioOutput`'s PortAudio callback thread requests SCHED_FIFO
-    real-time priority on first invocation** (`_boost_priority_once`), same
-    fix as gotcha 11 — this callback needs the GIL like any thread, and a
-    missed callback is an instant audible glitch. Best-effort; prints its
-    outcome unconditionally (not just under `SMARTSCAN_DEBUG_LIVE_AUDIO`) —
-    check this line first when debugging a live-audio report.
+26. **(Retired.)** Live audio no longer plays through PortAudio on the
+   machine running the scanner — it streams to the browser (gotcha 40).
+
 27. **Three gain modes (`DeviceConfig.gain_mode`): `"manual"`, `"auto"` =
     the tuner's own hardware AGC (passed straight to `backend.set_gain`,
     the default), `"sw_auto"` = `SoftwareAgc` (`smartscan/agc.py`).**
@@ -307,40 +324,32 @@ the `scanner_panel.py` call site).
     primary no priority over recording-only slots in the same pool batch,
     so more simultaneously-recording slots directly degraded live audio.
     Non-primary slots are still parallelized among themselves as before.
-    Related UI lesson from the same investigation: don't reach for
-    `QSpinBox.setSpecialValueText()` for a sentinel value (e.g. 0 =
-    unlimited) a user is expected to type over directly — its validator
-    rejects typing over the special text, only the spin arrows bypass it.
-    Also don't reflexively add a live-tick-read setting to a panel's
-    `set_running()` disable list — only lock a control during a scan if a
-    live change could actually corrupt something.
-29. **Both real-time-priority boosts (gotcha 11, gotcha 26) print their
-    outcome unconditionally** (`OK`/`NOT granted`) — check these lines
-    first for any live-audio/scan-speed report; a silently-ungranted boost
-    is otherwise indistinguishable from "granted but didn't help".
-30. **`SpectrumView` (Listen tab mini-spectrum) must be rate-limited and
-    cheap per update, or it can cause real dropped IQ chunks.** Submitting
-    a frame every SCANNING tick (~30/s) with an unconditional
-    `setPen()`/`setYRange()` on every call is real GIL-holding GUI-thread
-    work at nearly the scanner thread's own cadence — severe enough to
-    overflow `AcquisitionThread`'s bounded queue for real (this is why a
-    recording can run measurably short of real elapsed time, not just a
-    live-monitoring artifact). Fixed: `ScannerEngine._submit_spectrum()`
-    throttles to `_SPECTRUM_FPS` (10 Hz); `SpectrumView` caches the trigger
-    pen (only reassigned on color change) and skips `setYRange()` when the
-    range hasn't moved > 0.5 dB. `AcquisitionThread` also has always-on
+    Related UI lesson: don't reflexively disable a live-tick-read setting
+    while scanning — only lock a control during a scan if a live change
+    could actually corrupt something (gotcha 33).
+29. **The acquisition thread's real-time-priority boost (gotcha 11)
+    prints its outcome** (`OK`/`NOT granted`, in debug mode — gotcha 32) —
+    check this line first for any scan-speed report; a silently-ungranted
+    boost is otherwise indistinguishable from "granted but didn't help".
+
+30. **The live spectrum must stay rate-limited and cheap, or it can cause
+    real dropped IQ chunks.** Submitting a frame every SCANNING tick (~30/s)
+    with heavy work attached once overflowed `AcquisitionThread`'s bounded
+    queue for real (a recording can then run measurably short of real
+    elapsed time). `ScannerEngine._submit_spectrum()` throttles to
+    `_SPECTRUM_FPS` (10 Hz) on its own `_SpectrumWorker`; the controller
+    only downsamples to ≤600 points and stores the latest frame; browsers
+    poll it (4/s on the Listen page). `AcquisitionThread` also has always-on
     health counters (`chunks_read`/`chunks_DROPPED`/`slow_reads`/
-    `read_max_s`, printed every `_HEALTH_REPORT_INTERVAL_S`) —
+    `read_max_s`, printed every `_HEALTH_REPORT_INTERVAL_S` in debug mode) —
     `chunks_DROPPED` is the only place that can distinguish genuine data
-    loss from mere timing jitter. **Debug any live-audio/recording-timing
-    report against a real `MainWindow` session, not a headless/bare-engine
-    one** — GUI-thread contention doesn't exist in the latter.
+    loss from mere timing jitter.
+
 31. **`_extend_edges()`/`extend_boundary_window()` (probe past a *swept
     band's* true edge) must never fire for a frequency that isn't part of a
     genuine multi-point band grid.** A standalone Memory List point channel
-    or a degenerate "band" with `start_hz == stop_hz` (exactly what
-    `ScannerPanel._on_add_frequency()`'s "Quick-add a frequency" button
-    creates) each form a one-frequency window whose "edge" is that same Hz
+    or a degenerate "band" with `start_hz == stop_hz` (exactly what the
+    Listen page's "Single frequency" button creates) each form a one-frequency window whose "edge" is that same Hz
     on both sides — the old code couldn't tell that apart from a real band
     edge and fabricated up to ~28 fake candidate frequencies per side,
     which then get treated as real simultaneous detections/recordings.
@@ -353,23 +362,21 @@ the `scanner_panel.py` call site).
     `start_hz != stop_hz` check before ever calling `_extend_edges()`.**
 
 32. **`AppConfig.debug_mode` (default off) gates the "Simulation" entry in
-    the SDR device dropdown** — real users shouldn't be able to pick it by
-    accident instead of their actual hardware. `ScannerPanel.refresh_device_list()`
-    repopulates the combo (preserving the current selection if still valid)
-    when the Options checkbox toggles it live. Also gates the RT-priority
-    outcome prints (gotcha 26/29) and `AcquisitionThread`'s periodic health
-    summary (gotcha 30) — `debug=self.config.debug_mode` passed into both
-    at construction in `ScannerEngine._setup_static()`/`_open_backend()`.
-    The actual `sched_setscheduler()` calls always still happen regardless;
-    only the `print()`s are conditional, so a normal launch has zero
-    diagnostic console noise.
-33. **`device_combo`/`bandwidth_spin` are correctly locked while the scanner
-    is running** (`set_running()`) — unlike gotcha 24's max_concurrent_recordings
-    spinbox, changing SDR hardware or capture bandwidth genuinely requires
-    closing and reopening the device stream, which isn't supported live.
-    Don't unlock these; if this confuses users again, improve the tooltip,
-    not the lock.
-34. **`compute_waveform_peaks()` (Playback waveform preview) normalizes so
+    the SDR device list** (`Controller.devices()`) — real users shouldn't be
+    able to pick it by accident instead of their actual hardware. Also
+    gates the RT-priority outcome print (gotcha 29) and `AcquisitionThread`'s
+    periodic health summary (gotcha 30) — `debug=self.config.debug_mode`
+    passed in at construction in `ScannerEngine._open_backend()`. The actual
+    `sched_setscheduler()` call always still happens regardless; only the
+    `print()`s are conditional.
+
+33. **The SDR device and capture width are locked while the scanner is
+    running** (Listen page `lockDevice()`) — unlike most settings, changing
+    SDR hardware or capture bandwidth genuinely requires closing and
+    reopening the device stream, which isn't supported live. Don't unlock
+    these; if this confuses users again, improve the hint, not the lock.
+
+34. **`compute_waveform_peaks()` (recording waveform, `/api/recording/peaks`) normalizes so
     the recording's own loudest bucket reaches full bar height**, not its
     raw fraction of digital full scale — a weak/distant station's real
     peaks can sit at 5-15% of full scale even where speech is clearly
@@ -379,11 +386,11 @@ the `scanner_panel.py` call site).
     content) are untouched. Guards divide-by-zero for a genuinely all-
     silent file (stays all-zero).
 35. **`packaging/linux-deb/build.sh`** builds a self-contained PyInstaller
-    `--onedir` bundle wrapped in a .deb (RTL-SDR + sounddevice only - no
-    SoapySDR, no system PyAudio - see its own header comment and README.md
-    for the full rationale/known limitations). Several real, clean-
-    container-verified gotchas any other frozen build (Windows .exe,
-    AppImage) will also hit - all three below are the same underlying
+    `--onedir` bundle wrapped in a .deb (RTL-SDR only - no SoapySDR - plus
+    `smartscan/web/static` as data; see its own header comment and
+    README.md for the full rationale/known limitations). Several real,
+    clean-container-verified gotchas any other frozen build (Windows .exe,
+    AppImage) will also hit - the first two are the same underlying
     failure mode (a native library loaded dynamically at *runtime*, not
     linked at import time, so PyInstaller's static analysis can't see it
     needs bundling) with three different fix shapes depending on how each
@@ -404,35 +411,17 @@ the `scanner_panel.py` call site).
       False there, and the app falls through to the SoapySDR path this build
       deliberately doesn't ship, surfacing as "the python3-soapysdr module is
       not installed" instead of ever finding the real dongle.
-    - **`libportaudio.so.2` (live audio) needs an explicit `--add-binary`,
-      found via `ldconfig` at build time, plus a `sys.frozen`-gated
-      `ctypes.util.find_library()` monkeypatch in `audio_output.py`** -
-      `--collect-data` doesn't work here like it did for pyrtlsdrlib: Linux
-      `sounddevice` only ever calls `find_library("portaudio")`, a *system-
-      wide* ldconfig-cache search with no concept of a bundle's own
-      `_internal/` directory, even with that directory on `LD_LIBRARY_PATH`
-      (confirmed in a clean container: the .so was physically present there
-      and still not found). The monkeypatch hands `find_library` the bundled
-      file's real path directly instead of ever letting it search. Real,
-      user-reported symptom: recording worked (demod doesn't touch audio
-      output) but live listening was completely silent, with no error
-      shown - `AudioOutput.available` was simply `False`. Needs
-      `libportaudio2` installed on the *build* machine (system package, not
-      in requirements.txt) - `build.sh` now fails loudly at build time if
-      it's missing, rather than silently producing a .deb broken this way.
     - **`main.py`'s venv re-exec check and `transcription_install.py`'s
       installer both gate on `getattr(sys, "frozen", False)`** - a frozen
       build's own `sys.executable` *is* the app itself, not a real Python;
       calling `[sys.executable, "-m", "pip", ...]` would try to re-launch
-      the whole GUI a second time instead of running pip. The transcription
-      installer now fails with a clear message in a frozen build instead of
-      doing that. Any future code path that shells out to `sys.executable`
-      expecting a real interpreter needs the same guard. **That error
-      message must also go through `output_line.emit()`, not just
-      `finished_install.emit()`** - `TranscriptionPanel._on_install_finished()`
-      shows only a generic "see the log above" label on any failure (every
-      failure path, not just this one); the real explanation only ever
-      reaches the user via the `install_log` box, fed by `output_line`.
+      the whole app a second time instead of running pip. The transcription
+      installer fails with a clear message in a frozen build instead. Any
+      future code path that shells out to `sys.executable` expecting a real
+      interpreter needs the same guard. **That message must go through
+      `on_line`** - the worker's log (shown per computer in Settings) is the
+      only place the user sees why an install failed. Likewise `_restart()`
+      in `main.py` re-execs `sys.executable` directly when frozen.
     - **A fresh install has no udev rule granting a plain user access to an
       RTL-SDR dongle's USB device, and nothing stops the kernel's own DVB-T
       driver from claiming it first** - the `rtl-sdr` apt package normally
@@ -453,15 +442,60 @@ the `scanner_panel.py` call site).
       whole `apt install` in a bare Docker container) - a postinst must
       never be able to block an install.
 
+36. **Engine signals are plain synchronous callbacks** (`scanner_engine.Signal`,
+    no Qt): handlers run on whichever engine thread emits (main loop, slot
+    pool, spectrum worker). Every handler must be thread-safe and quick —
+    take a lock, store a value, return (`Controller._set_live`). A handler
+    exception is printed, never allowed to kill the engine thread.
+37. **The library only ever lists *closed* recordings.** `Library.rescan()`
+    skips `ScannerEngine.open_recording_paths()` (open slots + manual
+    recording), and `transcode_to_mp3()` writes `*.mp3.part` and renames —
+    a listed file may be downloaded, mirrored, transcribed or deleted, which
+    must never happen mid-write (real, earlier bug: a sync deleted a
+    recording still being written). New files join via
+    `recording_finished` → `Library.add_file`. Worker protocol: jobs are
+    leased (`_LEASE_S`) so two computers never transcribe the same file; a
+    result whose `key` (path|size|mtime) no longer matches is dropped; a
+    copy counts as mirrored only after a size check; imported metadata
+    (`import_metadata`) only fills gaps, never overwrites.
+38. **Access: the password is optional and off by default** (owner's
+    explicit choice — it's a home-LAN tool). When set (`/api/access`), every
+    `/api/` call except session/login/i18n needs the HttpOnly cookie or
+    `Authorization: Bearer`. Independently, every POST/PUT must carry
+    `X-SmartScan: 1` (a non-simple header → CORS preflight this server never
+    answers → other websites can't trigger actions), and local mode with no
+    password refuses non-loopback `Host` headers (DNS rebinding). Keep both
+    when adding endpoints; `api()` in `core.js` and `worker.Api` add the
+    header.
+39. **Settings are patched, not re-sent whole** (`state.js` `patchConfig` →
+    `POST /api/config` → `merge_patch`, which coerces to the field's current
+    type); only `bands` goes as a whole list. `access_token` and `workers`
+    are never patchable — they have their own endpoints.
+40. **Live audio in the browser = one long `fetch()` of raw PCM16 +
+    back-to-back `AudioBufferSourceNode`s** (`live-audio.js`, same approach
+    as the owner's SW listener). Not `AudioWorklet`: that needs a secure
+    context (HTTPS/localhost), and the UI is reached by plain `http://IP`.
+    Idle streams get 10 ms of silence every 5 s (keeps proxies/sockets
+    alive and lets the server notice dead listeners).
+41. **Mode switches and stops shut down cleanly first.** SIGTERM/SIGINT,
+    the UI's Quit, connect/disconnect all set `stop` in `main.py`, which
+    then runs `controller.shutdown()` (closes every open recording) before
+    exiting or re-exec'ing — `sdr-mode` stops the receiver unit on every
+    mode switch, and an `os.execv()` straight from a request handler would
+    leave truncated recordings.
+
 ## Testing without touching the user's real config/recordings
 
-Unit tests: `.venv/bin/python -m unittest tests/test_remote_and_config.py` (config load/save, receiver path checks, sync-delete rule). To smoke-test end to end, run the app with
-`QT_QPA_PLATFORM=offscreen`, select the "Symulacja" device entry, and point
-`recording.output_dir` at a scratch directory before starting — otherwise
+Unit tests: `python -m unittest tests/test_core.py` (sets its own scratch
+`HOME`). To smoke-test end to end, run `HOME=/tmp/x python3 main.py
+--no-browser --port 18810` with a config there that has
+`"debug_mode": true, "device": {"driver": "simulated"}` and a scratch
+`recording.output_dir` — otherwise
 config edits during a manual test run land in the real
-`~/.config/SmartScanATC/config.json`. When constructing `MainWindow`/
+`~/.config/SmartScanATC/config.json`. When constructing `Controller`/
 `ScannerEngine` directly in a script, set config overrides *before*
-construction (not after) — `PlaybackPanel.__init__` and similar eagerly read
-from config at construction time. Verified working combos: real RTL-SDR via
-`SoapyBackend`/`RtlSdrBackend`, and full state-machine + WAV recording via
-`SimulatedBackend`.
+construction. UI changes: check every page in a headless Chrome (DevTools
+protocol: console errors + screenshots, desktop and ~390 px wide). Verified
+working combos: real RTL-SDR via `SoapyBackend`/`RtlSdrBackend`, and full
+state-machine + WAV recording + browser UI + worker (transcription, mirror,
+upload) via `SimulatedBackend`.

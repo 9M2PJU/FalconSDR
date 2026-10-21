@@ -5,7 +5,7 @@ re-exec check and transcription_install.py both need the exact same
 computation, so it lives here once rather than being duplicated.
 
 Deliberately no other imports (this gets imported by main.py before its
-own re-exec decision, i.e. before anything heavier - PySide6 included -
+own re-exec decision, i.e. before anything heavier -
 is safe to import yet).
 """
 import sys

@@ -9,6 +9,7 @@ import logging
 from pathlib import Path
 from typing import Set
 
+from smartscan.config import atomic_write_text
 from smartscan.playback.config import FAVORITES_FILE
 
 logger = logging.getLogger(__name__)
@@ -30,7 +31,7 @@ class FavoritesStore:
 
     def save(self) -> None:
         try:
-            self.favorites_file.write_text(json.dumps(sorted(self._keys)))
+            atomic_write_text(self.favorites_file, json.dumps(sorted(self._keys)))
         except OSError as exc:
             logger.warning("Failed to save the favorites list: %s", exc)
 

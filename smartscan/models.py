@@ -1,7 +1,7 @@
 """Data models shared across SmartScanATC (scanner states, channels, blacklist entries)."""
 from __future__ import annotations
 
-from dataclasses import dataclass, field
+from dataclasses import dataclass
 from enum import Enum
 
 
@@ -13,16 +13,6 @@ class ScannerState(str, Enum):
     SIGNAL_DETECTED = "SIGNAL_DETECTED"
     LINGER = "LINGER"
     RECONNECTING = "RECONNECTING"
-
-
-class ScanMode(str, Enum):
-    VFO_RANGE = "vfo_range"
-    MEMORY_LIST = "memory_list"
-
-
-class RecordMode(str, Enum):
-    SINGLE_FILE = "single"
-    SPLIT_FILES = "split"
 
 
 class Modulation(str, Enum):
@@ -59,7 +49,6 @@ def resolve_ssb_sideband(modulation: Modulation, freq_hz: float) -> Modulation:
 
 
 # Audio-path states in which the recorder/speaker are allowed to be live.
-AUDIO_ACTIVE_STATES = frozenset({ScannerState.SIGNAL_DETECTED, ScannerState.LINGER})
 
 
 @dataclass
@@ -115,14 +104,3 @@ class BlacklistEntry:
 
     def contains(self, freq_hz: int) -> bool:
         return abs(freq_hz - self.freq_hz) <= self.margin_hz
-
-
-@dataclass
-class ScanStatus:
-    """Lightweight snapshot pushed from the engine thread to the GUI thread."""
-    state: ScannerState = ScannerState.IDLE
-    freq_hz: int = 0
-    level_dbfs: float = -120.0
-    channel_name: str = ""
-    recording: bool = False
-    recording_path: str = ""

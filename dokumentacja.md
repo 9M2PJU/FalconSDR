@@ -28,12 +28,15 @@ zdarzenia:
    nagrywająca na dysk.
 2. **Biblioteka odtwarzacza** — indeksowanie zapisanych nagrań, ocena ich
    jakości, transkrypcja mowy, statystyki, przeglądanie/filtrowanie/odtwarzanie.
-3. **Interfejs użytkownika** — pięć zakładek (Nasłuch, Kanały, Odtwarzacz,
-   Statystyki, Opcje) prezentujących i sterujących powyższymi dwoma
-   podsystemami, plus trwała konfiguracja zapisywana na dysku.
+3. **Interfejs użytkownika w przeglądarce** — pięć stron (Nasłuch, Nagrania,
+   Kanały, Statystyki, Ustawienia) serwowanych przez sam program po HTTP;
+   dowolna liczba przeglądarek (komputer, telefon) może być podłączona
+   jednocześnie. Trwała konfiguracja jest zapisywana na dysku po stronie
+   programu, nie przeglądarki (§21).
 
-Silnik skanera działa **niezależnie od tego, która zakładka GUI jest aktualnie
-widoczna** — przełączanie zakładek nie zatrzymuje ani nie spowalnia nasłuchu.
+Silnik skanera działa **niezależnie od tego, czy jakakolwiek przeglądarka jest
+podłączona i która strona jest widoczna** — zamknięcie karty nie zatrzymuje
+ani nie spowalnia nasłuchu.
 
 ### 1.1 Wątki i ich odpowiedzialność (wymóg architektoniczny, nie szczegół implementacyjny)
 
@@ -342,8 +345,8 @@ Pełny opis — patrz §6.5.
 
 ### 3.9 Stereo FM
 
-`wfm_stereo_enabled` (domyślnie: nie) — dekodowanie stereo dla WFM **tylko na
-żywo**; nagrania zawsze mono niezależnie od tego ustawienia.
+Usunięte razem z odsłuchem przez lokalny głośnik — dźwięk (na żywo i w
+nagraniach) jest zawsze mono.
 
 ### 3.10 Transkrypcja
 
@@ -377,7 +380,11 @@ linków playbacku FlightRadar24/ADSBExchange (§17.5).
 - Nagrania: `<output_dir>/<RRRR-MM-DD>/<znacznik_czasu>_<kHz>.wav` w trybie
   split (patrz §11.3); pojedynczy plik sesji w trybie single.
 - Pamięć podręczna jakości nagrań, pamięć podręczna transkrypcji, lista
-  ulubionych — osobne pliki JSON w katalogu danych aplikacji.
+  ulubionych, lista nagrań skopiowanych na inne komputery (`mirrored.json`)
+  — osobne pliki JSON w katalogu danych aplikacji, zapisywane atomowo (zapis
+  do pliku tymczasowego i podmiana).
+- Na komputerze pomocniczym (§21): `worker_state.json` w katalogu
+  konfiguracyjnym (czy jednorazowy import metadanych już się odbył).
 - Dziennik kalibracji mocy (`power_calibration.jsonl`) i pochodny z niego cache
   krzywej kompensacji brzegowej (§8) — w katalogu konfiguracyjnym.
 
@@ -394,7 +401,7 @@ linków playbacku FlightRadar24/ADSBExchange (§17.5).
 `freq_hz, margin_hz (domyślnie 5000), label, date_added`. Częstotliwość jest
 zablokowana, jeśli `|f − freq_hz| ≤ margin_hz`.
 
-### 4.3 Stan skanera (do wyświetlenia w GUI)
+### 4.3 Stan skanera (do wyświetlenia w interfejsie)
 
 `IDLE`, `CALCULATE_NEXT_FREQ`, `TUNING`, `SCANNING`, `SIGNAL_DETECTED`,
 `LINGER`, `RECONNECTING`. Tylko `CALCULATE_NEXT_FREQ`/`TUNING`/`SCANNING`
@@ -471,10 +478,10 @@ w tym samym takcie: raz do sprawdzenia mocy już aktywnych transmisji, raz do
 sprawdzenia kandydatów na nowe wykrycia — nigdy nie liczony od nowa dla
 każdego z tych dwóch celów osobno.
 
-### 5.4 Podgląd widma (GUI)
+### 5.4 Podgląd widma (interfejs)
 
 Osobna, tańsza redukcja tego samego FFT do ustalonej liczby punktów (np. 512)
-do wykresu w GUI: każdy punkt wyświetlany to **suma** (nie średnia!) mocy PSD
+do wykresu w interfejsie: każdy punkt wyświetlany to **suma** (nie średnia!) mocy PSD
 grupy binów, które reprezentuje — sumowanie odzwierciedla rzeczywistą moc
 zintegrowaną po paśmie (ta sama konwencja co przy odczycie mocy kanału wyżej),
 podczas gdy uśrednianie zaniżałoby wynik o wartość zależną od liczby binów na
@@ -887,7 +894,7 @@ jest więcej niż jeden kanał naraz.
 3. Wyjście audio to różnica kolejnych próbek fazy (dyskryminator FM), obcięta
    do zakresu [−3, 3] rad.
 
-### 10.3 WFM (radio FM, opcjonalnie stereo)
+### 10.3 WFM (radio FM)
 
 WFM wymaga zupełnie innego traktowania: dewiacja ±75 kHz i pasmo zajmowane
 ~180–200 kHz (reguła Carsona) zostałyby przefiltrowane do szumu przez zwykłą
@@ -895,8 +902,7 @@ decymację do wąskiej częstotliwości audio *przed* demodulacją — poprawną
 kolejnością dla wąskopasmowych AM/NFM.
 
 1. Zdecymuj IQ do pośredniej częstotliwości (np. 200 kHz — wystarczająco
-   szeroko, żeby zmieścić pełną dewiację ±75 kHz i pozostać powyżej 2× górnej
-   krawędzi podnośnej stereo 53 kHz), ograniczonej z góry do faktycznej
+   szeroko, żeby zmieścić pełną dewiację ±75 kHz), ograniczonej z góry do faktycznej
    przepustowości przechwytu, jeśli jest węższa.
 2. Weź fazę, rozwiń, dyskryminator FM (jak w NFM) — to sygnał kompozytowy
    (MPX).
@@ -904,27 +910,7 @@ kolejnością dla wąskopasmowych AM/NFM.
    (standard europejski/CCIR; USA używa 75 μs) — nadajniki z góry podbijają
    wysokie częstotliwości audio, licząc na to, że odbiornik je z powrotem
    ściągnie.
-4. Jeśli **mono**: zdecymuj wynik do końcowej częstotliwości audio i zwróć.
-5. Jeśli **stereo** (włączone globalnie, dotyczy tylko żywego odsłuchu —
-   nagrania zawsze mono niezależnie od tego ustawienia):
-   - Sygnał kompozytowy MPX niesie: mono L+R w 0–15 kHz, ton pilota 19 kHz,
-     różnicę L−R zmodulowaną DSB-SC na (stłumionej) podnośnej 38 kHz — razem
-     zajmując 23–53 kHz (ITU-R BS.450).
-   - Wyodrębnij pasmowo (filtr pasmowoprzepustowy) ton pilota (19 kHz ± 2 kHz)
-     i podnośną L−R (23–53 kHz), a dolnoprzepustowo (≤15 kHz) sygnał główny
-     L+R.
-   - Znormalizuj amplitudę pilota do jedności (śledzona wygładzona estymata
-     RMS), następnie **podnieś do kwadratu** — podwaja to jego częstotliwość do
-     dokładnie 38 Hz z dopasowaną fazą, co jest lekką alternatywą dla pełnej
-     pętli synchronizacji fazy (PLL), potrzebnej do koherentnej demodulacji
-     podnośnej.
-   - Zdemoduluj koherentnie podnośną L−R tym odtworzonym odniesieniem 38 kHz,
-     odfiltruj dolnoprzepustowo do pasma audio, pomnóż przez empiryczny
-     współczynnik wzmocnienia (kompensujący utratę amplitudy przy podnoszeniu
-     do kwadratu i to, że pilot niesie tylko ~10% szczytowej dewiacji
-     kompozytu).
-   - `L = (L+R) + (L−R)`, `R = (L+R) − (L−R)`, każdy przepuszczony osobno
-     przez de-emfazę, zdecymowany do końcowej częstotliwości audio.
+4. Zdecymuj wynik do końcowej częstotliwości audio.
 
 ### 10.4 Normalizacja wyjścia (wszystkie tryby)
 
@@ -1036,288 +1022,130 @@ Patrz §9.3–9.4 pełna semantyka: cisza w środku, obcięcie ogona.
 
 ---
 
-## 13. Odtwarzanie na żywo (wyjście audio)
+## 13. Odsłuch na żywo (w przeglądarce)
 
-### 13.1 Dopasowanie częstotliwości próbkowania
-
-Demodulator pracuje na niskiej częstotliwości audio (np. 12 500 Hz) — żadna
-karta dźwiękowa nie obsługuje tego natywnie. Strumień wyjściowy musi być
-otwarty na **natywnej częstotliwości urządzenia wyjściowego** (typowo
-44100/48000 Hz), z jawnym, wysokiej jakości przepróbkowaniem
-(polifazowe, np. `resample_poly`) po stronie aplikacji — pozostawienie tego
-sterownikowi/systemowi dźwięku dałoby typowo tańszą/gorszą konwersję.
-
-### 13.2 Przepróbkowanie ciągłe bez trzasków na granicy bloków
-
-Naiwne przepróbkowanie każdej ~30 ms działki osobno (bez kontekstu z sąsiednich
-działek) niejawnie dopełnia zerami poza granicami wejścia — powodując mały
-artefakt na *końcu* każdego bloku (filtr "widzi" ciszę zamiast prawdziwego
-audio, które faktycznie po nim nastąpi). Rozwiązanie: zamiast przepróbkowywać
-natychmiast, zatrzymuj mały margines *jeszcze nieprzepróbkowanych* próbek na
-końcu każdego wywołania (razem z prawdziwą historią lewego kontekstu z
-poprzedniego wywołania) — tak, żeby każda faktycznie wyemitowana próbka miała
-prawdziwe audio jako kontekst filtra po **obu** stronach, nigdy sztuczne zera.
-Kosztuje to stałe, niewielkie opóźnienie (kilka ms), nieistotne wobec własnych
-opóźnień przestrajania/trzymania skanera.
-
-### 13.3 Bufor pierścieniowy, oddzielenie od produkcji audio
-
-Wywołanie zapisujące audio (z wątku skanera) **nigdy nie może blokować** —
-wrzuca przepróbkowane audio do bufora pierścieniowego i wraca natychmiast.
-Osobny mechanizm sterownika dźwięku (własny wątek/callback, na żądanie
-urządzenia) pobiera z bufora, kiedy faktycznie potrzebuje kolejnej porcji do
-odtworzenia — całkowicie odseparowany czasowo od tego, czym akurat zajęty jest
-wątek skanera.
-
-Ograniczenie górne bufora (np. 2 sekundy) zabezpiecza przed nieograniczonym
-wzrostem pamięci, gdyby urządzenie wyjściowe kiedykolwiek się zawiesiło —
-nadmiar jest odrzucany (najstarsze próbki), nigdy blokując zapisującego.
-
-### 13.4 "Prime" (rozgrzewka bufora) i ponowne uzbrajanie po chwilowej przerwie
-
-Zanim faktycznie zacznie się realne odtwarzanie (start sesji, oraz po
-prawdziwym niedoborze danych), callback urządzenia **wstrzymuje** realne
-odtwarzanie i cicho gra ciszę, dopóki bufor nie zbierze zapasu (np. 0.5 s) —
-tak, żeby chwilowe zacięcie produkcji audio "zjadło" ten zapas zamiast być od
-razu słyszalne jako przerwa.
-
-**Pojedyncze** puste wywołanie callbacku (bufor akurat pusty) **nie** wymusza
-ponownego pełnego "prime" — normalna różnica tempa produkcji (~30 ms takty
-skanera) i konsumpcji (tempo wyznaczone przez sam sterownik audio) sprawia, że
-bufor od czasu do czasu naturalnie "ociera się" o zero bez żadnego realnego
-niedoboru. Dopiero **kilka kolejnych** pustych wywołań z rzędu (np. 4) uznawane
-jest za prawdziwy, trwały niedobór, wymuszający ponowne "prime" — inaczej
-każde takie normalne, nieszkodliwe "otarcie się o zero" samo w sobie wywoływało
-słyszalną ~200 ms ciszę za każdym razem, co paradoksalnie *powodowało*
-dokładnie ten przerywany dźwięk, któremu ten mechanizm miał zapobiegać.
-
-### 13.5 Korekcja dryfu zegara (drift correction)
-
-Zegar próbkowania SDR i zegar sprzętowy karty dźwiękowej to dwa niezależne
-fizyczne oscylatory — nigdy nie są *dokładnie* identyczne, nawet oba będąc
-nominalnie "poprawne". Bez korekcji, poziom bufora pierścieniowego powoli, ale
-systematycznie **dryfuje** w jedną stronę (nie tylko szumi losowo) w trakcie
-długiej sesji, aż w końcu wyczerpie zapas.
-
-Rozwiązanie: prosty regulator proporcjonalno-całkujący (PI) porównujący
-aktualny poziom bufora z celem (poziomem "prime") przy każdym zapisie i delikatnie
-"naciągający"/"ściskający" liczbę próbek bieżącego bloku (przez interpolację
-liniową) — rozciągając go, jeśli bufor jest za niski, ściskając, jeśli za
-wysoki. Korekcja jest zawsze małym ułamkiem bieżącego błędu (żeby sama korekcja
-była niesłyszalna, zbiegając stopniowo zamiast jednym skokiem) i nigdy więcej
-niż stały ułamek długości bloku (np. 25%) niezależnie od wielkości błędu.
-**Człon całkujący jest konieczny** — sam proporcjonalny regulator wobec
-*trwałego* zaburzenia (stała różnica tempa zegarów) matematycznie osiada na
-trwałym błędzie ustalonym zamiast kiedykolwiek faktycznie go zniwelować; człon
-całkujący (dużo mniejszy, z ograniczeniem narastania) usuwa właśnie ten błąd
-ustalony.
-
-### 13.6 Wyjście stereo zawsze
-
-Strumień wyjściowy jest zawsze otwierany jako **2-kanałowy**: mono
-(AM/NFM/WFM bez stereo) jest po prostu duplikowane na oba kanały (L=R), a
-prawdziwe stereo (WFM z włączonym dekodowaniem stereo) przechodzi bez zmian —
-strumień nigdy nie musi być ponownie otwierany przy zmianie mono/stereo w
-trakcie sesji.
+- Dźwięk na żywo to zawsze **aktualnie główny slot** (§7.3) — ten sam, mono,
+  już po redukcji szumów i blokadzie szumów, który trafia do nagrania.
+- Program wysyła go jako surowy strumień PCM 16-bit mono w natywnej
+  częstotliwości demodulatora (np. 12 500 Hz), jednym długim żądaniem HTTP
+  (nagłówek z częstotliwością próbkowania). Każdy słuchacz ma własną,
+  ograniczoną kolejkę (np. 50 bloków ~30 ms): wolny lub zawieszony słuchacz
+  traci najstarsze bloki, nigdy nie spowalnia silnika.
+- Gdy nic nie gra (brak transmisji), co ~5 s idzie 10 ms ciszy — utrzymuje
+  połączenie i pozwala wykryć słuchacza, który zniknął.
+- Przeglądarka planuje każdy odebrany blok jako osobny bufor dźwiękowy, jeden
+  za drugim, z ~0,25 s zapasu; jeśli kolejka wybiegła za bardzo w przyszłość
+  (>1,2 s) albo została w tyle, zaczyna od nowa z tym samym zapasem —
+  przerwy między transmisjami same "resetują" opóźnienie. Przepróbkowanie do
+  częstotliwości karty dźwiękowej robi przeglądarka. Zerwane połączenie jest
+  wznawiane po ~1 s.
+- Celowo **bez** wątków audio wymagających bezpiecznego kontekstu (HTTPS):
+  interfejs jest zwykle otwierany przez `http://<IP>` w sieci domowej.
+- Wyciszenie/głośność są **per przeglądarka** — nie wpływają na nagrywanie
+  ani na innych słuchaczy.
 
 ---
 
-## 14. Interfejs użytkownika
+## 14. Interfejs użytkownika (przeglądarka)
 
-Pięć głównych zakładek: **Nasłuch**, **Kanały**, **Odtwarzacz**, **Statystyki**,
-**Opcje**. Ciemny motyw kolorystyczny w całej aplikacji.
+Pięć stron: **Nasłuch**, **Nagrania**, **Kanały**, **Statystyki**,
+**Ustawienia**; na telefonie nawigacja jest na dole ekranu. Motyw jasny,
+ciemny lub zgodny z systemem (zapamiętywany w przeglądarce). W nagłówku
+zawsze: stan skanera, wskaźnik nagrywania i przycisk odsłuchu na żywo.
+Zmiany ustawień działają od razu (także na pracującym skanerze); suwaki są
+zapisywane z krótkim opóźnieniem (debounce).
 
-### 14.1 Zakładka Nasłuch (Skaner)
+### 14.1 Strona Nasłuch
 
-- Wybór urządzenia SDR (rozwijana lista: "Automatycznie", enumerowane
-  urządzenia SoapySDR, "Symulacja"), niedostępny do zmiany podczas pracy skanera.
-- Szerokość pasma przechwytu w MHz (podwójna rola — patrz §3.1).
-- **Lista pasm/zakresów** (przewijalna): każdy wiersz to checkbox
-  włącz/wyłącz, pole nazwy, checkbox "1 kanał" (pojedyncza częstotliwość
-  zamiast zakresu — automatycznie ustawia stop=start), start/stop w MHz, krok w
-  kHz, modulacja, waga priorytetu, przycisk "zaawansowane" (⚙, przełącza tryb
-  edycji per-pasmo — patrz §6.6/§7.4), przycisk usunięcia.
-- **Lista pamięci** jako rozwijany wiersz w tej samej liście (nie osobna
-  zakładka) — checkbox włącz/wyłącz całą listę, licznik "N włączonych", i po
-  rozwinięciu: drzewo włączonych kanałów pogrupowanych folderami, z
-  edytowalną wagą każdego bezpośrednio w drzewie.
-- Przyciski: "Dodaj preset" (z rozwijanej listy gotowych presetów pasm),
-  "Dodaj własny zakres", "Lista pamięci (kanały)" (skrót do zakładki Kanały),
-  szybkie dodanie pojedynczej częstotliwości.
-- Suwaki (każdy: pasek + pole liczbowe, oba aktualizują się na żywo w trakcie
-  przeciągania): Tuning Time, Linger Time, Trigger Level, Squelch (offset +
-  włącznik), Gain (+ checkbox Auto/AGC), siła redukcji szumów (+ włącznik).
-  Checkbox stereo WFM (dotyczy tylko żywego odsłuchu).
-- W trybie edycji "zaawansowanej" jednego pasma: powyższe suwaki (poza
-  squelchem, który zawsze jest globalny) zmieniają kolor na bursztynowy i
-  kontrolują to jedno pasmo zamiast ustawień globalnych; przyciski "Zapisz"
-  (zapisuje bieżące wartości jako nadpisania tego pasma) i "Przywróć domyślne"
-  (czyści wszystkie nadpisania, wraca do globalnych).
-- Miernik poziomu (pasek poziomy dBFS z linią progu wyzwalania).
-- Podgląd widma na żywo (mini-wykres bieżącego okna przechwytu), z linią progu
-  wyzwalania/squelcha (kolor bursztynowy, jeśli aktualnie tunowane pasmo ma
-  własne nadpisanie progu).
-- Etykieta "czas powrotu do tego okna" (rzeczywisty, zmierzony czas między
-  dwoma kolejnymi wizytami tego samego okna — nie teoretyczne wyliczenie, bo
-  ważone linie odwiedzane są w bardzo różnym rzeczywistym tempie).
-- Nazwa/częstotliwość aktualnie aktywnego kanału (do 3 wierszy jednocześnie
-  aktywnych kanałów, z dopiskiem "(+N więcej)" przy większej liczbie), stan
-  tekstowy (IDLE/SCANNING/SIGNAL_DETECTED/LINGER/RECONNECTING).
-- Przyciski: START/STOP, SKIP (pomiń bieżącą transmisję, częstotliwość
-  pozostaje skanowalna), SKIP + BLACKLIST (jak wyżej, plus trwałe zablokowanie
-  częstotliwości), WYCISZ (wyłącza tylko żywy odsłuch — nagrywanie działa
-  dalej w tle, jeśli włączone).
+- Duży odczyt częstotliwości głównego slotu (zielony przy sygnale), nazwa z
+  listy pamięci, pozostałe aktywne kanały jako "chipy", stan skanera, miernik
+  poziomu dBFS z markerem progu wyzwalania, "czas powrotu do tego okna".
+- Przyciski: Start/Stop, Słuchaj (+ głośność), Pomiń, Pomiń + czarna lista,
+  Nagrywaj (nagrywanie ręczne, §12), przełącznik automatycznego nagrywania,
+  Surowe IQ.
+- Widmo bieżącego okna przechwytu z linią progu i wodospadem (czyszczonym
+  przy zmianie okna).
+- "Co skanować": lista pasm (włącz/wyłącz, nazwa, zakres/krok/modulacja,
+  waga), "skanuj tylko to pasmo" (§6.6), edycja z **własnymi ustawieniami
+  pasma** — każde nadpisanie (próg, czasy, tryb i wartość wzmocnienia,
+  redukcja szumów) ma przełącznik "własna wartość / globalnie" (§7.4);
+  dodawanie z gotowych presetów, własnego zakresu albo pojedynczej
+  częstotliwości; przełącznik całej listy pamięci.
+- Panel "Odbiornik": próg wyzwalania, blokada szumów (+ offset), tryb
+  wzmocnienia (ręczny / sprzętowy auto / programowy auto) i wartość, czas
+  strojenia, podtrzymanie po transmisji, redukcja szumów (+ siła).
+- Urządzenie SDR i szerokość przechwytu — zablokowane podczas pracy skanera.
+- Dziennik zdarzeń silnika.
 
-### 14.2 Zakładka Kanały
+### 14.2 Strona Kanały
 
-Dwie podzakładki:
-
-- **Kanały (Memory List)**: pole wyszukiwania (filtruje po częstotliwości,
-  nazwie, modulacji, folderze — skrót Ctrl+F), drzewo kanałów pogrupowanych
-  folderami (przeciąganie kanału do folderu zmienia jego przypisanie),
-  checkbox włącz/wyłącz przy każdym kanale i przy folderze (checkbox folderu
-  ma stan pośredni, jeśli tylko część dzieci jest włączona — kliknięcie
-  ustawia wszystkie dzieci naraz). Przyciski: Dodaj, Edytuj (kanał lub — jeśli
-  zaznaczony folder — zmiana jego nazwy), Usuń (też klawisz Delete), Nowy
-  folder, "Wczytaj wojskowe (znane częstotliwości)", "Wczytaj straż pożarną
-  (znane częstotliwości)" — oba dopisują gotową listę znanych publicznie
-  częstotliwości (§14.3), nigdy nie nadpisując istniejącej listy (pomijają
-  duplikaty po dokładnej częstotliwości).
-- **Czarna lista (Blacklist)**: tabela (częstotliwość, margines w kHz, opis,
-  data dodania), przyciski Dodaj ręcznie / Usuń (też klawisz Delete).
+- **Lista pamięci**: tabela pogrupowana folderami (zwijanymi), wyszukiwanie,
+  dodawanie/edycja (częstotliwość, nazwa, modulacja, folder, waga),
+  włącz/wyłącz i waga bezpośrednio w tabeli, foldery (nowy, zmiana nazwy,
+  usunięcie z zawartością), dodanie polskich częstotliwości wojskowych i
+  strażackich (§14.3) do własnych folderów (bez duplikatów).
+- **Czarna lista**: wyszukiwanie, ręczne dodanie (częstotliwość, margines,
+  opis), usunięcie; wpisy z "Pomiń + czarna lista" są tu widoczne.
 
 ### 14.3 Gotowe presety (znane publicznie częstotliwości)
 
-**Presety pasm** (do jednoklikowego dodania w zakładce Nasłuch):
-lotnictwo cywilne (118–137 MHz, krok 8.33 kHz, AM), VHF wojskowe
-(137–144 MHz, 25 kHz, AM), UHF wojskowe (225–400 MHz, 25 kHz, AM), PMR446
-(446.00625–446.19375 MHz, 12.5 kHz, NFM), amatorskie 2 m (144–146 MHz,
-12.5 kHz, NFM), amatorskie 70 cm (430–440 MHz, 12.5 kHz, NFM), VHF morskie
-(156–162.025 MHz, 25 kHz, NFM), radio FM (87.5–108 MHz, 100 kHz, WFM), VHF
-straży pożarnej (148.6625–149.3375 MHz, 12.5 kHz, NFM), PRM
-(168.5–169.2 MHz, 12.5 kHz, NFM).
+Presety pasm (Ustawienia → Presety pasm) i zestawy kanałów wojskowych/
+strażackich pochodzą z publicznie dostępnych źródeł. Presety: wbudowane +
+własne; edycja wbudowanego tworzy własną kopię o tym samym identyfikatorze,
+usunięcie wbudowanego go ukrywa; import nigdy nie nadpisuje (nowy
+identyfikator przy kolizji); eksport tylko własnych.
 
-**Gotowe kanały wojskowe** (przycisk "Wczytaj wojskowe"): częstotliwości
-guard, tankowanie w powietrzu (cysterny), sektory OAT Warszawa (EPWW), oraz
-częstotliwości wież/podejść baz QRA/Baltic Air Policing (Malbork, Łask, Mińsk
-Mazowiecki, Powidz, Świdwin, Mirosławiec).
+### 14.4 Strona Nagrania
 
-**Gotowe kanały straży pożarnej** (przycisk "Wczytaj straż pożarną"): ogólnopolskie
-kanały ratowniczo-gaśnicze PSP (KRG 1–8), oraz częstotliwości alarmowania
-syren OSP (Tx/Rx w paśmie 148.6625–149.3375 MHz) — wiele OSP wciąż pracuje
-analogowo mimo migracji PSP do cyfrowego DMR.
+- Panel boczny: Częstotliwości / Pasma / Języki, każda pozycja z liczbą
+  nagrań i średnią jakością; filtr, sortowanie; "Wszystkie", "Ulubione";
+  Ctrl+klik wybiera kilka pozycji.
+- Wyszukiwanie po częstotliwości, nazwie, dacie, nazwie pliku i treści
+  transkrypcji; zakres czasu, minimalna jakość, kolejność (najnowsze,
+  najstarsze, najlepsze, najdłuższe); czas lokalny/UTC; automatyczne
+  odtwarzanie kolejnego; przełącznik automatycznej transkrypcji.
+- Lista stronicowana (doładowywana przy przewijaniu), zaznaczanie wielu (także
+  "zaznacz wszystkie pasujące") z akcjami: ulubione, transkrybuj, usuń.
+- Odtwarzacz: fala dźwiękowa (§14.5) z przewijaniem kliknięciem, poprzednie/
+  następne (także klawisze ↑/↓, spacja), ulubione, zapis częstotliwości na
+  listę pamięci (nazwa + folder), odtworzenie lotów FR24/ADSBx (§17.5),
+  pobranie pliku, usunięcie; transkrypcja z językiem, oznaczeniem niskiej
+  pewności/edycji, ręczną edycją i ponowną transkrypcją (z wymuszonym
+  językiem lub wykrywaniem).
+- Nowe nagrania pojawiają się same, gdy przeglądane są najnowsze.
 
-### 14.4 Zakładka Odtwarzacz
+### 14.5 Widok fali dźwiękowej
 
-Główny widok: pasek narzędzi u góry, panel boczny z listą częstotliwości/
-języków, tabela nagrań (środek/prawo), panel transkrypcji, pasek odtwarzania
-na dole.
-
-**Pasek narzędzi**: przycisk Odśwież (F5) — segreguje nowe pliki i ponownie
-skanuje bibliotekę; pasek postępu; checkbox "Czas UTC" (przełącza wyświetlanie
-czasu w całej zakładce); filtr daty (Wszystkie / Dzisiaj / Ostatnie 24h /
-Ostatnie 7 dni / Ostatnie 30 dni / konkretny dzień z listy); suwak minimalnej
-jakości (0–100); checkbox "Transkrypcja auto" z etykietą postępu; pole
-wyszukiwania pełnotekstowego (Ctrl+F — przeszukuje nazwę pliku, częstotliwość,
-datę, treść transkrypcji); przyciski szybkiego sortowania "Najnowsze"/
-"Najlepsza jakość".
-
-**Panel boczny częstotliwości/języków**: przełącznik trybu Częstotliwości/
-Języki, kombo sortowania (3 opcje w każdym trybie), wpis "Wszystkie" i
-"★ Ulubione" na górze, poniżej lista pogrupowana odpowiednio po częstotliwości
-(z nazwą, jeśli znana z Listy pamięci) lub po wykrytym/wymuszonym języku
-transkrypcji (z etykietami pełnych nazw dla popularnych języków, plus
-"(bez transkrypcji)" dla nagrań bez wyniku). Wybór w jednym trybie czyści
-filtr z drugiego (nigdy nieoczekiwanie się nie łączą).
-
-**Tabela nagrań** — kolumny: Data, Godzina, Częstotliwość (z nazwą, jeśli
-znana), Czas trwania, SNR (dB), Jakość (0–100, tło komórki kolorowane
-czerwony→żółty→zielony wg wyniku; szare tło = plik nieczytelny), Rozmiar,
-Transkrypcja (snippet tekstu albo etykieta statusu: "⏳ w kolejce", "– za
-krótkie", "🔇 brak mowy", "⚠ błąd transkrypcji", "❓ niska pewność"; tło
-kolorowane wg statusu). Sortowalna po dowolnej kolumnie (numerycznie/czasowo,
-nie leksykograficznie). Zaznaczenie wiersza (klik lub strzałki) odtwarza
-nagranie. Menu kontekstowe (PPM): Odtwórz, Pokaż w folderze (z zaznaczonym
-plikiem, przez usługę D-Bus menedżera plików, z zapasowym zwykłym otwarciem
-folderu), Kopiuj ścieżkę, Dodaj/usuń z ulubionych, Zapisz częstotliwość,
-Transkrybuj ponownie, FlightRadar24, ADSBExchange, Usuń — z wariantem dla
-wielokrotnego zaznaczenia (operacje zbiorcze). Klawisz Delete usuwa zaznaczone
-(z potwierdzeniem, wypisując nazwy plików).
-
-**Panel transkrypcji**: nagłówek z częstotliwością i statusem, przyciski
-FlightRadar24/ADSBExchange (otwierają playback w przeglądarce o czasie tego
-nagrania — patrz §17.5), "Zapisz częstotliwość" (dialog: nazwa + folder,
-zapisuje/nadpisuje w Liście pamięci), przycisk ulubionych (☆/★), wybór języka
-do wymuszenia przy ręcznej transkrypcji ("Auto (wykryj)" / Polski / English /
-dowolny wpisany kod ISO), przycisk "Transkrybuj ponownie" (pomija cache).
-Pole tekstowe transkrypcji jest **edytowalne ręcznie** — zmiana zapisuje się
-automatycznie po przejściu do innego nagrania (puste pole = cofnięcie do
-"brak transkrypcji"; wypełnione = zapisane jako wynik ze statusem "ok" i
-silnikiem "manual", widoczne w tabeli identycznie jak wynik automatyczny).
-
-**Pasek odtwarzania**: widok fali dźwiękowej pełnej szerokości (zamiast
-zwykłego paska postępu — patrz §14.5), pod nim: przyciski ⏮/▶⏸/⏹/⏭, etykieta
-"teraz odtwarzane", czas (mm:ss / mm:ss), suwak głośności, checkbox
-"Auto-odtwarzanie kolejnych" (domyślnie włączony — po zakończeniu nagrania
-automatycznie odtwarza kolejne z listy, do szybkiego przeglądu ruchu).
-Spacja = play/pause (globalny skrót w tej zakładce).
-
-### 14.5 Widok fali dźwiękowej (Odtwarzacz)
-
-Zastępuje zwykły pasek postępu — pełni tę samą rolę (klik lub przeciągnięcie =
-przewinięcie do tej pozycji), jednocześnie pokazując amplitudę w czasie:
-
-- Amplituda szczytowa (0–1) w N kubełkach (np. 400) pokrywających cały plik —
-  obliczana raz przy starcie odtwarzania danego pliku (szybkie, wektoryzowane
-  odczytanie i redukcja całego pliku, wykonywane synchronicznie, bez wątku w
-  tle, bo pojedynczy plik nagrania to zwykle sekundy-dziesiątki sekund).
-- Rysowanie: szare słupki dla części jeszcze nieodtworzonej, zielone dla już
-  odtworzonej, pionowa linia głowicy odtwarzania, cienka pozioma linia
-  środkowa. Dwie wersje (szara/zielona) są renderowane raz do bitmapy i tylko
-  przycinane/nakładane przy każdej aktualizacji pozycji (kilka razy na
-  sekundę) — nie rysowane od zera przy każdej klatce.
-- Brak danych (plik nieczytelny lub jeszcze nie policzone) → płaska linia
-  zamiast słupków, żeby odróżnić "brak danych" od "faktycznie cicho przez cały
-  plik" (to drugie wygląda jak bardzo niskie słupki, nie płaska linia — obie
-  sytuacje muszą być wizualnie rozróżnialne).
-- Pozwala od razu zobaczyć np. przerwę wyciszoną przez squelch (§9) jako
-  wyraźnie cichszy odcinek, bez konieczności odtwarzania na ślepo.
+Zgrubny przegląd obwiedni nagrania (§17.4), z zaznaczonym postępem
+odtwarzania; kliknięcie przewija.
 
 ---
 
-## 15. Zakładka Statystyki
+## 15. Strona Statystyki
 
-Górny panel podsumowania: liczba nagrań, łączny czas trwania, zakres dat, średnia
-jakość, najaktywniejsza częstotliwość, liczba unikalnych częstotliwości.
-
-Tabela częstotliwości: częstotliwość, liczba nagrań, średnia jakość, łączny
-czas trwania, ostatnio słyszana — sortowalna, podwójny klik przenosi do
-zakładki Odtwarzacz przefiltrowanej do tej częstotliwości.
-
-Widok przełączany między podsumowaniem a szczegółem, z wykresami słupkowymi:
-liczba nagrań per dzień, rozkład godzinowy (0–23), rozkład wg dnia tygodnia
-(Pon–Nd, zawsze wszystkie 7 dni pokazane nawet z zerem).
-
-Wszystkie statystyki respektują przełącznik czasu lokalnego/UTC.
+Kafelki (liczba nagrań, łączny czas, liczba częstotliwości, średnia jakość,
+najaktywniejsza częstotliwość, zakres dat), wykresy wg godziny i dnia
+tygodnia, dzienny (ostatnie dni), tabela częstotliwości (liczba, jakość,
+łączny czas, ostatnio słyszana) — kliknięcie otwiera nagrania tej
+częstotliwości. Czas lokalny lub UTC.
 
 ---
 
-## 16. Zakładka Opcje
+## 16. Strona Ustawienia
 
-- **Nagrywanie**: włącz/wyłącz, tryb Single/Split, katalog docelowy (wybór
-  folderu), wstawianie znacznika dźwiękowego (tylko tryb Single).
-- **Recency boost**: włącz/wyłącz, czas trwania boostu (5–600 s, krok 5),
-  odstęp między dodatkowymi wizytami (1–120 s, krok 1).
-- **Transkrypcja**: włącz/wyłącz automatyczną kolejkę w tle (ten sam
-  przełącznik co w pasku narzędzi Odtwarzacza — oba zsynchronizowane).
-
-Wszystkie zmiany w tej zakładce zapisują się natychmiast do trwałej
-konfiguracji i (tam gdzie dotyczy trwającego skanu) działają od razu, bez
-restartu.
+Nagrywanie (automatyczne, limit jednoczesnych, WAV/MP3, folder); Dysk i
+przechowywanie (§21.3); Transkrypcja i komputery (§21.2, modele Whisper,
+urządzenie, języki, minimalna długość); Połączenie z serwerem (tylko w trybie
+lokalnym, §21.1); Dostęp (opcjonalne hasło, §21.4); Lokalizacja (do FR24/ADSBx,
+także z lokalizacji urządzenia); Harmonogram (recency boost, domyślny margines
+czarnej listy); Presety pasm; Wygląd i język ("automatycznie" = język
+przeglądarki); Zaawansowane (tryb debugowania z symulowanym urządzeniem,
+przywrócenie ustawień domyślnych — zachowuje nagrania, folder nagrań, hasło i
+podłączone komputery; w trybie lokalnym zamknięcie programu).
 
 ---
 
-## 17. Biblioteka nagrań (Odtwarzacz — logika danych)
+## 17. Biblioteka nagrań (logika danych)
 
 ### 17.1 Segregacja plików
 
@@ -1410,13 +1238,12 @@ algorytmem w nieskończoność.
 Zamiast czekać na pełne okresowe przeskanowanie katalogu, każda właśnie
 zakończona transmisja (sygnał z silnika skanera) jest doklejana do biblioteki
 natychmiast: sparsowanie nazwy, odczyt/policzenie jakości, dociągnięcie
-transkrypcji/statusu ulubionego z pamięci podręcznych, wstawienie do modelu
-tabeli **bez resetowania całej tabeli** (żeby nie gubić zaznaczenia/przewinięcia
-widoku). Odświeżenie panelu bocznego częstotliwości i zakładki Statystyki po
-takim zdarzeniu jest **debounced** (np. raz na sekundę, z ograniczeniem, by
-ciągły napływ nie odkładał tego w nieskończoność) — pełne przebudowanie
-wykresów/tabeli częstotliwości dla dużego archiwum jest zbyt kosztowne, by
-robić to przy każdej pojedynczej transmisji.
+transkrypcji/statusu ulubionego z pamięci podręcznych. Biblioteka **nigdy nie
+pokazuje pliku, który jest jeszcze zapisywany** (otwarte sloty i nagranie
+ręczne są pomijane; konwersja do MP3 zapisuje pod tymczasową nazwą i podmienia
+na końcu) — pokazany plik może zostać pobrany, skopiowany, przetranskrybowany
+albo usunięty. Pełne przeskanowanie katalogu odbywa się co ~2 minuty (pliki
+dodane z zewnątrz), analiza jakości brakujących plików — w tle.
 
 ---
 
@@ -1519,26 +1346,20 @@ Progi dobrane empirycznie na realnych nagraniach z tego projektu:
   tej samej kolejki transkrypcji, jeszcze bardziej obciążając CPU (błędne
   koło, któremu ta rezerwa zapobiega).
 
-### 18.6 Kolejka w tle — dwa tryby budowania listy "do zrobienia"
+### 18.6 Kolejka — kto i co transkrybuje
 
-- **Pełne nadrobienie zaległości** (start programu, ręczne odświeżenie, albo
-  wznowienie po zakończonej paczce): skanuje **całe** bieżące archiwum
-  przeciwko pamięci podręcznej — każdy plik bez wyniku, oraz (tylko w tym
-  trybie) każdy plik ze statusem `error`, trafia do kolejki.
-- **Nowo zakończone pojedyncze nagranie**: dodawane do kolejki od razu, bez
-  ponownego skanowania całego archiwum (uniknięcie kosztu rosnącego z
-  rozmiarem archiwum przy każdej pojedynczej transmisji).
-- **Wznowienie zaraz po zakończonej paczce**: sprawdza tylko naprawdę nowe
-  pliki (bez żadnego wyniku), **celowo pomijając** ponowną próbę plików ze
-  statusem `error` z tej samej paczki — bez tego wyjątku, plik kończący się
-  błędem natychmiast kwalifikowałby się do kolejnej paczki, która zakończyłaby
-  się tym samym błędem, w kółko, bez żadnej przerwy (obserwowany realnie
-  przypadek nieskończonej pętli obciążającej GPU/CPU).
-- Zapis pamięci podręcznej transkrypcji w trakcie przetwarzania paczki jest
-  throttlowany (np. co najwyżej raz na 5 sekund, plus zawsze raz na koniec) —
-  zapis **całego** pliku pamięci podręcznej po każdym pojedynczym
-  przetworzonym nagraniu skalowałby koszt z rozmiarem całego archiwum, nie
-  tylko nowej paczki.
+- Transkrypcję wykonuje dowolny "komputer" (§21.2), który ma ją włączoną i
+  zainstalowaną — sam program albo komputer pomocniczy z GPU.
+- Komputer prosi o zadanie; dostaje najpierw ręcznie zlecone (z ewentualnie
+  wymuszonym językiem), potem — gdy włączona jest automatyczna transkrypcja —
+  **najnowsze** nagranie bez wyniku. Zadanie jest "dzierżawione" (np. 15 min):
+  dwa komputery nigdy nie robią tego samego pliku.
+- Wynik dla pliku, który w międzyczasie zmieniono lub usunięto (inny klucz
+  ścieżka|rozmiar|czas modyfikacji), jest odrzucany.
+- Plik zakończony błędem nie wraca do kolejki automatycznie do restartu
+  programu (zabezpieczenie przed nieskończoną pętlą); ręczna "ponowna
+  transkrypcja" zawsze działa.
+- Zapis pamięci podręcznej transkrypcji jest throttlowany (najwyżej co ~5 s).
 
 ---
 
@@ -1592,3 +1413,53 @@ jeśli program ma być równie łatwy do utrzymania:
   bufora audio na żywo — oraz osobno to samo dla czasu samego blokującego
   odczytu sprzętu (rozróżnienie: "za dużo pracy na takt" wymaga innej naprawy
   niż "sprzęt/USB nie dostarcza danych w czasie rzeczywistym").
+
+---
+
+## 21. Tryby pracy, komputery pomocnicze, dysk i dostęp
+
+### 21.1 Trzy tryby jednego programu
+
+- **Lokalny** (domyślny): ten komputer skanuje; interfejs pod
+  `http://127.0.0.1:8765`, otwierany automatycznie; ponowne uruchomienie tylko
+  otwiera działający interfejs. Zamykany z Ustawień → Zaawansowane.
+- **Serwer** (`--server`, usługa systemd): to samo, ale dostępne z całej sieci;
+  skanowanie startuje od razu (`--start`). Zatrzymanie usługi (np. przez
+  przełącznik trybów dongla) zamyka nagrania poprawnie.
+- **Klient**: komputer połączony z serwerem (Ustawienia → Połączenie z
+  serwerem) nie skanuje; pracuje dla serwera jako komputer pomocniczy (§21.2)
+  i otwiera interfejs serwera. Lokalna strona pokazuje stan połączenia i
+  pozwala wrócić do trybu lokalnego. Każda zmiana trybu najpierw poprawnie
+  zamyka skaner i nagrania, potem uruchamia program ponownie.
+
+### 21.2 Komputery pomocnicze
+
+Każdy proces programu ma wbudowany "komputer" (sam serwer), a każdy klient
+jest kolejnym. Na serwerze, per komputer: transkrypcja tu (z przyciskiem
+instalacji Whisper, także z GPU), trzymanie kopii każdego nagrania w
+wybranym folderze (kopia uznawana za gotową dopiero po sprawdzeniu rozmiaru;
+pobieranie przez plik tymczasowy), odłączenie, zapomnienie. Polecenia
+dochodzą do komputera w ciągu kilku sekund. Przy pierwszym połączeniu klient
+jednorazowo przenosi swoje dotychczasowe transkrypcje, oceny jakości i
+ulubione dla plików, które serwer też ma (dopasowanie po ścieżce względnej i
+rozmiarze; nigdy nie nadpisuje). Jeśli klient ma nagrania, których serwer nie
+ma, serwer pokazuje ich liczbę i jednym przyciskiem ściąga je do siebie
+(razem z metadanymi; u klienta zostają).
+
+### 21.3 Dysk i przechowywanie
+
+Strona pokazuje zajętość (nagrania na tle dysku), liczbę plików, najstarsze
+nagranie i ile ma kopię na innym komputerze. Automatyczne czyszczenie (co 10
+minut, domyślnie wyłączone): usuwanie starszych niż N dni i/lub utrzymywanie
+biblioteki poniżej X GB (najpierw najstarsze); opcjonalnie nigdy nie usuwaj
+ulubionych, opcjonalnie usuwaj tylko nagrania skopiowane na inny komputer.
+Podgląd pokazuje, ile nagrań przekracza limity, z przyciskiem "Wyczyść teraz".
+
+### 21.4 Dostęp
+
+Domyślnie bez hasła — każdy, kto dotrze do adresu w sieci, może korzystać.
+Opcjonalne hasło (Ustawienia → Dostęp) obowiązuje wtedy wszystkie przeglądarki
+i komputery pomocnicze (ciasteczko HttpOnly / nagłówek Bearer). Niezależnie od
+hasła: każde żądanie zmieniające stan wymaga własnego nagłówka (inne strony
+WWW nie mogą wywołać akcji), a tryb lokalny bez hasła odrzuca obce nazwy
+hosta (ochrona przed DNS rebinding).

@@ -31,7 +31,7 @@ class IQRecorder:
         self._captures: list[dict] = []
         self._last_center_hz: float | None = None
         stamp = dt.datetime.now().strftime("%Y-%m-%d_%H-%M-%S")
-        # Kept in its own subfolder, separate from the Odtwarzacz-library
+        # Kept in its own subfolder, separate from the recording-library
         # WAV/MP3 tree (organizer.py/library.py only expect audio there) -
         # raw IQ is technical output for the user's own tools, not something
         # meant to show up as a playable "recording" in this app itself.

@@ -1,92 +1,36 @@
-# PySide6, numpy, scipy and pyqtgraph all have reliable prebuilt wheels on
-# every platform (Linux/Windows/macOS) - pip install these directly, no need
-# for apt/system packages:
-PySide6>=6.6
+# The app is a small web server (Python's standard library) with a browser UI
+# - these are the only Python packages it needs, all with prebuilt wheels on
+# Linux/Windows/macOS:
 numpy>=1.26
 scipy>=1.11
-pyqtgraph>=0.13
 # Windows has no system time zone database - zoneinfo needs this package
 # there (on Linux/macOS it's harmless, the system one is used first).
 tzdata
 # RTL-SDR without SoapySDR: pyrtlsdrlib ships a prebuilt librtlsdr (incl.
-# RTL-SDR Blog V4 support) for Windows/macOS/Linux, so on Windows/macOS the
-# dongle works with pip alone. On Windows the dongle still needs the WinUSB
-# driver (Zadig) - the same one SDR++/SDR# already need.
+# RTL-SDR Blog V4 support) for Windows/macOS/Linux, so the dongle works with
+# pip alone. On Windows the dongle still needs the WinUSB driver (Zadig) -
+# the same one SDR++/SDR# already need.
 pyrtlsdr>=0.3
 pyrtlsdrlib
-# Live audio on Windows/macOS: wheels bundle PortAudio, no compiler needed.
-# Used only when PyAudio (below) isn't installed - Linux keeps PyAudio.
-sounddevice
 #
-# SoapySDR (+ device drivers, e.g. SoapySDRRTLSDR) and PyAudio/PortAudio are
-# the two exceptions - they need system-level installation:
-#   Linux (Ubuntu/Debian):  sudo apt install python3-soapysdr soapysdr0.8-module-rtlsdr python3-pyaudio
-#   Windows:                nothing extra for RTL-SDR - it's covered above via
-#                           pyrtlsdr, audio via sounddevice. SoapySDR itself is
-#                           only needed for OTHER hardware (HackRF, LimeSDR,
-#                           Airspy, SDRplay, USRP/UHD, ...) - see below.
-#   macOS:                  nothing extra, same as Windows; SoapySDR optional
-#                           (brew install soapysdr soapyrtlsdr)
-# If no SDR library is available at all, the app still starts and falls back
-# to the built-in Simulated backend rather than failing.
+# Optional - SoapySDR, for non-RTL-SDR hardware (HackRF, LimeSDR, Airspy,
+# SDRplay, USRP/UHD, ...). Needs a system install:
+#   Linux (Ubuntu/Debian):  sudo apt install python3-soapysdr soapysdr0.8-module-<device>
+#   Windows/macOS:          no pip wheel; conda-forge has soapysdr and
+#                           soapysdr-module-<device> (a separate conda env -
+#                           not verified end-to-end by this project).
+# With no SDR library at all, the app still starts; debug mode (Settings →
+# Advanced) adds a simulated receiver for testing.
 #
-# --- Non-RTL-SDR hardware on Windows/macOS (HackRF, LimeSDR, Airspy,
-#     SDRplay, USRP/UHD, ...) - requires SoapySDR itself, which has no pip
-#     wheel. PothosSDR (the old "batteries included" Windows installer) has
-#     been unmaintained since 2021 - don't rely on it for anything but an
-#     already-working RTL-SDR setup (which pyrtlsdr above replaces anyway).
-#     The current, actively-maintained path is conda-forge, which does
-#     publish win-64/osx builds of soapysdr and per-device modules
-#     (soapysdr-module-hackrf, -limesdr, -airspy, -sdrplay3, -uhd, ...):
-#       1. Install Miniforge (https://github.com/conda-forge/miniforge)
-#       2. conda install -c conda-forge soapysdr soapysdr-module-<yourdevice>
-#     This is a SEPARATE Python environment from this project's own
-#     pip/venv install - SoapySDR ends up importable only inside that conda
-#     env, not this project's regular Python. Not verified end-to-end by
-#     this project (no non-RTL-SDR hardware was available to test against
-#     when this was written) - if you get it working, a PR/note on what
-#     worked would help the next person.
+# Optional - MP3 recording output (Settings → Recording → MP3) needs a system
+# `ffmpeg` on PATH; without it the app keeps writing WAV:
+#   Linux: sudo apt install ffmpeg   Windows: winget install ffmpeg   macOS: brew install ffmpeg
 #
-# QtMultimedia (used by the Odtwarzacz tab's audio player) is bundled in the
-# single PySide6 wheel - no separate package needed, unlike PyQt6/apt.
-#
-# --- Optional: MP3 recording output (Options tab -> Recording -> MP3) ------
-# Requires a system `ffmpeg` on PATH - not a pip package (same reasoning as
-# SoapySDR/PyAudio above). If it's missing, the app still starts fine and
-# just keeps writing WAV regardless of the MP3 setting (see
-# smartscan/audio_transcode.py):
-#   Linux (Ubuntu/Debian):  sudo apt install ffmpeg
-#   Windows:                winget install ffmpeg  (or download a build and add it to PATH)
-#   macOS:                  brew install ffmpeg
-#
-# --- Optional: transcription (Odtwarzacz tab) -------------------------------
-# NOT listed as a plain dependency above on purpose - it's a large, separate
-# download (faster-whisper + ctranslate2/av/tokenizers, then ~1.5 GB + ~0.8 GB
-# of Whisper models on first use), so it's opt-in rather than bundled. Install
-# it from inside the app itself: Options tab -> Transcription -> "Install
-# transcription" - one click, with a live log, and a restart prompt only if
-# your platform actually needs one (see below). The app works completely
-# normally without it; Options/Odtwarzacz both show a clear "not installed"
-# notice with that same button instead of a confusing silent failure.
-#
-# What that button does (smartscan/playback/transcription_install.py), for
-# anyone who'd rather do it by hand or is scripting a deployment:
-#   1. Tries `pip install faster-whisper` straight into whatever's running
-#      the app - this is *all* that's needed on Windows/macOS and on any
-#      Linux distro that doesn't lock down its system Python.
-#   2. Only if that fails with pip's own "externally-managed-environment"
-#      error (Ubuntu and similar - PEP 668) does it fall back to a dedicated
-#      venv instead:
-#        python3 -m venv --system-site-packages .venv
-#        .venv/bin/pip install faster-whisper
-#      --system-site-packages means this venv still sees the app's own
-#      PySide6/numpy/etc. main.py's own startup check transparently re-execs
-#      into this venv if it exists, so "python3 main.py" doesn't change -
-#      this is the *only* case that needs a restart to take effect.
-#   3. Optional, either way: nvidia-cublas-cu12 + nvidia-cudnn-cu12 for GPU
-#      (NVIDIA/CUDA) transcription - CPU works fine without them, just slower.
-# Deliberately NOT listed as a real requirement line below - `pip install -r
-# requirements.txt` must NOT pull this in unconditionally, or every install
-# pays its full size/download cost regardless of whether transcription is
-# ever used. faster-whisper>=1.2 is the version constraint the installer/any
-# manual install above should use.
+# Optional - transcription (faster-whisper + Whisper models, several GB) is
+# deliberately NOT a requirement: install it from the web UI (Settings →
+# Transcription & computers → Install) on whichever computer should
+# transcribe. It runs `pip install faster-whisper` into the running Python,
+# falling back to a `--system-site-packages` .venv only on PEP 668
+# ("externally-managed-environment") systems, which main.py then re-execs
+# into automatically. GPU (NVIDIA/CUDA) support adds nvidia-cublas-cu12 and
+# nvidia-cudnn-cu12. See smartscan/playback/transcription_install.py.

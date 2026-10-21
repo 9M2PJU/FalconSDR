@@ -56,7 +56,6 @@ class DeviceConfig:
     gain_mode: str = "auto"
 
     gain_db: float = 30.0
-    audio_output_device: int = -1  # -1 = system default (PyAudio index)
 
 
 @dataclass
@@ -89,7 +88,7 @@ class VfoRangeConfig:
     @property
     def has_advanced_overrides(self) -> bool:
         """True once at least one "zaawansowane" field above has actually
-        been saved (see ScannerPanel's Save/Reset) - distinguishes a band
+        been saved (the Listen page's per-band settings) - distinguishes a band
         that's merely *tagged* on a window (see ScanWindow.band) from one
         that's genuinely diverging from the global settings, e.g. for the
         spectrum view's trigger-line accent color."""
@@ -111,9 +110,8 @@ class TimingConfig:
 @dataclass
 class RecordingConfig:
     # Off by default: a fresh install shouldn't start writing audio to disk
-    # before the user has deliberately opted in - see RecordingPanel/
-    # ScannerPanel's "Auto-recording" toggle (both control this same field,
-    # kept in sync - see MainWindow) and PlaybackPanel's notice when it's off.
+    # before the user has deliberately opted in - see the "Auto-record"
+    # toggles on the Listen and Settings pages (both control this field).
     enabled: bool = False
     # Auto-recording is always one file per transmission now - the old
     # "Single File (one continuous file)" mode never actually did that (see
@@ -150,14 +148,21 @@ class RecordingConfig:
     # leakage/fabricated-candidate bugs (see AGENTS.md gotcha 31/32) balloon
     # into a dozen-plus simultaneous recordings before those were found.
     max_concurrent_recordings: int = 3
+    # Disk retention (see playback/index.py's Library.apply_retention) - 0 = off.
+    retention_days: int = 0
+    retention_max_gb: float = 0.0
+    retention_keep_favorites: bool = True
+    # Only ever auto-delete a recording some connected computer already
+    # holds a verified copy of (see worker.py's mirroring).
+    retention_require_mirrored: bool = False
 
 
 @dataclass
 class LocationConfig:
     """Receiver location - used only to build the FlightRadar24/ADSBExchange
-    playback links in Odtwarzacz (an approximate location is plenty precise
+    playback links on the Recordings page (an approximate location is plenty precise
     for a ~9-zoom flight-tracker map, not exact GPS coordinates). None means
-    "not set yet" - see PlaybackPanel._open_fr24_for/_open_adsbexchange_for,
+    "not set yet" - see recordings.js (openMap),
     which redirect to Options with an explanatory message instead of opening
     a link built from nothing. Deliberately no baked-in default location:
     this used to default to the original developer's own home coordinates,
@@ -190,7 +195,7 @@ class NoiseReductionConfig:
 
 @dataclass
 class TranscriptionConfig:
-    enabled: bool = True         # automatic background transcription of new recordings (Odtwarzacz tab)
+    enabled: bool = True         # automatic background transcription of new recordings (see worker.py)
     generic_model: str = "large-v3"  # multilingual model (covers Polish transmissions, among others)
     english_atc_model: str = "jacktol/whisper-medium.en-fine-tuned-for-ATC-faster-whisper"
     device: str = "auto"         # "auto" | "cuda" | "cpu"
@@ -205,15 +210,12 @@ class TranscriptionConfig:
 
 @dataclass
 class RemoteReceiverConfig:
-    """Optional LAN receiver.  Audio files are copied locally for playback and Whisper."""
+    """Client mode: this computer doesn't scan itself, it works for a
+    SmartScanATC server elsewhere - transcribing locally and/or keeping a
+    local copy of its recordings (see worker.py). Off = local mode."""
     enabled: bool = False
     url: str = ""  # e.g. "http://receiver.local:8765"
     token: str = ""
-    # Deletes a recording from the receiver only after this machine's own
-    # download of it has fully completed (confirmed by size match) and the
-    # file has been handed to Odtwarzacz - never mid-transfer, never on a
-    # guess. See RemoteClient.delete_recording()/_sync_new_recordings().
-    delete_synced: bool = False
 
 
 @dataclass
@@ -281,24 +283,27 @@ class AppConfig:
     # disappear from the tree; folders that do have channels are re-derived
     # from Channel.folder on load regardless of what's in this list.
     channel_folders: list[str] = field(default_factory=list)
-    # Decode FM broadcast stereo (pilot-tone L/R) for live monitoring only -
-    # has no effect on AM/NFM. Recordings stay mono regardless.
-    wfm_stereo_enabled: bool = False
     # UI language - a code with a matching smartscan/locale/<code>.po file,
     # "en" (the source language, built into every string, needs no file), or
     # "auto" (default for a fresh install - follow the OS's own language,
     # falling back to English if we have no translation for it). See
     # smartscan/i18n.py's resolve_system_language()/set_language(). Applying
-    # a change needs a restart - see MainWindow._restart_app().
+    # a change applies on the next page load (server log lines: right away).
     language: str = "auto"
     legal_disclaimer: LegalDisclaimerConfig = field(default_factory=LegalDisclaimerConfig)
     # Off by default - a real user shouldn't stumble into "Simulation (no
     # hardware)" in the device dropdown and wonder why the scanner is
     # hearing fake bursts instead of their actual RTL-SDR. Gates only the
-    # device list's own "Simulation" entry (see ScannerPanel._populate_devices()/
+    # device list's own "Simulation" entry (see Controller.devices()/
     # refresh_device_list()) - purely a UI visibility toggle, not a behavior
     # flag anything else in the app reads.
     debug_mode: bool = False
+    # Optional password for the web UI and workers (Settings → Access).
+    # Empty = anyone who can reach the server can use it.
+    access_token: str = ""
+    # Per-computer worker settings, keyed by worker name - see worker.py:
+    # {"transcribe": bool, "mirror": bool, "mirror_dir": str}
+    workers: dict = field(default_factory=dict)
 
     @staticmethod
     def load() -> "AppConfig":
@@ -334,10 +339,11 @@ class AppConfig:
             memory_channel_bandwidth_hz=raw.get("memory_channel_bandwidth_hz", 12_500),
             channel_folders=list(raw.get("channel_folders", [])),
             memory_list_enabled=raw.get("memory_list_enabled", True),
-            wfm_stereo_enabled=raw.get("wfm_stereo_enabled", False),
             language=raw.get("language", "auto"),
             legal_disclaimer=_from_dict(LegalDisclaimerConfig, raw.get("legal_disclaimer", {})),
             debug_mode=raw.get("debug_mode", False),
+            access_token=raw.get("access_token", ""),
+            workers=dict(raw.get("workers", {})),
         )
 
     def save(self) -> None:

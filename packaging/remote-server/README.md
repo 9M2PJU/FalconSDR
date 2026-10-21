@@ -1,41 +1,56 @@
-# Headless RTL-SDR receiver
+# Headless receiver (server mode)
 
-`smartscanatc-receiver.service` runs the scanner and recorder continuously on
-the receiver.  It exposes an authenticated HTTP API on port 8765; the desktop
-app uses it for Start, Stop, Skip, recording controls and downloading closed
-WAV/MP3 files for local playback and Whisper transcription.
+The receiver runs SmartScanATC as a service and serves its web UI on port
+8765 to every device on the network: open `http://<receiver-ip>:8765/` in any
+browser (PC, phone). There is no password by default; set one in
+Settings → Access if other people share your network.
 
-The service runs as an unprivileged `smartscan` user (config in
-`/var/lib/smartscanatc/.config/SmartScanATC`, recordings in
-`/var/lib/smartscanatc/SmartScanATC/recordings`). Create it once:
+## Install / update
+
+On the receiver (Debian/Ubuntu, VM or LXC container), from a checkout of
+this repository:
 
 ```sh
-useradd --system --create-home --home-dir /var/lib/smartscanatc --groups plugdev smartscan
-install -m 644 packaging/linux-deb/60-rtl-sdr.rules /etc/udev/rules.d/  # if no rtl-sdr package is installed
+sudo packaging/remote-server/install.sh
+sudo systemctl enable --now smartscanatc-receiver.service
 ```
 
-Upgrading from an older install that ran as root: move `/root/.config/SmartScanATC`
-and `/root/SmartScanATC` into `/var/lib/smartscanatc/` and `chown -R smartscan:`
-them, then `systemctl daemon-reload && systemctl restart smartscanatc-receiver`.
+The script copies the app to `/opt/smartscanatc`, creates its own Python
+venv there, adds the unprivileged `smartscan` user (settings in
+`/var/lib/smartscanatc/.config/SmartScanATC`, recordings by default in
+`/var/lib/smartscanatc/SmartScanATC/recordings`), installs the RTL-SDR udev
+rule and DVB-T driver blacklist, and the systemd unit. Re-run it after
+`git pull` to update; settings and recordings stay. An older install that ran
+as root has its settings moved over automatically the first time.
 
-The API is plain HTTP: anyone who can see LAN traffic can read the token and
-then control the receiver and delete recordings. Keep it on a trusted LAN, and
-use a VPN (e.g. WireGuard) for anything beyond that.
+`smartscanatc-receiver.service` starts scanning right away (`--start`) and
+closes open recordings cleanly when stopped - so a mode switcher that stops
+and starts the unit (like `sdr-mode`) keeps working unchanged.
 
-The receiver must have the RTL-SDR USB device passed into its Linux instance.
-For a Proxmox LXC container, run this on the Proxmox host (replace `CTID`):
+## Transcription and copies on your PC
+
+A small receiver usually can't run Whisper. Start SmartScanATC on your PC,
+open Settings → Connect to a server, and enter the receiver's address. The PC
+then appears under Settings → Transcription & computers on the receiver,
+where you switch on transcription (uses its GPU) and/or keeping a copy of
+every recording. If the PC already has its own recordings, the same page
+offers to send them to the receiver with their transcripts and favorites.
+
+## USB passthrough
+
+The receiver must see the RTL-SDR dongle. Proxmox LXC (on the Proxmox host,
+replace `CTID`):
 
 ```sh
 pct set CTID -usb0 host=0bda:2838
 pct restart CTID
 ```
 
-For an LXD container, attach it from the LXD host instead:
+LXD:
 
 ```sh
 lxc config device add INSTANCE rtlsdr usb vendorid=0bda productid=2838
 ```
 
-The service will reconnect by itself after the device appears.  Verify it
-inside the receiver with `rtl_test -t` and `systemctl status
-smartscanatc-receiver`.
+The service reconnects by itself once the device appears. Check with
+`rtl_test -t` and `systemctl status smartscanatc-receiver`.

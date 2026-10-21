@@ -2,7 +2,7 @@
 
 The recordings directory isn't hardcoded here - the player is now part of
 SmartScanATC, so it always uses the current ``AppConfig.recording.output_dir``
-(see ``PlaybackPanel``). The ``SMARTSCAN_DIR`` constant below is only the
+(see ``index.Library``). The ``SMARTSCAN_DIR`` constant below is only the
 default value used if something calls this module's functions without
 passing its own ``root``.
 """
@@ -42,7 +42,7 @@ DATE_DIR_FORMAT = "%Y-%m-%d"
 # at all, since that file isn't tied to one fixed channel - see
 # organizer.parse_filename()'s handling (models.MANUAL_FREQ_KHZ). Without
 # this alternative, every such file was silently invisible to the whole
-# Odtwarzacz library (organize() skipped it forever, scan_recordings()
+# recording library (organize() skipped it forever, scan_recordings()
 # dropped it) despite being a perfectly real, playable recording on disk -
 # a real bug a user hit (manual Record "did nothing" - it did, the file just
 # never showed up anywhere).

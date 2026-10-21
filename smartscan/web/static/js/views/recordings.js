@@ -1,0 +1,393 @@
+// "Recordings": the library on the server - browse by frequency/band/language,
+// search transcripts, play with a seekable waveform, edit transcripts, and
+// favorite/transcribe/delete one or many.
+import {
+  LANGUAGE_NAMES, api, confirmDialog, debounce, errorToast, fmtBytes, fmtDate, fmtDateShort, fmtDuration, fmtKhz, fmtTime,
+  formDialog, h, icon, modal, mount, prefs, qs, qualityBadge, select, seg, t, toast, toggle,
+} from '../core.js';
+import { S, cfg, on, patchConfig, saveChannels } from '../state.js';
+
+const PAGE = 120;
+// Kept across visits to the tab.
+const F = { mode: 'frequencies', sel: [], q: '', range: 'all', minq: 0, sort: 'new', facetSort: 'count', facetQ: '', autoNext: localStorage.getItem('autonext') !== '0' };
+
+function rangeSince(range) {
+  const now = Date.now() / 1000;
+  if (range === 'today') { const d = new Date(); d.setHours(0, 0, 0, 0); return d.getTime() / 1000; }
+  return { '24h': now - 86400, '7d': now - 7 * 86400, '30d': now - 30 * 86400 }[range];
+}
+
+function freqLabel(item) {
+  return item.manual ? t('Manual recording') : `${fmtKhz(item.freq_khz)} MHz`;
+}
+
+export function transcriptStatus(tr, queued) {
+  if (!tr) return queued ? t('Waiting for transcription…') : t('Not transcribed yet');
+  return {
+    no_speech: t('No speech detected (just noise)'), skipped_short: t('Too short to transcribe'),
+    error: t('Transcription failed - try again'),
+  }[tr.status] || '';
+}
+
+export function recordingsView(root) {
+  const offs = [];
+  const preset = sessionStorage.getItem('openFreq');  // from Statistics
+  if (preset) { F.sel = [preset]; F.mode = 'frequencies'; sessionStorage.removeItem('openFreq'); }
+  let items = [], total = 0, loading = false, current = null, selected = new Set(), facets = null;
+  const audio = new Audio();
+  audio.preload = 'metadata';
+
+  // ---------------------------------------------------------- layout
+  const facetList = h('div.list');
+  const facetSearch = h('input', { placeholder: t('Filter…'), value: F.facetQ, oninput: (e) => { F.facetQ = e.target.value; renderFacets(); } });
+  const aside = h('aside.card',
+    seg([['frequencies', t('Frequencies')], ['bands', t('Bands')], ['languages', t('Languages')]], F.mode, (v) => { F.mode = v; renderFacets(); }),
+    h('div.row', h('div.grow', facetSearch), select([['count', t('Most')], ['recent', t('Latest')], ['freq', t('A–Z')], ['quality', t('Best')]], F.facetSort, (v) => { F.facetSort = v; renderFacets(); }, { style: { width: 'auto' } })),
+    facetList);
+
+  const search = h('input', { type: 'search', placeholder: t('Search frequency, name, date or transcript…'), value: F.q, oninput: debounce((e) => { F.q = e.target.value; reload(); }, 300) });
+  const toolbar = h('div.toolbar',
+    h('div.search', icon('search'), search),
+    select([['all', t('Any time')], ['today', t('Today')], ['24h', t('Last 24 h')], ['7d', t('Last 7 days')], ['30d', t('Last 30 days')]], F.range, (v) => { F.range = v; reload(); }),
+    select([[0, t('Any quality')], [40, t('Quality 40+')], [60, t('Quality 60+')], [80, t('Quality 80+')]], F.minq, (v) => { F.minq = +v; reload(); }),
+    select([['new', t('Newest first')], ['old', t('Oldest first')], ['quality', t('Best quality')], ['long', t('Longest')]], F.sort, (v) => { F.sort = v; reload(); }));
+  const statusLine = h('div.row.wrap.small.muted');
+  const bulk = h('div.bulk.hidden');
+  const list = h('div.rec-list');
+  const more = h('div.empty.hidden', h('button', { onclick: () => load() }, t('Load more')));
+  const player = h('div.player.hidden');
+  const main = h('section.card', toolbar, statusLine, bulk, list, more, player);
+
+  mount(root, h('div.page', h('div.library', aside, main)));
+
+  const io = new IntersectionObserver((entries) => { if (entries.some((e) => e.isIntersecting) && items.length < total) load(); });
+  io.observe(more);
+
+  // ---------------------------------------------------------- data
+  function params(extra = {}) {
+    return { sel: F.sel, q: F.q, since: rangeSince(F.range), minq: F.minq || '', ...extra };
+  }
+
+  async function reload() {
+    items = [];
+    total = 0;
+    selected.clear();
+    list.replaceChildren(h('div.empty', t('Loading…')));
+    await load(true);
+  }
+
+  async function load(first = false) {
+    if (loading) return;
+    loading = true;
+    try {
+      const res = await api.get('/api/library' + qs(params({ sort: F.sort, offset: items.length, limit: PAGE })));
+      if (first) list.replaceChildren();
+      items.push(...res.items);
+      total = res.total;
+      res.items.forEach((it) => list.append(row(it)));
+      if (!items.length) list.replaceChildren(h('div.empty', icon('library'), h('div', F.q || F.sel.length ? t('Nothing matches these filters.') : t('No recordings yet. They appear here as soon as a transmission ends.'))));
+      more.classList.toggle('hidden', items.length >= total);
+      mount(statusLine,
+        h('span', t('{n} recordings', { n: total.toLocaleString() })), '·', h('span', fmtBytes(res.total_bytes)),
+        res.pending ? h('span.chip.accent', t('{n} waiting for transcription', { n: res.pending.toLocaleString() })) : null,
+        h('span.spacer'),
+        toggle(t('Auto-transcribe'), cfg().transcription.enabled, (v) => patchConfig({ transcription: { enabled: v } })),
+        toggle(t('UTC'), prefs.utc, (v) => { prefs.utc = v; reload(); }),
+        toggle(t('Auto-play next'), F.autoNext, (v) => { F.autoNext = v; localStorage.setItem('autonext', v ? '1' : '0'); }));
+      renderBulk();
+    } catch (e) { errorToast(e); }
+    loading = false;
+  }
+
+  async function loadFacets() {
+    try { facets = await api.get('/api/library/facets'); renderFacets(); } catch (e) { errorToast(e); }
+  }
+
+  // ---------------------------------------------------------- sidebar
+  function facetRow(key, label, sub, count, quality) {
+    const active = key === 'all' ? !F.sel.length : F.sel.includes(key);
+    return h('div.facet', {
+      class: active ? 'active' : '',
+      onclick: (e) => {
+        if (key === 'all') F.sel = [];
+        else if (e.ctrlKey || e.metaKey) F.sel = F.sel.includes(key) ? F.sel.filter((k) => k !== key) : [...F.sel, key];
+        else F.sel = F.sel.length === 1 && F.sel[0] === key ? [] : [key];
+        renderFacets();
+        reload();
+      },
+      title: t('Ctrl+click to pick several'),
+    }, quality === undefined ? h('span') : qualityBadge(quality), h('div.label', label, sub ? h('small', sub) : null), h('span.count', count.toLocaleString()));
+  }
+
+  function renderFacets() {
+    if (!facets) return;
+    let rows = facets[F.mode].map((f) => {
+      if (F.mode === 'frequencies') return { ...f, label: f.freq_khz === 0 ? h('span', t('Manual recording')) : h('b', fmtKhz(f.freq_khz)), sub: f.name || '', text: `${fmtKhz(f.freq_khz)} ${f.name}`, sortv: f.freq_khz };
+      if (F.mode === 'bands') return { ...f, label: h('span', t(f.label)), sub: '', text: t(f.label), sortv: f.start_hz };
+      return { ...f, label: h('span', f.language ? (LANGUAGE_NAMES[f.language] || f.language.toUpperCase()) : t('(no transcript)')), sub: '', text: f.language, sortv: f.language };
+    });
+    const q = F.facetQ.trim().toLowerCase();
+    if (q) rows = rows.filter((r) => r.text.toLowerCase().includes(q));
+    const by = {
+      count: (a, b) => b.count - a.count, recent: (a, b) => b.last.localeCompare(a.last),
+      freq: (a, b) => (a.sortv > b.sortv ? 1 : -1), quality: (a, b) => (b.quality ?? -1) - (a.quality ?? -1),
+    }[F.facetSort];
+    rows.sort(by);
+    mount(facetList,
+      facetRow('all', h('span', t('All recordings')), '', facets.total, undefined),
+      facets.favorites ? facetRow('fav', h('span', '★ ', t('Favorites')), '', facets.favorites, undefined) : null,
+      h('div.divider'),
+      rows.map((r) => facetRow(r.key, r.label, r.sub, r.count, r.quality)));
+  }
+
+  // ---------------------------------------------------------- list
+  function row(it) {
+    const tr = it.transcript;
+    const text = tr && tr.text ? tr.text : transcriptStatus(tr, it.queued);
+    const el = h('div.rec', { class: current && current.id === it.id ? 'active' : '', onclick: () => open(it) },
+      h('input.chk', { type: 'checkbox', checked: selected.has(it.id), onclick: (e) => { e.stopPropagation(); e.target.checked ? selected.add(it.id) : selected.delete(it.id); renderBulk(); } }),
+      h('div.when', h('b', fmtTime(it.time)), fmtDateShort(it.time)),
+      h('div.what', h('b', freqLabel(it)), it.name ? h('span.name', it.name) : null, h('p', { class: tr && tr.text ? '' : 'none' }, text)),
+      h('span.dur', fmtDuration(it.duration)),
+      h('span.qcell', qualityBadge(it.quality)),
+      h('button.star', { class: it.favorite ? 'on' : '', title: t('Favorite'), onclick: (e) => { e.stopPropagation(); setFavorite([it.id], !it.favorite); } }, icon('star')));
+    el.dataset.id = it.id;
+    return el;
+  }
+
+  function refreshRow(it) {
+    const old = list.querySelector(`.rec[data-id="${CSS.escape(it.id)}"]`);
+    if (old) old.replaceWith(row(it));
+  }
+
+  function renderBulk() {
+    bulk.classList.toggle('hidden', !selected.size);
+    if (!selected.size) return;
+    mount(bulk, h('div.row.wrap',
+      h('b', t('{n} selected', { n: selected.size.toLocaleString() })),
+      selected.size < total ? h('button.ghost', { onclick: selectAll }, t('Select all {n}', { n: total.toLocaleString() })) : null,
+      h('span.spacer'),
+      h('button', { onclick: () => setFavorite([...selected], true) }, icon('star'), t('Favorite')),
+      h('button', { onclick: () => transcribe([...selected]) }, icon('text'), t('Transcribe')),
+      h('button.danger', { onclick: () => remove([...selected]) }, icon('trash'), t('Delete')),
+      h('button.ghost', { onclick: () => { selected.clear(); list.querySelectorAll('.rec input').forEach((c) => { c.checked = false; }); renderBulk(); } }, t('Clear'))));
+  }
+
+  async function selectAll() {
+    const ids = await api.get('/api/library/ids' + qs(params()));
+    ids.forEach((id) => selected.add(id));
+    list.querySelectorAll('.rec input').forEach((c) => { c.checked = true; });
+    renderBulk();
+  }
+
+  // ---------------------------------------------------------- actions
+  async function setFavorite(ids, favorite) {
+    try {
+      await api.post('/api/library/favorite', { ids, favorite });
+      items.filter((i) => ids.includes(i.id)).forEach((i) => { i.favorite = favorite; refreshRow(i); });
+      if (current && ids.includes(current.id)) renderPlayer();
+      loadFacets();
+    } catch (e) { errorToast(e); }
+  }
+
+  async function transcribe(ids, language) {
+    try {
+      await api.post('/api/library/transcribe', { ids, language: language || null });
+      items.filter((i) => ids.includes(i.id)).forEach((i) => { i.queued = true; refreshRow(i); });
+      toast(ids.length === 1 ? t('Queued for transcription') : t('{n} recordings queued for transcription', { n: ids.length }));
+      if (current && ids.includes(current.id)) { current.queued = true; renderPlayer(); }
+    } catch (e) { errorToast(e); }
+  }
+
+  async function remove(ids) {
+    const ok = await confirmDialog(t('Delete recordings'), ids.length === 1 ? t('Permanently delete this recording?') : t('Permanently delete {n} recordings?', { n: ids.length.toLocaleString() }), t('Delete'), true);
+    if (!ok) return;
+    try {
+      const res = await api.post('/api/library/delete', { ids });
+      toast(t('Deleted {n}', { n: res.deleted }), 'good');
+      if (current && ids.includes(current.id)) closePlayer();
+      ids.forEach((id) => selected.delete(id));
+      reload();
+      loadFacets();
+    } catch (e) { errorToast(e); }
+  }
+
+  // ---------------------------------------------------------- player
+  let peaks = [];
+  const wave = h('canvas');
+  const waveBox = h('div.wave', { onclick: (e) => { const r = waveBox.getBoundingClientRect(); if (audio.duration) audio.currentTime = ((e.clientX - r.left) / r.width) * audio.duration; } }, wave);
+  const playBtn = h('button.primary.icon', { onclick: () => (audio.paused ? audio.play() : audio.pause()) });
+  const timeText = h('span.mono.small.muted');
+
+  function open(it, autoplay = true) {
+    current = it;
+    list.querySelectorAll('.rec.active').forEach((r) => r.classList.remove('active'));
+    const el = list.querySelector(`.rec[data-id="${CSS.escape(it.id)}"]`);
+    if (el) { el.classList.add('active'); el.scrollIntoView({ block: 'nearest' }); }
+    audio.src = '/api/recording?id=' + encodeURIComponent(it.id);
+    if (autoplay) audio.play().catch(() => {});
+    peaks = [];
+    api.get('/api/recording/peaks?id=' + encodeURIComponent(it.id)).then((p) => { if (current === it) { peaks = p; drawWave(); } }).catch(() => {});
+    renderPlayer();
+  }
+
+  function closePlayer() {
+    audio.pause();
+    current = null;
+    player.classList.add('hidden');
+  }
+
+  function step(dir) {
+    if (!current) return;
+    const i = items.findIndex((x) => x.id === current.id);
+    const next = items[i + dir];
+    if (next) open(next);
+    else if (dir > 0 && items.length < total) load().then(() => { const n = items[i + 1]; if (n) open(n); });
+  }
+
+  function drawWave() {
+    const dpr = window.devicePixelRatio || 1;
+    const W = (wave.width = waveBox.clientWidth * dpr), H = (wave.height = waveBox.clientHeight * dpr);
+    const ctx = wave.getContext('2d');
+    ctx.clearRect(0, 0, W, H);
+    const pos = audio.duration ? audio.currentTime / audio.duration : 0;
+    const styles = getComputedStyle(document.documentElement);
+    const n = peaks.length || 1;
+    const bw = W / n;
+    for (let i = 0; i < peaks.length; i++) {
+      const v = Math.max(0.02, peaks[i]);
+      ctx.fillStyle = i / n <= pos ? styles.getPropertyValue('--accent') : styles.getPropertyValue('--line-2');
+      ctx.fillRect(i * bw, (H - v * H * 0.92) / 2, Math.max(1, bw - dpr * 0.6), v * H * 0.92);
+    }
+    if (!peaks.length) {
+      ctx.fillStyle = styles.getPropertyValue('--accent');
+      ctx.fillRect(0, H / 2 - dpr, W * pos, 2 * dpr);
+    }
+    timeText.textContent = `${fmtDuration(audio.currentTime)} / ${fmtDuration(audio.duration || current?.duration)}`;
+  }
+
+  function renderPlayer() {
+    const it = current;
+    if (!it) return;
+    player.classList.remove('hidden');
+    const tr = it.transcript;
+    const loc = cfg().location;
+    const when = new Date(it.time);
+    const pad = (n) => String(n).padStart(2, '0');
+    const ymd = `${when.getUTCFullYear()}-${pad(when.getUTCMonth() + 1)}-${pad(when.getUTCDate())}`;
+    const hm = `${pad(when.getUTCHours())}:${pad(when.getUTCMinutes())}`;
+    const openMap = (url) => {
+      if (loc.home_lat === null || loc.home_lon === null) {
+        toast(t('Set your receiver location in Settings first.'));
+        location.hash = '#/settings/location';
+        return;
+      }
+      window.open(url, '_blank', 'noopener');
+    };
+    const langSel = select([['', t('Detect language')], ['pl', 'Polski'], ['en', 'English']], '', () => {});
+    const textBox = h('div.transcript', { class: tr && tr.text ? '' : 'none' }, tr && tr.text ? tr.text : transcriptStatus(tr, it.queued));
+    mount(player,
+      h('div.row.wrap',
+        h('div.grow',
+          h('div', h('b.mono', { style: { fontSize: '16px' } }, freqLabel(it)), it.name ? h('span.muted', ` · ${it.name}`) : null),
+          h('div.small.muted', `${fmtDate(it.time)} ${fmtTime(it.time)}${prefs.utc ? ' UTC' : ''}`, ' · ', fmtDuration(it.duration),
+            it.snr !== null ? ` · SNR ${it.snr} dB` : '')),
+        qualityBadge(it.quality),
+        h('button.icon.star', { class: it.favorite ? 'on' : '', title: t('Favorite'), onclick: () => setFavorite([it.id], !it.favorite) }, icon('star')),
+        h('button.icon.ghost', { title: t('Close'), onclick: closePlayer }, icon('x'))),
+      waveBox,
+      h('div.row.wrap',
+        h('button.icon', { title: t('Previous'), onclick: () => step(-1) }, icon('prev')),
+        playBtn,
+        h('button.icon', { title: t('Next'), onclick: () => step(1) }, icon('next')),
+        timeText,
+        h('span.spacer'),
+        it.manual ? null : h('button.ghost', { onclick: () => saveFrequency(it), title: t('Add this frequency to the Memory List') }, icon('plus'), t('Save frequency')),
+        h('button.ghost', { onclick: () => openMap(`https://www.flightradar24.com/${ymd}/${hm}/20x/${loc.home_lat},${loc.home_lon}/9`), title: t('Flight replay at this moment') }, h('img', { src: 'img/fr24.svg', alt: '', style: { width: '18px', height: '18px', background: '#1f2937', borderRadius: '4px', padding: '2px' } }), 'FR24'),
+        h('button.ghost', { onclick: () => openMap(`https://globe.adsbexchange.com/?replay=${ymd}-${hm}&lat=${loc.home_lat}&lon=${loc.home_lon}&zoom=8.8`), title: t('Flight replay at this moment') }, h('img', { src: 'img/adsbexchange.png', alt: '', style: { width: '16px', height: '16px' } }), 'ADSBx'),
+        h('a.btn.ghost', { href: `/api/recording?id=${encodeURIComponent(it.id)}&download=1`, title: t('Download') }, icon('download')),
+        h('button.icon.ghost.danger', { title: t('Delete'), onclick: () => remove([it.id]) }, icon('trash'))),
+      h('div.col', { style: { gap: '8px' } },
+        h('div.row', h('h3', t('Transcript')),
+          tr && tr.language && ['ok', 'low_confidence'].includes(tr.status) ? h('span.chip', LANGUAGE_NAMES[tr.language] || tr.language) : null,
+          tr && tr.status === 'low_confidence' ? h('span.chip.warn', t('low confidence')) : null,
+          tr && tr.engine === 'manual' ? h('span.chip', t('edited')) : null,
+          h('span.spacer'),
+          h('button.ghost.small', { onclick: () => editTranscript(it) }, icon('edit'), t('Edit')),
+          langSel,
+          h('button.ghost.small', { onclick: () => transcribe([it.id], langSel.value) }, icon('refresh'), tr ? t('Re-transcribe') : t('Transcribe'))),
+        textBox));
+    updatePlayButton();
+    requestAnimationFrame(drawWave);
+  }
+
+  function updatePlayButton() { mount(playBtn, icon(audio.paused ? 'play' : 'pause')); }
+
+  async function editTranscript(it) {
+    const area = h('textarea', { value: it.transcript ? it.transcript.text : '', rows: 6, style: { width: '100%' } });
+    const ok = await modal(t('Edit transcript'), area, [[t('Cancel'), false, 'ghost'], [t('Save'), true, 'primary']]);
+    if (!ok) return;
+    try {
+      await api.post('/api/library/transcript', { id: it.id, text: area.value });
+      it.transcript = { ...(it.transcript || { language: '' }), text: area.value.trim(), status: 'ok', engine: 'manual' };
+      refreshRow(it);
+      renderPlayer();
+    } catch (e) { errorToast(e); }
+  }
+
+  async function saveFrequency(it) {
+    const channels = S.settings.channels;
+    const hz = it.freq_khz * 1000;
+    const existing = channels.find((c) => c.freq_hz === hz);
+    const folders = [...new Set([...cfg().channel_folders, ...channels.map((c) => c.folder).filter(Boolean)])];
+    const dl = h('datalist#folders', folders.map((f) => h('option', { value: f })));
+    document.body.append(dl);
+    const v = await formDialog(t('Save {f} MHz', { f: fmtKhz(it.freq_khz) }), [
+      { key: 'name', label: t('Name'), value: existing ? existing.name : '', placeholder: t('e.g. Downtown Tower') },
+      { key: 'folder', label: t('Folder'), value: existing ? existing.folder : '', list: 'folders' },
+    ]);
+    dl.remove();
+    if (!v) return;
+    if (existing) Object.assign(existing, { name: v.name.trim(), folder: v.folder.trim() });
+    else channels.push({ freq_hz: hz, name: v.name.trim(), modulation: 'AM', enabled: true, folder: v.folder.trim(), weight: 0 });
+    if (v.folder.trim() && !cfg().channel_folders.includes(v.folder.trim())) patchConfig({ channel_folders: [...cfg().channel_folders, v.folder.trim()] });
+    await saveChannels(channels);
+    toast(t('Saved to the Memory List'), 'good');
+    items.filter((x) => x.freq_khz === it.freq_khz).forEach((x) => { x.name = v.name.trim(); refreshRow(x); });
+    renderPlayer();
+  }
+
+  audio.addEventListener('play', updatePlayButton);
+  audio.addEventListener('pause', updatePlayButton);
+  audio.addEventListener('timeupdate', drawWave);
+  audio.addEventListener('ended', () => { updatePlayButton(); if (F.autoNext) step(1); });
+
+  const onKey = (e) => {
+    if (!current || ['INPUT', 'TEXTAREA', 'SELECT'].includes(document.activeElement.tagName)) return;
+    if (e.key === ' ') { e.preventDefault(); audio.paused ? audio.play() : audio.pause(); }
+    else if (e.key === 'ArrowDown' || e.key === 'j') { e.preventDefault(); step(1); }
+    else if (e.key === 'ArrowUp' || e.key === 'k') { e.preventDefault(); step(-1); }
+  };
+  document.addEventListener('keydown', onKey);
+
+  // New recordings: refresh the first page when the user is browsing the newest ones.
+  let knownTotal = null;
+  const freshTimer = setInterval(async () => {
+    if (F.sort !== 'new' || items.length > PAGE || selected.size) return;
+    try {
+      const res = await api.get('/api/library' + qs(params({ limit: 1 })));
+      if (knownTotal !== null && res.total !== knownTotal && (!current || audio.paused)) { reload(); loadFacets(); }
+      knownTotal = res.total;
+    } catch { /* offline */ }
+  }, 15000);
+
+  offs.push(on('settings', () => current && renderPlayer()));
+  reload();
+  loadFacets();
+  return {
+    destroy() {
+      audio.pause(); audio.src = ''; io.disconnect(); clearInterval(freshTimer);
+      document.removeEventListener('keydown', onKey); offs.forEach((f) => f());
+    },
+  };
+}

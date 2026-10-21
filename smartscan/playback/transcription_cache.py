@@ -9,6 +9,7 @@ import logging
 from pathlib import Path
 from typing import Dict
 
+from smartscan.config import atomic_write_text
 from smartscan.playback.config import TRANSCRIPTION_CACHE_FILE
 from smartscan.playback.models import TranscriptionResult
 
@@ -31,7 +32,7 @@ class TranscriptionCache:
 
     def save(self) -> None:
         try:
-            self.cache_file.write_text(json.dumps(self._data, ensure_ascii=False))
+            atomic_write_text(self.cache_file, json.dumps(self._data, ensure_ascii=False))
         except OSError as exc:
             logger.warning("Failed to save the transcription cache: %s", exc)
 

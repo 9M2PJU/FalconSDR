@@ -7,8 +7,9 @@ import logging
 from pathlib import Path
 from typing import Dict
 
+from smartscan.config import atomic_write_text
 from smartscan.playback.config import QUALITY_CACHE_FILE
-from smartscan.playback.models import QualityMetrics, Recording
+from smartscan.playback.models import QualityMetrics
 
 logger = logging.getLogger(__name__)
 
@@ -29,7 +30,7 @@ class QualityCache:
 
     def save(self) -> None:
         try:
-            self.cache_file.write_text(json.dumps(self._data))
+            atomic_write_text(self.cache_file, json.dumps(self._data))
         except OSError as exc:
             logger.warning("Failed to save the quality cache: %s", exc)
 

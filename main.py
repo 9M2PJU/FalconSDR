@@ -1,95 +1,146 @@
-#!/usr/bin/env python3
-"""SmartScanATC entry point."""
+"""SmartScanATC entry point - starts the web UI (and opens it in the browser).
+
+  python main.py            this computer scans: UI on http://127.0.0.1:8765
+                            (or, if connected to a server, works as its helper:
+                            local transcription / copies, opens the server's UI)
+  python main.py --server   headless receiver reachable over the network (systemd);
+                            open to everyone on the network unless a password is
+                            set in Settings → Access
+  python main.py --local    ignore a saved server connection, scan locally
+  --start                   start scanning right away
+  --no-browser              don't open the browser
+"""
 import os
 import sys
 from pathlib import Path
 
 sys.path.insert(0, str(Path(__file__).resolve().parent))
 
-# A PyInstaller-frozen build (see packaging/linux-deb/) has no real Python
-# installation to re-exec into or later pip-install a venv alongside - the
-# whole point of freezing is that there's no on-disk site-packages/pip left
-# to talk about, and the bundle is typically installed somewhere a normal
-# user can't write to anyway (e.g. /opt/smartscanatc via the .deb). Skipping
-# this check under `sys.frozen` avoids depending on VENV_PYTHON simply
-# happening not to exist inside the bundle - the transcription install flow
-# (transcription_install.py) has this exact same guard for the same reason;
-# the in-app "Install transcription" button in a frozen build reports a
-# clear error instead of silently trying to create a venv it can't use.
+# Transcription may live in this repo's own .venv (PEP 668 fallback - see
+# transcription_install.py): re-exec into it before importing anything heavy.
 if not getattr(sys, "frozen", False):
     from smartscan.venv_paths import VENV_DIR, VENV_PYTHON
 else:
     VENV_DIR = VENV_PYTHON = None
-
-# The transcription tab (smartscan/playback/transcription_engine.py) needs
-# faster-whisper. On a plain (non-externally-managed) Python it's installed
-# straight into whatever's running this file - see
-# smartscan/playback/transcription_install.py, which tries that first. This
-# .venv is only the fallback for platforms/installs where a direct pip
-# install is blocked (PEP 668 - Ubuntu and other distros that mark their
-# system Python "externally managed"): the installer creates it with
-# --system-site-packages (so it still sees the system PySide6/numpy/etc.),
-# and this re-exec is what makes "python3 main.py" transparently pick it up
-# afterwards without the user needing to remember to activate anything.
-# If .venv doesn't exist, the app just starts normally without transcription.
-# Note: .venv/bin/python3 (or Scripts\python.exe on Windows) is usually a
-# symlink/copy of the system interpreter, so comparing sys.executable to
-# VENV_PYTHON wouldn't tell us anything - whether we're actually running
-# "inside" this venv is what sys.prefix says instead, set by the interpreter
-# itself from the pyvenv.cfg next to whichever binary it was started with.
 if VENV_PYTHON is not None and VENV_PYTHON.exists() and Path(sys.prefix).resolve() != VENV_DIR.resolve():
     os.execv(str(VENV_PYTHON), [str(VENV_PYTHON), str(Path(__file__).resolve()), *sys.argv[1:]])
 
-# Real crashes have been observed (journalctl, when launched from the .desktop
-# file - see sdr_backend.py's LAST_CLOSE_FILE comment for the leading theory:
-# reopening the RTL-SDR device too soon after a previous process released it)
-# that leave *zero* trace: no Python traceback, nothing - consistent with a
-# native-level crash (e.g. a segfault inside the SoapySDR/librtlsdr C code),
-# which Python can't catch by definition. faulthandler *can* still catch
-# that: it installs a low-level OS signal handler for SIGSEGV/SIGABRT/SIGBUS/
-# SIGFPE that dumps whatever Python-level stack was running at the moment of
-# the crash (e.g. the exact line that called into the C extension) before the
-# process dies - the only way to get any diagnostic at all for a crash class
-# that otherwise leaves the log completely silent. Written to a real file
-# (not stdout) since a .desktop launch's stdout is journald, which a
-# mid-crash flush can't be relied on to have captured completely.
-import faulthandler
-from smartscan.config import CONFIG_DIR, AppConfig
-CONFIG_DIR.mkdir(parents=True, exist_ok=True)
-_crash_log = (CONFIG_DIR / "crash.log").open("a", buffering=1)
-faulthandler.enable(file=_crash_log, all_threads=True)
+import argparse  # noqa: E402
+import faulthandler  # noqa: E402
+import logging  # noqa: E402
+import signal  # noqa: E402
+import socket  # noqa: E402
+import threading  # noqa: E402
+import webbrowser  # noqa: E402
+from urllib.parse import quote  # noqa: E402
+from urllib.request import urlopen  # noqa: E402
 
-from PySide6.QtGui import QIcon
-from PySide6.QtWidgets import QApplication
+from smartscan.config import CONFIG_DIR, AppConfig  # noqa: E402
 
-from smartscan import i18n
-from smartscan.gui.main_window import MainWindow
-from smartscan.gui.theme import DARK_STYLESHEET
-from smartscan.gui.widgets import install_app_emoji_fallback
+DEFAULT_PORT = 8765
 
-ICON_PATH = Path(__file__).resolve().parent / "smartscan" / "gui" / "resources" / "app_icon.svg"
+
+def _restart() -> None:
+    """Re-exec this program with the same arguments (mode switch)."""
+    args = [a for a in sys.argv[1:] if a != "--local"]
+    if getattr(sys, "frozen", False):
+        os.execv(sys.executable, [sys.executable, *args])
+    os.execv(sys.executable, [sys.executable, str(Path(__file__).resolve()), *args])
+
+
+def _already_running(port: int) -> bool:
+    try:
+        with urlopen(f"http://127.0.0.1:{port}/api/session", timeout=2) as r:
+            return r.status == 200
+    except OSError:
+        return False
 
 
 def main() -> int:
-    # Set the UI language before building any widget - every tr() call
-    # during construction needs the right catalog already loaded (see
-    # smartscan/i18n.py; switching language later requires a restart, this
-    # is the only place it's read from config).
-    i18n.set_language(AppConfig.load().language)
+    parser = argparse.ArgumentParser(description="SmartScanATC")
+    parser.add_argument("--server", action="store_true", help="headless receiver reachable over the network")
+    parser.add_argument("--local", action="store_true", help="scan locally even if connected to a server")
+    parser.add_argument("--host", default=None)
+    parser.add_argument("--port", type=int, default=DEFAULT_PORT)
+    parser.add_argument("--start", action="store_true", help="start scanning immediately")
+    parser.add_argument("--no-browser", action="store_true")
+    args = parser.parse_args()
 
-    # "-name" sets the WM_CLASS instance name to "smartscanatc" (otherwise Qt
-    # just uses the script's own name, "main.py") - this lets GNOME/KDE match
-    # the window to smartscanatc.desktop (StartupWMClass) and show
-    # app_icon.svg instead of the default gear icon.
-    app = QApplication(sys.argv + ["-name", "smartscanatc"])
-    app.setDesktopFileName("smartscanatc")
-    # Must run BEFORE setStyleSheet() - see widgets.install_app_emoji_fallback()'s docstring.
-    install_app_emoji_fallback(app)
-    app.setStyleSheet(DARK_STYLESHEET)
-    app.setWindowIcon(QIcon(str(ICON_PATH)))
-    window = MainWindow()
-    window.show()
-    return app.exec()
+    CONFIG_DIR.mkdir(parents=True, exist_ok=True)
+    faulthandler.enable(file=(CONFIG_DIR / "crash.log").open("a", buffering=1), all_threads=True)
+    logging.basicConfig(level=logging.INFO, format="%(asctime)s %(levelname)s %(name)s: %(message)s")
+
+    from smartscan import i18n
+    from smartscan.web.server import App, serve
+    from smartscan.worker import Worker
+
+    config = AppConfig.load()
+    i18n.set_language(config.language)
+    client_mode = config.remote_receiver.enabled and not args.server and not args.local
+    host = args.host or ("0.0.0.0" if args.server else "127.0.0.1")
+
+    if not args.server and _already_running(args.port):
+        # A second launch just brings the running UI up again.
+        if not args.no_browser:
+            webbrowser.open(f"http://127.0.0.1:{args.port}/")
+        return 0
+
+    token = config.access_token  # optional - empty = no login needed
+    if args.server:
+        print(f"SmartScanATC server: http://{socket.gethostname()}:{args.port}/", flush=True)
+
+    stop = threading.Event()
+    restart = threading.Event()
+
+    def switch_mode() -> None:  # connect / disconnect: shut down cleanly, then re-exec
+        restart.set()
+        stop.set()
+
+    controller = worker = None
+    if client_mode:
+        rr = config.remote_receiver
+        worker = Worker(rr.url, rr.token, name=os.environ.get("SMARTSCAN_WORKER_NAME", ""),
+                        local_root=Path(config.recording.output_dir),
+                        on_detach=lambda: (setattr(rr, "enabled", False), config.save(), stop.set()))
+        worker.start()
+        app = App(config, None, token, "client", on_switch=switch_mode, worker=worker, on_quit=stop.set)
+        browser_url = f"{rr.url}/#token={quote(rr.token, safe='')}"
+        print(i18n.tr("Working for the server {url} - press Ctrl+C to stop.").format(url=rr.url), flush=True)
+    else:
+        from smartscan.controller import Controller
+        controller = Controller(config)
+        controller.start_background()
+        app = App(config, controller, token, "server" if args.server else "local", on_switch=switch_mode,
+                  on_quit=stop.set)
+        browser_url = f"http://127.0.0.1:{args.port}/"
+        # This computer's own transcription helper - talks to its own API.
+        worker = Worker(f"http://127.0.0.1:{args.port}", token, name=os.environ.get("SMARTSCAN_WORKER_NAME", ""),
+                        embedded=True)
+        worker.start()
+        if args.start:
+            controller.start()
+
+    try:
+        httpd = serve(app, host, args.port)
+    except OSError as exc:
+        print(f"Can't listen on {host}:{args.port}: {exc}", file=sys.stderr)
+        return 1
+    if not args.server and not args.no_browser:
+        webbrowser.open(browser_url)
+
+    for sig in (signal.SIGINT, signal.SIGTERM):
+        signal.signal(sig, lambda *_: stop.set())
+    stop.wait()
+    # Clean shutdown closes every open recording properly (systemd stop,
+    # sdr-mode switching, Ctrl+C).
+    httpd.shutdown()
+    if worker is not None:
+        worker.stop()
+    if controller is not None:
+        controller.shutdown()
+    if restart.is_set():
+        _restart()
+    return 0
 
 
 if __name__ == "__main__":

@@ -291,7 +291,7 @@ def transcribe_recording(
 
     ``forced_language`` (an ISO code, e.g. "pl"/"en") completely bypasses
     detect_language()/_resolve_language() - used only from a manual
-    "Re-transcribe" with a chosen language in Odtwarzacz (detection can be
+    "Re-transcribe" with a chosen language on the Recordings page (detection can be
     unreliable on weak audio, see _resolve_language), never from the
     automatic background queue (TranscriptionWorker never sets it), so this
     never changes auto-transcription's behavior in any way."""

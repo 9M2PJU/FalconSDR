@@ -25,15 +25,14 @@ import datetime as dt
 import os
 import threading
 import time
+import traceback
 from collections import deque
 from concurrent.futures import ThreadPoolExecutor
 from pathlib import Path
 
 import numpy as np
-from PySide6.QtCore import QObject, Signal
 
 from .agc import SoftwareAgc
-from .audio_output import AudioOutput
 from .audio_transcode import transcode_to_mp3
 from .calibration_log import CalibrationLogger
 from .edge_compensation import EdgeCompensation
@@ -94,8 +93,7 @@ _REFLECTION_MAX_SLOTS_CHECKED = 8
 # Reuses SMARTSCAN_DEBUG_LIVE_AUDIO (see live-audio debugging history) to
 # also gate a once-a-second scanner-loop timing summary: how many SCANNING
 # ticks in the last second took longer than CHUNK_SECONDS to process (demod
-# + noise reduction, per active slot), the worst one, and the live-audio
-# ring buffer's current fill level (see AudioOutput.buffered_seconds) - a
+# + noise reduction, per active slot) and the worst one - a
 # genuine CPU-throughput deficit (ticks consistently over budget) looks
 # different from real-time thread-priority starvation (which SCHED_FIFO,
 # see _maybe_boost_priority, would have already fixed) and needs a
@@ -282,8 +280,7 @@ class _SpectrumWorker:
     tens of thousands of samples, a much bigger FFT than anything in the
     demod/noise-reduction path, which only ever sees the much shorter
     per-channel *audio* output) on its own thread, decoupled from the
-    scanner thread the same way AudioOutput decouples PortAudio's writes
-    (see its docstring) - live audio has a real-time deadline and a slow
+    scanner thread - live audio has a real-time deadline and a slow
     spectrum frame must never be allowed to delay it. This purely feeds the
     GUI's spectrum widget from the raw IQ - it never touches demodulated
     audio or the recorder, so recording is completely unaffected by this.
@@ -380,46 +377,61 @@ class _Slot:
         self.level_history: deque[float] = deque(maxlen=_REFLECTION_HISTORY_TICKS)
 
 
-class ScannerSignals(QObject):
-    state_changed = Signal(str)
-    level_changed = Signal(float)
-    # list[tuple[freq_hz, name]] - one entry per currently active channel,
-    # primary (the one actually audible live) first, or a single placeholder
-    # entry for the tuned window while nothing's active yet.
-    freq_changed = Signal(object)
-    recording_changed = Signal(bool, str)
-    recording_finished = Signal(str)  # path of a just-closed per-transmission file (split mode)
-    # Manual, trigger-independent continuous recording (see
-    # start_manual_recording()) - (active, path). Separate from
-    # recording_changed, which reflects only the automatic, per-transmission
-    # recording driven by the trigger/signal-detection state machine.
-    manual_recording_changed = Signal(bool, str)
-    # Raw wideband IQ recording (see start_raw_iq_recording()) - (active,
-    # path). A third, independent recording mechanism again: not audio at
-    # all, so its finished file never goes through recording_finished (the
-    # Odtwarzacz library only expects playable WAV/MP3 there).
-    raw_iq_recording_changed = Signal(bool, str)
-    blacklisted = Signal(int)
-    # freqs_hz, db, trigger_dbfs, custom (True = this window's band has its
-    # own "advanced" overrides - see ScannerPanel/SpectrumView's accent color)
-    spectrum_ready = Signal(object, object, float, bool)
-    # Mono float32 audio (AUDIO_RATE) for the primary slot, only while it's
-    # not muted - the exact same samples that go to the local speaker (see
-    # _play_and_record_slot). Unconnected (the normal local case - the
-    # engine writes straight to AudioOutput, not through this) this costs
-    # nothing; remote_server.py is the one real subscriber, forwarding it
-    # to the desktop client so "remote" also means audible, not just
-    # recorded.
-    live_audio_ready = Signal(object)
-    # Real, *measured* seconds since this same window (by center_hz) was
-    # last tuned to - not a theoretical estimate (weighted scheduling makes
-    # that dishonest - different windows get visited at very different real
-    # rates). Only emitted from the second visit onward (nothing to compare
-    # the first time).
-    cycle_time_changed = Signal(float)
-    gain_range_changed = Signal(float, float)
-    log = Signal(str)
-    finished = Signal()
+class Signal:
+    """Minimal stand-in for a Qt signal: handlers run synchronously on the
+    emitting thread (engine loop, slot pool, spectrum worker), so every
+    handler must be thread-safe and quick. A failing handler is logged,
+    never allowed to kill the engine thread."""
+
+    def __init__(self) -> None:
+        self._handlers: list = []
+
+    def connect(self, handler) -> None:
+        self._handlers.append(handler)
+
+    def emit(self, *args) -> None:
+        for handler in list(self._handlers):
+            try:
+                handler(*args)
+            except Exception:  # noqa: BLE001
+                traceback.print_exc()
+
+
+class ScannerSignals:
+    def __init__(self) -> None:
+        self.state_changed = Signal()      # str
+        self.level_changed = Signal()      # float
+        # list[tuple[freq_hz, name]] - one entry per currently active channel,
+        # primary (the one actually audible live) first, or a single placeholder
+        # entry for the tuned window while nothing's active yet.
+        self.freq_changed = Signal()
+        self.recording_changed = Signal()  # (active, path)
+        self.recording_finished = Signal()  # path of a just-closed per-transmission file
+        # Manual, trigger-independent continuous recording (see
+        # start_manual_recording()) - (active, path). Separate from
+        # recording_changed, which reflects only the automatic, per-transmission
+        # recording driven by the trigger/signal-detection state machine.
+        self.manual_recording_changed = Signal()
+        # Raw wideband IQ recording (see start_raw_iq_recording()) - (active,
+        # path). Not audio at all, so its finished file never goes through
+        # recording_finished (the library only expects playable WAV/MP3 there).
+        self.raw_iq_recording_changed = Signal()
+        self.blacklisted = Signal()        # freq_hz
+        # freqs_hz, db, trigger_dbfs, custom (True = this window's band has its
+        # own "advanced" overrides - drawn in an accent color)
+        self.spectrum_ready = Signal()
+        # Mono float32 audio (AUDIO_RATE) of the primary slot - what the
+        # browser's live player streams (see controller.Controller).
+        self.live_audio_ready = Signal()
+        # Real, *measured* seconds since this same window (by center_hz) was
+        # last tuned to - not a theoretical estimate (weighted scheduling makes
+        # that dishonest - different windows get visited at very different real
+        # rates). Only emitted from the second visit onward (nothing to compare
+        # the first time).
+        self.cycle_time_changed = Signal()
+        self.gain_range_changed = Signal()  # (lo_db, hi_db)
+        self.log = Signal()                # str
+        self.finished = Signal()
 
 
 class ScannerEngine(threading.Thread):
@@ -437,10 +449,8 @@ class ScannerEngine(threading.Thread):
         self._stop_evt = threading.Event()
         self._skip_evt = threading.Event()          # "Skip" - move on now, frequency stays scannable
         self._skip_lockout_evt = threading.Event()   # "Skip + Blacklist" - move on now, permanently blacklist it
-        self._muted_evt = threading.Event()
 
         self._backend = None
-        self._audio_out: AudioOutput | None = None
         self._spectrum_worker: _SpectrumWorker | None = None
         self._last_spectrum_submit_at = 0.0
         self._edge_compensation: EdgeCompensation | None = None
@@ -451,7 +461,7 @@ class ScannerEngine(threading.Thread):
         # it (from this thread) - see request_rebuild().
         self._lock = threading.Lock()
         # Set while the Scanner tab has a band open in "advanced" edit mode -
-        # see set_solo_band()/ScannerPanel. Restricts _rebuild_windows() to
+        # see set_solo_band() (the Listen page's per-band "scan only this band"). Restricts _rebuild_windows() to
         # that one band alone (ignoring every other band and the whole
         # Memory List) so tuning a band's own trigger/timing/gain/noise
         # settings can be heard/seen in isolation, live, without the rest of
@@ -577,15 +587,6 @@ class ScannerEngine(threading.Thread):
         Blacklist tab."""
         self._skip_lockout_evt.set()
 
-    def set_live_muted(self, muted: bool) -> None:
-        """Mute/unmute the live monitoring output only - recording to disk
-        (when enabled) keeps running regardless, so a muted session can
-        still be replayed later."""
-        if muted:
-            self._muted_evt.set()
-        else:
-            self._muted_evt.clear()
-
     # -- manual, trigger-independent continuous recording -----------------
     # A completely separate mechanism from the automatic per-transmission
     # recording above (config.recording.enabled + each _Slot's own
@@ -635,6 +636,15 @@ class ScannerEngine(threading.Thread):
     def is_manual_recording(self) -> bool:
         with self._manual_recorder_lock:
             return self._manual_recorder is not None
+
+    def open_recording_paths(self) -> set[Path]:
+        """Audio files still being written - the library must not list (and
+        so never sync, mirror or delete) these yet. Called from other threads."""
+        recorders = [slot.recorder for slot in list(self._slots.values())]
+        with self._manual_recorder_lock:
+            if self._manual_recorder is not None:
+                recorders.append(self._manual_recorder)
+        return {Path(r.current_path) for r in recorders if r.current_path}
 
     def _feed_manual_recording(self, audio: np.ndarray, freq_hz: int | None = None) -> None:
         """Mirrors ``audio`` (AUDIO_RATE-domain, mono) into an in-progress
@@ -741,7 +751,7 @@ class ScannerEngine(threading.Thread):
     def set_solo_band(self, band: VfoRangeConfig | None) -> None:
         """Restricts scanning to just this one band (None = back to normal,
         every configured band + Memory List) - see self._solo_band and
-        ScannerPanel's advanced per-band edit mode. Safe to call before the
+        the Listen page's "scan only this band" button. Safe to call before the
         engine thread has even started (e.g. right after construction, to
         pick up an edit already in progress when Start is pressed)."""
         self._solo_band = band
@@ -755,7 +765,7 @@ class ScannerEngine(threading.Thread):
         and predictably instead of waiting its turn behind whatever else the
         desktop happens to be doing right now - directly attacking the
         "momentarily too slow to keep up with real time" root cause behind
-        live-audio underruns (see audio_output.py). Linux-only, and needs
+        live-audio dropouts. Linux-only, and needs
         either root or a system-granted rtprio allowance (commonly already
         set up for the "audio" group on desktop distros via
         /etc/security/limits.d - PipeWire itself relies on the same thing).
@@ -821,11 +831,6 @@ class ScannerEngine(threading.Thread):
 
     def _setup_static(self) -> None:
         """Everything that doesn't depend on the SDR hardware being present."""
-        dev = self.config.device
-        self._audio_out = AudioOutput(AUDIO_RATE, dev.audio_output_device, debug=self.config.debug_mode)
-        _checkpoint(f"AudioOutput created, available={self._audio_out.available}")
-        if not self._audio_out.available:
-            self.signals.log.emit(tr("No audio output (PyAudio) - live monitoring disabled."))
         self._spectrum_worker = _SpectrumWorker(self.signals)
         _checkpoint("_SpectrumWorker thread started")
         # Read once per engine start (not re-read mid-session) - roll-off is
@@ -922,15 +927,13 @@ class ScannerEngine(threading.Thread):
         # Stop click always finalizes whatever's still open instead of
         # leaving a file handle (or, for the manual recording, the WAV
         # header) dangling. The manual recording's file also still needs to
-        # reach the Odtwarzacz library via recording_finished (see
+        # reach the recording library via recording_finished (see
         # stop_manual_recording()); raw IQ never does (see
         # ScannerSignals.raw_iq_recording_changed).
         self.stop_manual_recording()
         self.stop_raw_iq_recording()
         for freq_hz in list(self._slots.keys()):
             self._close_slot(freq_hz, reason="stopped")
-        if self._audio_out is not None:
-            self._audio_out.close()
         if self._spectrum_worker is not None:
             self._spectrum_worker.stop()
         if self._backend is not None:
@@ -1118,8 +1121,8 @@ class ScannerEngine(threading.Thread):
                 if f not in bw_map:
                     _claim(f, float(max(1, vr.step_hz)), band_mod, weight=vr.weight)
             windows = plan_windows(freqs, sample_rate, max(1, vr.step_hz))
-            # A "band" with start_hz == stop_hz (e.g. ScannerPanel's
-            # "Quick-add a frequency" button - see _on_add_frequency(),
+            # A "band" with start_hz == stop_hz (e.g. the Listen page's
+            # "Single frequency" button - see listen.js addSingle(),
             # which really does create a VfoRangeConfig this way) is a
             # single point wearing a band's clothing - it has no real sweep
             # grid/edge of its own any more than a standalone Memory List
@@ -1171,7 +1174,7 @@ class ScannerEngine(threading.Thread):
                 default_freqs.append(f)
                 freq_to_band[f] = vr
                 # Same exclusion as the weighted-band lane above: a
-                # start_hz == stop_hz "band" (ScannerPanel's "Quick-add a
+                # start_hz == stop_hz "band" (the Listen page's "Single
                 # frequency") is a single point, not a real swept range - no
                 # legitimate edge to extend past, exactly like a plain
                 # Memory List channel (gotcha 31).
@@ -1195,10 +1198,10 @@ class ScannerEngine(threading.Thread):
         # respect .enabled - a disabled channel must never affect what gets
         # scanned or how):
         #  1. A disabled channel can still get incidentally caught by a wide
-        #     band sweep it happens to fall inside - Odtwarzacz shows that
+        #     band sweep it happens to fall inside - the Recordings page shows that
         #     channel's name for its recordings regardless of whether it's
         #     currently enabled (name lookup there has no notion of
-        #     "enabled" at all - see PlaybackPanel.set_known_frequencies),
+        #     "enabled" at all - see Controller.freq_names),
         #     so live display should be consistent with that instead of
         #     showing nothing just because the channel happens to be toggled
         #     off right now.
@@ -1209,7 +1212,7 @@ class ScannerEngine(threading.Thread):
         #     nearby band-grid point can end up as two distinct candidate
         #     frequencies watching the same real transmission, and whichever
         #     one wins the (near-tie) power comparison decides whether a
-        #     name shows up live if matched by exact Hz. Odtwarzacz never
+        #     name shows up live if matched by exact Hz. the Recordings page never
         #     has this problem because it matches by rounded kHz (same
         #     rounding recording filenames already use) - this mirrors that
         #     same tolerance.
@@ -1370,7 +1373,7 @@ class ScannerEngine(threading.Thread):
         the GUI thread - and a QLabel.setStyleSheet() re-polish paid there,
         noticeably pricier than a plain setText() - roughly 30x more often
         than the displayed value could possibly change. Safe: the only
-        consumer (ScannerPanel.update_state, wired in MainWindow) just
+        consumer (the browser, via Controller's live snapshot) just
         displays the current state, nothing here relies on a steady stream
         of identical events as a heartbeat."""
         if state == self._last_emitted_state:
@@ -1389,8 +1392,8 @@ class ScannerEngine(threading.Thread):
             return ScannerState.SIGNAL_DETECTED
         return ScannerState.LINGER
 
-    # Real-hardware finding (a full GUI session, real X11 display, not a
-    # headless test): submitting a new spectrum frame on *every* SCANNING
+    # Real-hardware finding (the former Qt desktop UI, real X11 display, not
+    # a headless test): submitting a new spectrum frame on *every* SCANNING
     # tick (~33/s) meant the GUI's mini-spectrum widget was also updating at
     # ~33/s - and each of those updates (SpectrumView.update_spectrum() -
     # pyqtgraph curve setData + an explicit setYRange() call every single
@@ -1440,7 +1443,7 @@ class ScannerEngine(threading.Thread):
             if len(window.freqs) == 1:
                 label = self._channel_name_map.get(window.freqs[0], "")
             else:
-                label = f"{len(window.freqs)} kanalow w oknie"
+                label = tr("{count} channels in window").format(count=len(window.freqs))
             entries = [(window.center_hz, label)]
         self.signals.freq_changed.emit(entries)
 
@@ -1642,12 +1645,10 @@ class ScannerEngine(threading.Thread):
         now = time.monotonic()
         if now - self._tick_report_at < 1.0:
             return
-        buffered_ms = self._audio_out.buffered_seconds * 1000 if self._audio_out else 0.0
         print(
             f"[scanner-timing {time.strftime('%H:%M:%S')}] ticks={self._tick_n} "
             f"over_budget={self._tick_over_budget} max_tick={self._tick_max_s * 1000:.1f}ms "
-            f"budget={CHUNK_SECONDS * 1000:.0f}ms active_slots={len(self._slots)} "
-            f"audio_buffered={buffered_ms:.0f}ms | "
+            f"budget={CHUNK_SECONDS * 1000:.0f}ms active_slots={len(self._slots)} | "
             f"read_over_budget={self._read_over_budget}/{self._read_n} max_read={self._read_max_s * 1000:.1f}ms",
             flush=True,
         )
@@ -1799,8 +1800,7 @@ class ScannerEngine(threading.Thread):
         # though those other slots have no real-time deadline of their own.
         # Doing primary's own work before any pool task even starts means
         # nothing else in this tick is yet competing for the GIL while it
-        # runs. ``self._audio_out`` is shared with the pool tasks too, but
-        # AudioOutput.write() already holds its own lock internally.
+        # runs.
         tasks = []
         for freq_hz, slot in list(self._slots.items()):
             # Corrected for the linger/level-meter decision (see
@@ -1907,8 +1907,7 @@ class ScannerEngine(threading.Thread):
         threads at once is safe (nothing anywhere writes back into it,
         numpy reads don't mutate); each call only ever touches this one
         slot's own Demodulator/NoiseReducer/Recorder."""
-        stereo = slot.modulation == Modulation.WFM and self.config.wfm_stereo_enabled
-        audio = slot.demod.demod(iq, slot.modulation, slot.offset_hz, stereo=stereo)
+        audio = slot.demod.demod(iq, slot.modulation, slot.offset_hz)
         self._play_and_record_slot(slot, audio, squelched=squelched)
 
     def _at_recording_capacity(self) -> bool:
@@ -2123,10 +2122,9 @@ class ScannerEngine(threading.Thread):
         if squelched:
             slot.was_squelched = True
             if slot.freq_hz == self._primary_freq:
-                # Mirrors what the live speaker would have heard (nothing -
+                # Mirrors what a live listener would have heard (nothing -
                 # squelch mutes it) into a manual recording, if one is
-                # running - see start_manual_recording(). Independent of
-                # self._muted_evt, same as the speaker-mute line below.
+                # running - see start_manual_recording().
                 self._feed_manual_recording(np.zeros(audio.shape[0], dtype=np.float32))
             if self.config.recording.enabled:
                 # real=False: silence substituted for a squelched block
@@ -2155,18 +2153,9 @@ class ScannerEngine(threading.Thread):
             # own state (phase, DC estimate) was never interrupted.
             slot.noise_reducer.reset()
             slot.was_squelched = False
-        if audio.ndim == 1:
-            audio = self._apply_noise_reduction(slot, audio)
-            mono = audio
-        else:
-            # Noise reduction is tuned for weak-antenna ATC voice, not
-            # broadcast FM - skip it for stereo audio rather than reworking
-            # it for 2 channels. Recordings stay mono regardless of live
-            # stereo (see AppConfig.wfm_stereo_enabled), so downmix here.
-            mono = audio.mean(axis=1).astype(np.float32)
-        if slot.freq_hz == self._primary_freq and not self._muted_evt.is_set():
-            self._audio_out.write(audio)
-            self.signals.live_audio_ready.emit(mono.copy())
+        mono = self._apply_noise_reduction(slot, audio)
+        if slot.freq_hz == self._primary_freq:
+            self.signals.live_audio_ready.emit(mono)
         if slot.freq_hz == self._primary_freq:
             # Manual recording mirrors the primary slot's real audio
             # regardless of mute - like the automatic recording below, it's

@@ -1,5 +1,5 @@
 [Unit]
-Description=SmartScanATC RTL-SDR receiver
+Description=SmartScanATC receiver (web UI on port 8765)
 After=network-online.target
 Wants=network-online.target
 
@@ -9,8 +9,9 @@ Type=simple
 User=smartscan
 SupplementaryGroups=plugdev
 WorkingDirectory=/opt/smartscanatc
-EnvironmentFile=/etc/smartscanatc/receiver.env
-ExecStart=/opt/smartscanatc/.venv/bin/python -m smartscan.remote_server --start
+ExecStart=/opt/smartscanatc/.venv/bin/python /opt/smartscanatc/main.py --server --start
+# SIGTERM closes every open recording cleanly (sdr-mode switches stop this unit).
+TimeoutStopSec=15
 Restart=always
 RestartSec=3
 

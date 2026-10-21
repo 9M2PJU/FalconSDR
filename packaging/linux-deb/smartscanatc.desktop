@@ -6,4 +6,3 @@ Exec=/usr/bin/smartscanatc
 Icon=smartscanatc
 Terminal=false
 Categories=HamRadio;AudioVideo;
-StartupWMClass=smartscanatc

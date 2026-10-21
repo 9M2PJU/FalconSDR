@@ -1,5 +1,4 @@
-"""Computes statistics over the recording collection (for the Statistics tab
-and the frequency panel)."""
+"""Computes statistics over the recording collection (Statistics page)."""
 from __future__ import annotations
 
 from collections import Counter, defaultdict
@@ -42,64 +41,6 @@ def frequency_stats(recordings: List[Recording], use_utc: bool = False) -> List[
         total_dur = sum(r.duration_sec for r in recs)
         last_heard = max((r.dt_utc if use_utc else r.dt_local) for r in recs)
         result.append(FrequencyStat(freq_khz, len(recs), avg_q, total_dur, last_heard))
-
-    result.sort(key=lambda s: s.count, reverse=True)
-    return result
-
-
-# Labels for the most common languages in this kind of listening (see
-# transcription_engine.py - what's actually observed is pl/en as real
-# content, plus the occasional "exotic" detection misfire on weak audio).
-# Anything outside this dict still displays fine (see LanguageStat.label) -
-# this is just cosmetics for the most common ones, not a complete ISO 639-1
-# table. Deliberately shown in each language's own native name (Deutsch,
-# not "German") regardless of the UI language - the standard convention for
-# a language picker/list, not something that gets translated.
-_LANGUAGE_LABELS = {
-    "pl": "Polski", "en": "English", "de": "Deutsch", "fr": "Français",
-    "ru": "Русский", "uk": "Українська", "tr": "Türkçe", "ar": "العربية",
-    "no": "Norsk", "fi": "Suomi", "sv": "Svenska", "es": "Español",
-    "it": "Italiano", "nl": "Nederlands", "cs": "Čeština", "sk": "Slovenčina",
-    "pt": "Português", "el": "Ελληνικά", "hu": "Magyar", "ro": "Română",
-}
-# Sentinel (not None - that would mean "no filter/show everything" elsewhere)
-# for recordings with no detected language: no transcript at all, or a
-# transcript that ended with a status carrying no language (skipped_short/error).
-NO_LANGUAGE = ""
-
-
-@dataclass
-class LanguageStat:
-    language: str  # ISO code, or NO_LANGUAGE for "no transcript"
-    count: int
-    avg_quality: float
-    total_duration_sec: float
-    last_heard: datetime
-
-    @property
-    def label(self) -> str:
-        if self.language == NO_LANGUAGE:
-            return tr("(no transcript)")
-        return _LANGUAGE_LABELS.get(self.language, self.language.upper())
-
-
-def language_stats(recordings: List[Recording], use_utc: bool = False) -> List[LanguageStat]:
-    """Like frequency_stats(), but grouped by detected/forced transcript
-    language instead of frequency - see freq_panel.py ("Languages" mode), for
-    catching e.g. exotic languages misdetected on weak audio (see
-    _resolve_language in transcription_engine.py)."""
-    by_lang: Dict[str, List[Recording]] = defaultdict(list)
-    for rec in recordings:
-        lang = rec.transcript.language if rec.transcript and rec.transcript.language else NO_LANGUAGE
-        by_lang[lang].append(rec)
-
-    result = []
-    for lang, recs in by_lang.items():
-        qualities = [r.quality_score for r in recs if r.quality]
-        avg_q = sum(qualities) / len(qualities) if qualities else 0.0
-        total_dur = sum(r.duration_sec for r in recs)
-        last_heard = max((r.dt_utc if use_utc else r.dt_local) for r in recs)
-        result.append(LanguageStat(lang, len(recs), avg_q, total_dur, last_heard))
 
     result.sort(key=lambda s: s.count, reverse=True)
     return result

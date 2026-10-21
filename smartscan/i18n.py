@@ -20,23 +20,19 @@ To add a new language (e.g. Slovak):
   2. Translate every ``msgstr "..."`` line (leave ``msgid`` alone - that's
      the original English text, used as the lookup key).
   3. Add the language to ``LANGUAGE_NAMES`` below so it shows up with a
-     proper display name in Options, instead of just its raw code.
+     proper display name in Settings, instead of just its raw code.
 That's the whole process - restart the app and it appears in the language
 list automatically (``available_languages()`` just lists whatever ``.po``
 files exist).
 
-Changing the active language still needs a restart to actually apply - every
-widget's text is set once, at construction time, from whatever ``tr()``
-returned back then, and there's no app-wide "retranslate every already-built
-widget" mechanism (that's a much bigger feature - Qt calls this a
-LanguageChange event + a retranslateUi() convention). But the restart itself
-is one click, not a manual close-and-reopen: MainWindow's language panel
-offers to do it immediately (shut down cleanly, then re-exec the same
-process - see MainWindow._restart_app()), the same self-re-exec trick
-main.py already uses for the venv redirect.
+The web UI (smartscan/web/static) uses the same catalogs: it fetches the
+table for its language once at load (see catalog_for()) and translates
+itself with the same English source strings as keys, so a language change
+applies on the next page reload.
 """
 from __future__ import annotations
 
+import os
 import re
 from pathlib import Path
 
@@ -140,25 +136,32 @@ def language_display_name(code: str) -> str:
 def resolve_system_language() -> str:
     """Maps the OS's own configured language to one of our supported codes,
     or "en" if it isn't one we have a translation for. Used when
-    AppConfig.language is AUTO (the default for a fresh install - see
-    config.py) so a Polish-language system gets a Polish UI without the user
-    having to find the setting first, while everyone else still gets English
-    rather than a language they can't read.
-
-    Uses Qt's own QLocale instead of Python's stdlib ``locale`` module -
-    QLocale.system() reads the OS's actual UI language setting on every
-    platform this app targets (Linux/Windows/macOS) consistently, where the
-    stdlib module leans on environment variables (LANG/LC_*) that aren't
-    reliably set at all on Windows and can lag behind the OS's real setting
-    even on Linux. Imported lazily so this module stays importable (e.g. for
-    a quick .po-parsing test) without Qt available.
-    """
+    AppConfig.language is AUTO for server-side text (engine log lines); the
+    web UI itself follows the browser's language instead (see
+    web/server.py's catalog endpoint)."""
+    import locale
+    candidates = [os.environ.get(k, "") for k in ("LC_ALL", "LC_MESSAGES", "LANG")]
     try:
-        from PySide6.QtCore import QLocale
-        system_code = QLocale.system().name()[:2].lower()  # e.g. "pl_PL" -> "pl"
-    except Exception:
-        return "en"
-    return system_code if system_code in available_languages() else "en"
+        candidates.append(locale.getlocale()[0] or "")
+    except ValueError:
+        pass
+    for code in candidates:
+        code = code[:2].lower()
+        if code and code in available_languages():
+            return code
+    return "en"
+
+
+def catalog_for(lang: str) -> dict[str, str]:
+    """The msgid -> msgstr table for ``lang`` ({} for English or an unknown
+    code) - what the web UI fetches to translate itself."""
+    path = LOCALE_DIR / f"{lang}.po"
+    if lang == "en" or not path.exists():
+        return {}
+    try:
+        return parse_po(path.read_text(encoding="utf-8"))
+    except OSError:
+        return {}
 
 
 _catalog: dict[str, str] = {}
@@ -175,14 +178,7 @@ def set_language(lang: str) -> None:
     if lang == AUTO:
         lang = resolve_system_language()
     _current_language = lang
-    path = LOCALE_DIR / f"{lang}.po"
-    if lang == "en" or not path.exists():
-        _catalog = {}
-        return
-    try:
-        _catalog = parse_po(path.read_text(encoding="utf-8"))
-    except OSError:
-        _catalog = {}
+    _catalog = catalog_for(lang)
 
 
 def current_language() -> str:

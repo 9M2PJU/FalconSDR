@@ -4,7 +4,6 @@ from __future__ import annotations
 import csv
 import io
 import logging
-from pathlib import Path
 
 from .config import BLACKLIST_CSV, CHANNELS_CSV, atomic_write_text
 from .models import BlacklistEntry, Channel

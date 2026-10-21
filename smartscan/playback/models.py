@@ -1,7 +1,7 @@
 """Data structures representing a single recording."""
 from __future__ import annotations
 
-from dataclasses import dataclass, field
+from dataclasses import dataclass
 from datetime import datetime
 from pathlib import Path
 from typing import Optional
@@ -53,6 +53,10 @@ class Recording:
     quality: Optional[QualityMetrics] = None
     transcript: Optional[TranscriptionResult] = None
     is_favorite: bool = False
+    # Filled in once by the library index (see index.py) so hot paths never
+    # re-stat the file: cache_key() at scan time, and the size it saw.
+    key: str = ""
+    size: int = 0
 
     @property
     def transcript_text(self) -> str:

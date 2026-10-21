@@ -766,7 +766,7 @@ msgid "avg. quality"
 msgstr "śr. jakość"
 
 msgid "Recordings"
-msgstr "Nagrań"
+msgstr "Nagrania"
 
 msgid "Total time"
 msgstr "Łączny czas"
@@ -1270,3 +1270,980 @@ msgstr "Pobieranie nagrań…"
 
 msgid "Downloaded {count} recordings"
 msgstr "Pobrano nagrania: {count}"
+
+# ---- web UI ----
+
+msgid "Close"
+msgstr "Zamknij"
+
+msgid "OK"
+msgstr "OK"
+
+msgid "just now"
+msgstr "przed chwilą"
+
+msgid "{n} min ago"
+msgstr "{n} min temu"
+
+msgid "{n} h ago"
+msgstr "{n} godz. temu"
+
+msgid "{n} days ago"
+msgstr "{n} dni temu"
+
+msgid "Settings"
+msgstr "Ustawienia"
+
+msgid "Password"
+msgstr "Hasło"
+
+msgid "Wrong password"
+msgstr "Błędne hasło"
+
+msgid "Enter the password of this receiver."
+msgstr "Podaj hasło tego odbiornika."
+
+msgid "Log in"
+msgstr "Zaloguj"
+
+msgid "The password was set in Settings → Access. To remove it, delete \"access_token\" from config.json on the receiver."
+msgstr "Hasło ustawiono w Ustawieniach → Dostęp. Aby je usunąć, skasuj „access_token” z config.json na odbiorniku."
+
+msgid "This computer works for a SmartScanATC server"
+msgstr "Ten komputer pracuje dla serwera SmartScanATC"
+
+msgid "Connected"
+msgstr "Połączono"
+
+msgid "Not connected"
+msgstr "Brak połączenia"
+
+msgid "Transcription and copying are set up per computer in the server's Settings → Transcription & computers."
+msgstr "Transkrypcję i kopiowanie ustawia się dla każdego komputera w panelu serwera: Ustawienia → Transkrypcja i komputery."
+
+msgid "Open the server panel"
+msgstr "Otwórz panel serwera"
+
+msgid "Disconnect from the server?"
+msgstr "Odłączyć od serwera?"
+
+msgid "This computer goes back to scanning on its own. Recordings stay on the server."
+msgstr "Ten komputer wróci do samodzielnego skanowania. Nagrania zostają na serwerze."
+
+msgid "Disconnect"
+msgstr "Odłącz"
+
+msgid "Switching to local mode…"
+msgstr "Przełączam na tryb lokalny…"
+
+msgid "server"
+msgstr "serwer"
+
+msgid "Stopping…"
+msgstr "Zatrzymywanie…"
+
+msgid "Signal"
+msgstr "Sygnał"
+
+msgid "Scanning"
+msgstr "Skanowanie"
+
+msgid "Stopped"
+msgstr "Zatrzymany"
+
+msgid "Stop listening"
+msgstr "Przestań słuchać"
+
+msgid "Listen live"
+msgstr "Słuchaj na żywo"
+
+msgid "I understand"
+msgstr "Rozumiem"
+
+msgid "Hold"
+msgstr "Podtrzymanie"
+
+msgid "Reconnecting"
+msgstr "Ponowne łączenie"
+
+msgid "Volume"
+msgstr "Głośność"
+
+msgid "Leave this frequency for now"
+msgstr "Zostaw tę częstotliwość na razie"
+
+msgid "Skip"
+msgstr "Pomiń"
+
+msgid "Leave it and never stop on it again (adds it to the blacklist)"
+msgstr "Pomiń i nigdy więcej się na niej nie zatrzymuj (dodaje do czarnej listy)"
+
+msgid "Skip + blacklist"
+msgstr "Pomiń + czarna lista"
+
+msgid "Continuous recording of what you hear, including silence"
+msgstr "Ciągłe nagrywanie tego, co słychać, razem z ciszą"
+
+msgid "Record"
+msgstr "Nagrywaj"
+
+msgid "Raw wideband IQ (SigMF) - about 19 MB per second"
+msgstr "Surowe szerokopasmowe IQ (SigMF) - ok. 19 MB na sekundę"
+
+msgid "Raw IQ"
+msgstr "Surowe IQ"
+
+msgid "Auto-record transmissions"
+msgstr "Automatycznie nagrywaj transmisje"
+
+msgid "Spectrum"
+msgstr "Widmo"
+
+msgid "Yellow line: trigger level"
+msgstr "Żółta linia: próg wyzwalania"
+
+msgid "What to scan"
+msgstr "Co skanować"
+
+msgid "Activity"
+msgstr "Zdarzenia"
+
+msgid "Press Start to begin scanning"
+msgstr "Naciśnij Start, aby rozpocząć skanowanie"
+
+msgid "Back to this window: {s} s ago"
+msgstr "Powrót do tego okna: {s} s temu"
+
+msgid "Stop"
+msgstr "Stop"
+
+msgid "Start"
+msgstr "Start"
+
+msgid "Stop recording"
+msgstr "Zatrzymaj nagrywanie"
+
+msgid "Stop raw IQ"
+msgstr "Zatrzymaj IQ"
+
+msgid "Listening"
+msgstr "Słuchasz"
+
+msgid "Starting gain"
+msgstr "Wzmocnienie początkowe"
+
+msgid "Gain"
+msgstr "Wzmocnienie"
+
+msgid "Squelch below trigger"
+msgstr "Blokada szumów poniżej progu"
+
+msgid "Noise reduction strength"
+msgstr "Siła redukcji szumów"
+
+msgid "Receiver"
+msgstr "Odbiornik"
+
+msgid "Changes apply live"
+msgstr "Zmiany działają od razu"
+
+msgid "Trigger level"
+msgstr "Próg wyzwalania"
+
+msgid "Squelch"
+msgstr "Blokada szumów"
+
+msgid "Mutes the noise tail after a transmission ends"
+msgstr "Wycisza szum po zakończeniu transmisji"
+
+msgid "Auto (hardware)"
+msgstr "Auto (sprzętowe)"
+
+msgid "Auto (software)"
+msgstr "Auto (programowe)"
+
+msgid "The tuner sets its own gain. Can overload on very strong stations - try software auto then."
+msgstr "Tuner sam ustawia wzmocnienie. Przy bardzo silnych stacjach może się przesterować - wtedy spróbuj trybu programowego."
+
+msgid "Tuning time"
+msgstr "Czas strojenia"
+
+msgid "Hold after a transmission"
+msgstr "Podtrzymanie po transmisji"
+
+msgid "Noise reduction"
+msgstr "Redukcja szumów"
+
+msgid "Adaptive filter for weak, noisy voice"
+msgstr "Adaptacyjny filtr dla słabej, zaszumionej mowy"
+
+msgid "SDR device"
+msgstr "Urządzenie SDR"
+
+msgid "Device"
+msgstr "Urządzenie"
+
+msgid "Capture width (MHz)"
+msgstr "Szerokość przechwytu (MHz)"
+
+msgid "Stop the scanner to change the device or capture width."
+msgstr "Zatrzymaj skaner, aby zmienić urządzenie albo szerokość przechwytu."
+
+msgid "Add a band preset…"
+msgstr "Dodaj gotowe pasmo…"
+
+msgid "Nothing to scan yet - add a band preset or a frequency below."
+msgstr "Na razie nie ma czego skanować - dodaj pasmo albo częstotliwość poniżej."
+
+msgid "Single frequency"
+msgstr "Pojedyncza częstotliwość"
+
+msgid "Memory List"
+msgstr "Lista pamięci"
+
+msgid "{n} enabled channels"
+msgstr "włączone kanały: {n}"
+
+msgid "Edit channels →"
+msgstr "Edytuj kanały →"
+
+msgid "Start (MHz)"
+msgstr "Od (MHz)"
+
+msgid "Stop (MHz)"
+msgstr "Do (MHz)"
+
+msgid "Step (kHz)"
+msgstr "Krok (kHz)"
+
+msgid "Watched alongside the bands, e.g. 121.500 MHz guard"
+msgstr "Obserwowana razem z pasmami, np. 121,500 MHz (guard)"
+
+msgid "Scan this band"
+msgstr "Skanuj to pasmo"
+
+msgid "own settings"
+msgstr "własne ustawienia"
+
+msgid "Back to scanning everything"
+msgstr "Wróć do skanowania wszystkiego"
+
+msgid "Scan only this band for now"
+msgstr "Skanuj na razie tylko to pasmo"
+
+msgid "Remove"
+msgstr "Usuń"
+
+msgid "Remove band"
+msgstr "Usuń pasmo"
+
+msgid "Remove “{name}” from the scan list?"
+msgstr "Usunąć „{name}” z listy skanowania?"
+
+msgid "Priority weight"
+msgstr "Waga priorytetu"
+
+msgid "0 = normal. Higher = visited more often than other weighted bands (1 vs 2 = twice as often)."
+msgstr "0 = normalnie. Więcej = odwiedzane częściej niż inne ważone pasma (1 i 2 = dwa razy częściej)."
+
+msgid "Global: {v}"
+msgstr "Globalnie: {v}"
+
+msgid "Gain mode"
+msgstr "Tryb wzmocnienia"
+
+msgid "On"
+msgstr "Wł."
+
+msgid "Off"
+msgstr "Wył."
+
+msgid "Own settings for this band"
+msgstr "Własne ustawienia tego pasma"
+
+msgid "No data - start the scanner"
+msgstr "Brak danych - uruchom skaner"
+
+msgid "Loading…"
+msgstr "Wczytywanie…"
+
+msgid "No recordings yet - statistics appear once something has been recorded."
+msgstr "Brak nagrań - statystyki pojawią się, gdy coś zostanie nagrane."
+
+msgid "Average quality"
+msgstr "Średnia jakość"
+
+msgid "By hour of day"
+msgstr "Wg godziny"
+
+msgid "Per day (last {n} days)"
+msgstr "Dziennie (ostatnie {n} dni)"
+
+msgid "Click a row to open its recordings"
+msgstr "Kliknij wiersz, aby otworzyć nagrania"
+
+msgid "MHz"
+msgstr "MHz"
+
+msgid "Add channel"
+msgstr "Dodaj kanał"
+
+msgid "Edit channel"
+msgstr "Edytuj kanał"
+
+msgid "Folder"
+msgstr "Folder"
+
+msgid "0 = normal. Higher = checked more often."
+msgstr "0 = normalnie. Więcej = sprawdzany częściej."
+
+msgid "{f} MHz is already in the list"
+msgstr "{f} MHz już jest na liście"
+
+msgid "Folder name"
+msgstr "Nazwa folderu"
+
+msgid "Create"
+msgstr "Utwórz"
+
+msgid "Rename"
+msgstr "Zmień nazwę"
+
+msgid "Delete folder"
+msgstr "Usuń folder"
+
+msgid "Delete “{name}” and its {n} channels?"
+msgstr "Usunąć „{name}” i jego kanały ({n})?"
+
+msgid "Delete the empty folder “{name}”?"
+msgstr "Usunąć pusty folder „{name}”?"
+
+msgid "Military"
+msgstr "Wojsko"
+
+msgid "Fire brigade"
+msgstr "Straż pożarna"
+
+msgid "All of these are already in the list."
+msgstr "Wszystkie już są na liście."
+
+msgid "Added {n} channels"
+msgstr "Dodano kanały: {n}"
+
+msgid "Scan this channel"
+msgstr "Skanuj ten kanał"
+
+msgid "Delete channel"
+msgstr "Usuń kanał"
+
+msgid "Delete {f} MHz {name}?"
+msgstr "Usunąć {f} MHz {name}?"
+
+msgid "Search frequency, name, folder…"
+msgstr "Szukaj częstotliwości, nazwy, folderu…"
+
+msgid "{n} channels, {e} scanned"
+msgstr "kanałów: {n}, skanowanych: {e}"
+
+msgid "The Memory List is switched off on the Listen page"
+msgstr "Lista pamięci jest wyłączona na stronie Nasłuch"
+
+msgid "Add Polish military frequencies"
+msgstr "Dodaj polskie częstotliwości wojskowe"
+
+msgid "Add Polish fire brigade frequencies"
+msgstr "Dodaj polskie częstotliwości straży"
+
+msgid "Mode"
+msgstr "Emisja"
+
+msgid "No saved channels yet. Add one, or save a frequency straight from a recording."
+msgstr "Brak zapisanych kanałów. Dodaj kanał albo zapisz częstotliwość prosto z nagrania."
+
+msgid "Margin ± (kHz)"
+msgstr "Margines ± (kHz)"
+
+msgid "Search blacklist…"
+msgstr "Szukaj na czarnej liście…"
+
+msgid "The scanner never stops on these frequencies. “Skip + blacklist” on the Listen page adds them here."
+msgstr "Skaner nigdy nie zatrzymuje się na tych częstotliwościach. „Pomiń + czarna lista” na stronie Nasłuch dodaje je tutaj."
+
+msgid "Margin"
+msgstr "Margines"
+
+msgid "Skipped from the Listen page"
+msgstr "Pominięta na stronie Nasłuch"
+
+msgid "Remove from blacklist"
+msgstr "Usuń z czarnej listy"
+
+msgid "The blacklist is empty."
+msgstr "Czarna lista jest pusta."
+
+msgid "Disk & retention"
+msgstr "Dysk i przechowywanie"
+
+msgid "Transcription & computers"
+msgstr "Transkrypcja i komputery"
+
+msgid "Connect to a server"
+msgstr "Połączenie z serwerem"
+
+msgid "Access"
+msgstr "Dostęp"
+
+msgid "Scheduling"
+msgstr "Harmonogram skanowania"
+
+msgid "Appearance & language"
+msgstr "Wygląd i język"
+
+msgid "Advanced"
+msgstr "Zaawansowane"
+
+msgid "Every transmission the scanner stops on is saved as its own file."
+msgstr "Każda transmisja, na której zatrzyma się skaner, trafia do osobnego pliku."
+
+msgid "Simultaneous recordings"
+msgstr "Jednoczesne nagrania"
+
+msgid "How many transmissions may be recorded at the same time. 0 = no limit."
+msgstr "Ile transmisji może być nagrywanych naraz. 0 = bez limitu."
+
+msgid "File format"
+msgstr "Format pliku"
+
+msgid "MP3 takes about 10× less space."
+msgstr "MP3 zajmuje ok. 10× mniej miejsca."
+
+msgid "MP3 needs ffmpeg installed on this machine."
+msgstr "MP3 wymaga zainstalowanego ffmpeg na tej maszynie."
+
+msgid "MP3 (compressed)"
+msgstr "MP3 (skompresowany)"
+
+msgid "Recordings folder"
+msgstr "Folder nagrań"
+
+msgid "On the machine that scans. Existing recordings are not moved."
+msgstr "Na maszynie, która skanuje. Istniejące nagrania nie są przenoszone."
+
+msgid "{n} recordings ({size}) are past these limits"
+msgstr "Nagrania poza tymi limitami: {n} ({size})"
+
+msgid "Clean up now"
+msgstr "Wyczyść teraz"
+
+msgid "Delete {n} recordings now?"
+msgstr "Usunąć teraz {n} nagrań?"
+
+msgid "Deleted {n}"
+msgstr "Usunięto: {n}"
+
+msgid "Nothing to clean up right now."
+msgstr "Na razie nie ma czego czyścić."
+
+msgid "Automatic clean-up is off - recordings are kept forever."
+msgstr "Automatyczne czyszczenie jest wyłączone - nagrania są trzymane bez końca."
+
+msgid "Recordings: {size}"
+msgstr "Nagrania: {size}"
+
+msgid "Free: {size} of {total}"
+msgstr "Wolne: {size} z {total}"
+
+msgid "{n} files"
+msgstr "plików: {n}"
+
+msgid "oldest from {d}"
+msgstr "najstarsze z {d}"
+
+msgid "{n} copied to another computer"
+msgstr "skopiowane na inny komputer: {n}"
+
+msgid "Automatic clean-up"
+msgstr "Automatyczne czyszczenie"
+
+msgid "Delete recordings older than"
+msgstr "Usuwaj nagrania starsze niż"
+
+msgid "Days. 0 = never."
+msgstr "Dni. 0 = nigdy."
+
+msgid "days"
+msgstr "dni"
+
+msgid "Keep the library under"
+msgstr "Utrzymuj bibliotekę poniżej"
+
+msgid "When it grows bigger, the oldest recordings go first. 0 = no limit."
+msgstr "Po przekroczeniu najpierw znikają najstarsze nagrania. 0 = bez limitu."
+
+msgid "Never delete favorites"
+msgstr "Nigdy nie usuwaj ulubionych"
+
+msgid "Only delete what another computer has copied"
+msgstr "Usuwaj tylko to, co skopiował inny komputer"
+
+msgid "Safe mode for hybrid setups: a recording is only removed from here once a connected computer holds a verified copy."
+msgstr "Tryb bezpieczny dla układu hybrydowego: nagranie znika stąd dopiero, gdy podłączony komputer ma jego sprawdzoną kopię."
+
+msgid "Clean-up runs every 10 minutes. You can also delete any selection by hand on the Recordings page."
+msgstr "Czyszczenie działa co 10 minut. Dowolny wybór możesz też usunąć ręcznie na stronie Nagrania."
+
+msgid "Whisper models and options"
+msgstr "Modele Whisper i opcje"
+
+msgid "General model"
+msgstr "Model ogólny"
+
+msgid "Used for Polish and other languages."
+msgstr "Dla polskiego i innych języków."
+
+msgid "English ATC model"
+msgstr "Model angielski ATC"
+
+msgid "Fine-tuned for English air traffic control."
+msgstr "Dostrojony do angielskiej korespondencji lotniczej."
+
+msgid "Run on"
+msgstr "Uruchamiaj na"
+
+msgid "Automatic (GPU if available)"
+msgstr "Automatycznie (GPU, jeśli jest)"
+
+msgid "Expected languages"
+msgstr "Spodziewane języki"
+
+msgid "ISO codes, e.g. en, pl. Detection picks between these."
+msgstr "Kody ISO, np. en, pl. Wykrywanie wybiera spośród nich."
+
+msgid "Skip recordings shorter than"
+msgstr "Pomijaj nagrania krótsze niż"
+
+msgid "Seconds - a squelch crackle is not worth transcribing."
+msgstr "Sekundy - trzask blokady szumów nie jest wart transkrypcji."
+
+msgid "Transcribe new recordings automatically"
+msgstr "Automatycznie transkrybuj nowe nagrania"
+
+msgid "Transcription runs on whichever computers below have it switched on - the server itself, or your PC with a GPU."
+msgstr "Transkrypcja działa na tych komputerach poniżej, które mają ją włączoną - na samym serwerze albo na Twoim PC z GPU."
+
+msgid "Computers"
+msgstr "Komputery"
+
+msgid "Add another computer (e.g. your PC with a GPU)"
+msgstr "Dodaj kolejny komputer (np. PC z kartą graficzną)"
+
+msgid "On that computer start SmartScanATC, open Settings → Connect to a server and enter:"
+msgstr "Na tamtym komputerze uruchom SmartScanATC, otwórz Ustawienia → Połączenie z serwerem i wpisz:"
+
+msgid "…and this server's password."
+msgstr "…oraz hasło tego serwera."
+
+msgid "It then shows up here. Turn on transcription or local copies for it, and if it already has recordings of its own, send them here with one click."
+msgstr "Pojawi się wtedy tutaj. Włącz mu transkrypcję lub kopie lokalne, a jeśli ma własne nagrania, prześlij je tu jednym kliknięciem."
+
+msgid "No computers connected yet."
+msgstr "Brak podłączonych komputerów."
+
+msgid "Sent - the computer picks it up within a few seconds"
+msgstr "Wysłano - komputer odbierze to w ciągu kilku sekund"
+
+msgid "idle"
+msgstr "bezczynny"
+
+msgid "transcribing"
+msgstr "transkrybuje"
+
+msgid "copying recordings"
+msgstr "kopiuje nagrania"
+
+msgid "uploading recordings"
+msgstr "wysyła nagrania"
+
+msgid "installing transcription…"
+msgstr "instaluje transkrypcję…"
+
+msgid "its own recordings folder"
+msgstr "jego własny folder nagrań"
+
+msgid "this server"
+msgstr "ten serwer"
+
+msgid "offline"
+msgstr "offline"
+
+msgid "Forget"
+msgstr "Zapomnij"
+
+msgid "Last seen {ago}"
+msgstr "Ostatnio widziany {ago}"
+
+msgid "Transcribe here"
+msgstr "Transkrybuj tutaj"
+
+msgid "Whisper isn't installed on this computer yet."
+msgstr "Whisper nie jest jeszcze zainstalowany na tym komputerze."
+
+msgid "{n} recordings waiting"
+msgstr "czeka nagrań: {n}"
+
+msgid "Install"
+msgstr "Zainstaluj"
+
+msgid "Install with GPU support"
+msgstr "Zainstaluj z obsługą GPU"
+
+msgid "Keep a copy of every recording"
+msgstr "Trzymaj kopię każdego nagrania"
+
+msgid "Copied to this folder on that computer (verified by size)."
+msgstr "Kopiowane do tego folderu na tamtym komputerze (sprawdzane po rozmiarze)."
+
+msgid "{n} recordings exist only on that computer"
+msgstr "Nagrania tylko na tamtym komputerze: {n}"
+
+msgid "Send recordings to the server"
+msgstr "Prześlij nagrania na serwer"
+
+msgid "Upload {n} recordings (with their transcripts and favorites) from {name} to this server? They stay on that computer too."
+msgstr "Przesłać {n} nagrań (z transkrypcjami i ulubionymi) z {name} na ten serwer? Na tamtym komputerze też zostaną."
+
+msgid "Upload"
+msgstr "Prześlij"
+
+msgid "Send them here"
+msgstr "Prześlij tutaj"
+
+msgid "Disconnect computer"
+msgstr "Odłącz komputer"
+
+msgid "{name} stops working for this server and goes back to its own local mode."
+msgstr "{name} przestanie pracować dla tego serwera i wróci do własnego trybu lokalnego."
+
+msgid "Password (if the server has one)"
+msgstr "Hasło (jeśli serwer je ma)"
+
+msgid "Connected - opening the server…"
+msgstr "Połączono - otwieram serwer…"
+
+msgid "Connect"
+msgstr "Połącz"
+
+msgid "Have a SmartScanATC server elsewhere (e.g. an always-on receiver)? Connect this computer to it: it stops scanning on its own and instead transcribes and/or keeps copies of the server's recordings. You can come back to local mode any time."
+msgstr "Masz serwer SmartScanATC gdzie indziej (np. stale działający odbiornik)? Połącz z nim ten komputer: przestanie sam skanować, a zamiast tego będzie transkrybował i/lub trzymał kopie nagrań z serwera. Do trybu lokalnego możesz wrócić w każdej chwili."
+
+msgid "New password"
+msgstr "Nowe hasło"
+
+msgid "A password is set - everyone (including helper computers) needs it."
+msgstr "Hasło jest ustawione - potrzebuje go każdy (także komputery pomocnicze)."
+
+msgid "No password: anyone who can reach this address on your network can use it. Set one to keep other people on the network out."
+msgstr "Bez hasła: każdy, kto dotrze do tego adresu w Twojej sieci, może z niego korzystać. Ustaw hasło, aby inni użytkownicy sieci nie mieli dostępu."
+
+msgid "Password set. Helper computers need it too - reconnect them."
+msgstr "Hasło ustawione. Komputery pomocnicze też go potrzebują - połącz je ponownie."
+
+msgid "Change password"
+msgstr "Zmień hasło"
+
+msgid "Set password"
+msgstr "Ustaw hasło"
+
+msgid "Remove password"
+msgstr "Usuń hasło"
+
+msgid "Anyone on the network will be able to use the receiver again."
+msgstr "Każdy w sieci znów będzie mógł korzystać z odbiornika."
+
+msgid "Log out"
+msgstr "Wyloguj"
+
+msgid "Used for the FlightRadar24 / ADSBExchange replay buttons next to each recording. Approximate is fine."
+msgstr "Do przycisków odtworzenia lotów FlightRadar24 / ADSBExchange przy nagraniach. Wystarczy przybliżona."
+
+msgid "Latitude"
+msgstr "Szerokość geograficzna"
+
+msgid "Longitude"
+msgstr "Długość geograficzna"
+
+msgid "The browser did not share a location."
+msgstr "Przeglądarka nie udostępniła lokalizacji."
+
+msgid "Use this device's location"
+msgstr "Użyj lokalizacji tego urządzenia"
+
+msgid "Come back sooner after a transmission"
+msgstr "Wracaj szybciej po transmisji"
+
+msgid "Replies usually follow within seconds, so a frequency that was just active gets extra visits for a while - without stopping the rest of the scan."
+msgstr "Odpowiedzi zwykle padają w ciągu kilku sekund, więc częstotliwość, która właśnie była aktywna, przez chwilę dostaje dodatkowe wizyty - bez wstrzymywania reszty skanowania."
+
+msgid "For how long"
+msgstr "Jak długo"
+
+msgid "Seconds after the transmission ends."
+msgstr "Sekundy po zakończeniu transmisji."
+
+msgid "Extra visit every"
+msgstr "Dodatkowa wizyta co"
+
+msgid "Seconds."
+msgstr "Sekundy."
+
+msgid "Default blacklist margin"
+msgstr "Domyślny margines czarnej listy"
+
+msgid "± kHz around a frequency added with “Skip + blacklist”."
+msgstr "± kHz wokół częstotliwości dodanej przez „Pomiń + czarna lista”."
+
+msgid "Imported {n} presets"
+msgstr "Zaimportowano presety: {n}"
+
+msgid "The ready-made bands offered on the Listen page. Removing one doesn't touch bands you already added."
+msgstr "Gotowe pasma proponowane na stronie Nasłuch. Usunięcie presetu nie zmienia pasm już dodanych."
+
+msgid "custom"
+msgstr "własny"
+
+msgid "Delete preset “{label}”?"
+msgstr "Usunąć preset „{label}”?"
+
+msgid "Export"
+msgstr "Eksportuj"
+
+msgid "Theme"
+msgstr "Motyw"
+
+msgid "Stored in this browser."
+msgstr "Zapamiętywane w tej przeglądarce."
+
+msgid "Like the system"
+msgstr "Jak w systemie"
+
+msgid "Dark"
+msgstr "Ciemny"
+
+msgid "Light"
+msgstr "Jasny"
+
+msgid "“Automatic” follows each browser's language."
+msgstr "„Automatycznie” = język przeglądarki."
+
+msgid "Automatic"
+msgstr "Automatycznie"
+
+msgid "Start listening when the scanner starts"
+msgstr "Włączaj odsłuch razem ze skanerem"
+
+msgid "Debug mode"
+msgstr "Tryb debugowania"
+
+msgid "Adds a “Simulation (no hardware)” device for testing without a receiver."
+msgstr "Dodaje urządzenie „Symulacja (brak sprzętu)” do testów bez odbiornika."
+
+msgid "Settings, Memory List, blacklist and custom presets back to a fresh install. Recordings, the password and connected computers are kept."
+msgstr "Ustawienia, lista pamięci, czarna lista i własne presety jak po świeżej instalacji. Nagrania, hasło i podłączone komputery zostają."
+
+msgid "Reset all settings, the Memory List and the blacklist?"
+msgstr "Przywrócić wszystkie ustawienia, listę pamięci i czarną listę?"
+
+msgid "Reset"
+msgstr "Przywróć"
+
+msgid "Done"
+msgstr "Gotowe"
+
+msgid "Reset…"
+msgstr "Przywróć…"
+
+msgid "Waiting for transcription…"
+msgstr "Czeka na transkrypcję…"
+
+msgid "Not transcribed yet"
+msgstr "Jeszcze bez transkrypcji"
+
+msgid "No speech detected (just noise)"
+msgstr "Nie wykryto mowy (sam szum)"
+
+msgid "Too short to transcribe"
+msgstr "Za krótkie na transkrypcję"
+
+msgid "Transcription failed - try again"
+msgstr "Transkrypcja nie powiodła się - spróbuj ponownie"
+
+msgid "Filter…"
+msgstr "Filtruj…"
+
+msgid "Most"
+msgstr "Najwięcej"
+
+msgid "Latest"
+msgstr "Najnowsze"
+
+msgid "A–Z"
+msgstr "A–Z"
+
+msgid "Best"
+msgstr "Najlepsze"
+
+msgid "Search frequency, name, date or transcript…"
+msgstr "Szukaj częstotliwości, nazwy, daty lub treści…"
+
+msgid "Any time"
+msgstr "Kiedykolwiek"
+
+msgid "Last 24 h"
+msgstr "Ostatnie 24 h"
+
+msgid "Any quality"
+msgstr "Dowolna jakość"
+
+msgid "Quality 40+"
+msgstr "Jakość 40+"
+
+msgid "Quality 60+"
+msgstr "Jakość 60+"
+
+msgid "Quality 80+"
+msgstr "Jakość 80+"
+
+msgid "Newest first"
+msgstr "Najnowsze"
+
+msgid "Oldest first"
+msgstr "Najstarsze"
+
+msgid "Longest"
+msgstr "Najdłuższe"
+
+msgid "Load more"
+msgstr "Wczytaj więcej"
+
+msgid "Nothing matches these filters."
+msgstr "Nic nie pasuje do tych filtrów."
+
+msgid "No recordings yet. They appear here as soon as a transmission ends."
+msgstr "Brak nagrań. Pojawią się tu, gdy tylko skończy się jakaś transmisja."
+
+msgid "{n} recordings"
+msgstr "nagrań: {n}"
+
+msgid "{n} waiting for transcription"
+msgstr "czeka na transkrypcję: {n}"
+
+msgid "Ctrl+click to pick several"
+msgstr "Ctrl+klik, aby wybrać kilka"
+
+msgid "All recordings"
+msgstr "Wszystkie nagrania"
+
+msgid "Favorites"
+msgstr "Ulubione"
+
+msgid "Favorite"
+msgstr "Ulubione"
+
+msgid "{n} selected"
+msgstr "zaznaczono: {n}"
+
+msgid "Select all {n}"
+msgstr "Zaznacz wszystkie ({n})"
+
+msgid "Transcribe"
+msgstr "Transkrybuj"
+
+msgid "Clear"
+msgstr "Odznacz"
+
+msgid "Queued for transcription"
+msgstr "Dodano do kolejki transkrypcji"
+
+msgid "{n} recordings queued for transcription"
+msgstr "Dodano do kolejki transkrypcji: {n}"
+
+msgid "Permanently delete this recording?"
+msgstr "Trwale usunąć to nagranie?"
+
+msgid "Permanently delete {n} recordings?"
+msgstr "Trwale usunąć {n} nagrań?"
+
+msgid "Set your receiver location in Settings first."
+msgstr "Najpierw ustaw lokalizację odbiornika w Ustawieniach."
+
+msgid "Detect language"
+msgstr "Wykryj język"
+
+msgid "Previous"
+msgstr "Poprzednie"
+
+msgid "Next"
+msgstr "Następne"
+
+msgid "Add this frequency to the Memory List"
+msgstr "Dodaj tę częstotliwość do listy pamięci"
+
+msgid "Flight replay at this moment"
+msgstr "Odtworzenie lotów z tej chwili"
+
+msgid "Download"
+msgstr "Pobierz"
+
+msgid "low confidence"
+msgstr "niska pewność"
+
+msgid "edited"
+msgstr "edytowane"
+
+msgid "Edit transcript"
+msgstr "Edytuj transkrypcję"
+
+msgid "Save {f} MHz"
+msgstr "Zapisz {f} MHz"
+
+msgid "Saved to the Memory List"
+msgstr "Zapisano na liście pamięci"
+
+msgid "Scanner is still stopping - try again"
+msgstr "Skaner jeszcze się zatrzymuje - spróbuj ponownie"
+
+msgid "Scanner is not running"
+msgstr "Skaner nie działa"
+
+msgid "Enter the server address, e.g. http://192.168.1.10:8765"
+msgstr "Podaj adres serwera, np. http://192.168.1.10:8765"
+
+msgid "Can't connect: {error}"
+msgstr "Nie można połączyć: {error}"
+
+msgid "{count} channels in window"
+msgstr "kanałów w oknie: {count}"
+
+msgid "{weak:.4f} MHz looks like a reflection of {strong:.4f} MHz - discarding."
+msgstr "{weak:.4f} MHz wygląda na odbicie {strong:.4f} MHz - odrzucam."
+
+msgid "Working for the server {url} - press Ctrl+C to stop."
+msgstr "Pracuję dla serwera {url} - Ctrl+C kończy."
+
+msgid "Quit SmartScanATC"
+msgstr "Zamknij SmartScanATC"
+
+msgid "Stops the scanner and closes the program running in the background. Start it again from the menu or with the same command."
+msgstr "Zatrzymuje skaner i zamyka program działający w tle. Uruchomisz go ponownie z menu albo tą samą komendą."
+
+msgid "Stop scanning and close the program?"
+msgstr "Zatrzymać skanowanie i zamknąć program?"
+
+msgid "Quit"
+msgstr "Zamknij"
+
+msgid "Closed. You can close this tab."
+msgstr "Zamknięto. Możesz zamknąć tę kartę."
+
+msgid "Folder on that computer"
+msgstr "Folder na tamtym komputerze"

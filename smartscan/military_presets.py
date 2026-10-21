@@ -19,10 +19,10 @@ from __future__ import annotations
 
 import json
 import logging
-from dataclasses import asdict, dataclass
+from dataclasses import asdict, dataclass, replace
 from pathlib import Path
 
-from .config import CONFIG_DIR, VfoRangeConfig
+from .config import CONFIG_DIR, VfoRangeConfig, atomic_write_text
 from .models import Channel, Modulation
 
 logger = logging.getLogger(__name__)
@@ -36,7 +36,7 @@ def _ch(freq_mhz: float, name: str, modulation: Modulation = Modulation.AM) -> C
 class BandPreset:
     """One entry in the "Add preset" picker for the band-list editor.
     ``label``/``tooltip`` here are the plain English source text - wrapped in
-    ``tr()`` at the point of display (ScannerPanel._build_vfo_form), not
+    ``t()`` at the point of display (the web UI), not
     here: presets are loaded once, at module-import time (or whenever
     reload_presets()/save_user_presets() runs), which can happen before
     ``i18n.set_language()`` ever runs (see main.py) - a tr() call made here
@@ -126,22 +126,15 @@ def load_hidden_builtin_ids() -> set[str]:
 
 
 def save_user_data(presets: list[BandPreset], hidden_builtin_ids: set[str]) -> None:
-    CONFIG_DIR.mkdir(parents=True, exist_ok=True)
-    USER_PRESETS_PATH.write_text(
-        json.dumps(
-            {
-                "presets": [p.to_dict() for p in presets],
-                "hidden_builtin_ids": sorted(hidden_builtin_ids),
-            },
-            indent=2, ensure_ascii=False,
-        ),
-        encoding="utf-8",
-    )
+    atomic_write_text(USER_PRESETS_PATH, json.dumps(
+        {"presets": [p.to_dict() for p in presets], "hidden_builtin_ids": sorted(hidden_builtin_ids)},
+        indent=2, ensure_ascii=False,
+    ))
 
 
 def save_user_presets(presets: list[BandPreset]) -> None:
     """Convenience wrapper keeping the current hidden-ids set untouched -
-    every write from the Options editor that isn't a delete-a-built-in goes
+    every write from the presets editor that isn't a delete-a-built-in goes
     through this one instead of building the tuple by hand each time."""
     save_user_data(presets, load_hidden_builtin_ids())
 
@@ -150,7 +143,7 @@ def hide_builtin_preset(preset_id: str) -> None:
     """"Deletes" a built-in preset - the built-in JSON file itself is never
     touched (it's part of the installed package, restored by every update
     regardless), so a deletion is recorded here instead and filtered out by
-    get_all_presets(). Restored by "Reset to defaults" (MainWindow) clearing
+    get_all_presets(). Restored by "Reset to defaults" (Controller.reset_to_defaults) clearing
     this whole file, or by re-importing/re-adding a preset with the same id
     (which shadows it back "visible" again via the same mechanism as an
     edit - see get_all_presets())."""
@@ -161,9 +154,9 @@ def hide_builtin_preset(preset_id: str) -> None:
 
 def get_all_presets() -> list[BandPreset]:
     """Built-ins (minus any hidden or shadowed - see below) followed by the
-    user's own - called fresh at every point of use (ScannerPanel's preset
-    dropdown, the Options editor) rather than cached in a module-level
-    constant, so an edit made in the Options editor shows up immediately
+    user's own - called fresh at every point of use (the web UI's preset
+    picker and editor) rather than cached in a module-level
+    constant, so an edit made in the presets editor shows up immediately
     without needing a restart - the exact same "function, not a frozen
     constant" fix AGENTS.md already documents for the i18n footgun, applied
     here for a different reason (live edits, not translation) but the same
@@ -174,7 +167,7 @@ def get_all_presets() -> list[BandPreset]:
     _BUILTIN_PRESETS_PATH (part of the installed package - every app update
     would just restore it anyway). Both are represented purely in the
     user's own file instead:
-    - **Edit**: PresetManagerPanel saves the edited version into the user
+    - **Edit**: upsert_preset() saves the edited version into the user
       presets list *under the same id* the built-in had. A built-in whose
       id also appears in the user list is excluded here - the user version
       "shadows" it - so from that point on it's indistinguishable from (and
@@ -190,10 +183,61 @@ def get_all_presets() -> list[BandPreset]:
     return visible_builtins + user_presets
 
 
+def unique_preset_id(label: str, existing_ids: set[str]) -> str:
+    slug = "".join(c.lower() if c.isalnum() else "_" for c in label).strip("_")
+    while "__" in slug:
+        slug = slug.replace("__", "_")
+    base = candidate = slug or "preset"
+    i = 2
+    while candidate in existing_ids:
+        candidate = f"{base}_{i}"
+        i += 1
+    return candidate
+
+
+def upsert_preset(preset: BandPreset) -> BandPreset:
+    """Adds (empty id -> a fresh unique one) or edits a preset. Editing a
+    pure built-in saves it into the user file under the same id, which
+    shadows the built-in from then on (see get_all_presets())."""
+    user_presets = load_user_presets()
+    if not preset.id:
+        preset = replace(preset, id=unique_preset_id(preset.label, {p.id for p in get_all_presets()}))
+    if any(p.id == preset.id for p in user_presets):
+        user_presets = [preset if p.id == preset.id else p for p in user_presets]
+    else:
+        user_presets.append(preset)
+    save_user_presets(user_presets)
+    return preset
+
+
+def delete_preset(preset_id: str) -> None:
+    """Removes a user-owned preset, or hides a pure built-in - the two take
+    different paths since only a user-owned one has an entry to remove."""
+    if is_user_owned_preset(preset_id):
+        save_user_presets([p for p in load_user_presets() if p.id != preset_id])
+    else:
+        hide_builtin_preset(preset_id)
+
+
+def import_presets(raw: list[dict]) -> int:
+    """Never overwrites on an id collision - an imported preset whose id is
+    already taken gets a fresh unique id instead. Raises on malformed input."""
+    imported = [BandPreset.from_dict(d) for d in raw]
+    user_presets = load_user_presets()
+    existing_ids = {p.id for p in get_all_presets()}
+    for preset in imported:
+        if preset.id in existing_ids:
+            preset = replace(preset, id=unique_preset_id(preset.label, existing_ids))
+        existing_ids.add(preset.id)
+        user_presets.append(preset)
+    save_user_presets(user_presets)
+    return len(imported)
+
+
 def is_user_owned_preset(preset_id: str) -> bool:
     """True once a preset (built-in-sourced originally or not) has a user-
-    file entry under this id - i.e. it's editable/deletable in
-    PresetManagerPanel. A still-pure built-in (never edited) is False."""
+    file entry under this id - i.e. it's editable/deletable via
+    upsert_preset()/delete_preset(). A still-pure built-in (never edited) is False."""
     return preset_id in {p.id for p in load_user_presets()}
 
 

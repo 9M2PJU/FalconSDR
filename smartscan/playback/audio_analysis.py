@@ -94,7 +94,7 @@ def _read_samples(path: Path) -> tuple[np.ndarray, int, float]:
 
 def compute_waveform_peaks(path: Path, n_buckets: int = 400) -> np.ndarray | None:
     """Peak amplitude (0..1) per time bucket, for WaveformView's visual
-    overview in Odtwarzacz (see gui/widgets.py) - lets a listener see at a
+    overview on the Recordings page (recordings.js drawWave) - lets a listener see at a
     glance where a recording is quiet/silent (e.g. a squelched gap - see
     ScannerEngine._play_and_record_slot, which writes silence rather than
     cutting the block so the file's timeline stays real) versus genuinely
@@ -104,7 +104,7 @@ def compute_waveform_peaks(path: Path, n_buckets: int = 400) -> np.ndarray | Non
     reading and reducing even a several-minutes-long recording this way is
     a handful of vectorized numpy calls, fast enough to run synchronously
     on the GUI thread right as playback starts (see
-    PlaybackPanel._on_playback_started) rather than needing a background
+    the /api/recording/peaks request when a recording is opened) rather than needing a background
     worker thread like the library-wide quality scan does.
 
     Returns None (not an all-zero array) for an unreadable/corrupt file or

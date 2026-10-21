@@ -8,7 +8,6 @@ import threading
 import time
 from abc import ABC, abstractmethod
 from collections import deque
-from pathlib import Path
 
 import numpy as np
 
@@ -410,7 +409,7 @@ class RtlSdrBackend(SdrBackend):
             serials = RtlSdr.get_device_serial_addresses()
         except Exception:
             return []
-        # No commas in the label - ScannerPanel joins every key into one
+        # No commas in the label - Controller.devices() joins every key into one
         # "k=v,k=v" device_args string.
         return [
             {"driver": RTLSDR_NATIVE_DRIVER, "label": f"RTL-SDR (librtlsdr) SN {serial}", "serial": serial}
@@ -556,8 +555,7 @@ class AcquisitionThread:
     SdrBackend.read()) instead of calling the hardware directly - exactly
     the acquisition/processing separation mature SDR software (SDR++
     included) uses, and the same pattern this project already applies to
-    live audio output (AudioOutput's ring buffer) and the spectrum display
-    (_SpectrumWorker in scanner_engine.py) - just never, until now, to the
+    the spectrum display (_SpectrumWorker in scanner_engine.py) - just never, until now, to the
     one thing that actually touches the hardware.
 
     ``max_queued`` bounds queue growth if the consumer falls behind for a

@@ -29,20 +29,24 @@ def transcode_to_mp3(wav_path: Path, bitrate_kbps: int = 96) -> Path | None:
     if not ffmpeg_available():
         return None
     mp3_path = wav_path.with_suffix(".mp3")
+    # Written under a non-.mp3 name first and renamed when complete, so the
+    # library (which lists *.wav/*.mp3) never shows a half-written file.
+    partial = wav_path.with_suffix(".mp3.part")
     try:
         subprocess.run(
             [
                 "ffmpeg", "-y", "-loglevel", "error",
                 "-i", str(wav_path),
                 "-codec:a", "libmp3lame", "-b:a", f"{bitrate_kbps}k",
-                str(mp3_path),
+                "-f", "mp3", str(partial),
             ],
             check=True,
             capture_output=True,
             timeout=120,
         )
+        partial.replace(mp3_path)
     except (subprocess.CalledProcessError, subprocess.TimeoutExpired, OSError):
-        mp3_path.unlink(missing_ok=True)
+        partial.unlink(missing_ok=True)
         return None
     try:
         wav_path.unlink()

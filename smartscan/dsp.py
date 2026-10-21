@@ -21,33 +21,13 @@ _EPS = 1e-12
 # Complex sample rate the WFM discriminator runs at, wide enough to keep a
 # +/-75 kHz deviation broadcast FM signal intact (occupied bandwidth by
 # Carson's rule is ~180-200 kHz) - capped to the capture's own sample rate
-# when that's narrower (e.g. a small manually-set capture bandwidth). Also
-# comfortably above 2x the 53 kHz stereo subcarrier's top edge, so stereo
-# decoding (see _demod_wfm_stereo) doesn't alias it.
+# when that's narrower (e.g. a small manually-set capture bandwidth).
 WFM_DISCRIMINATOR_RATE = 200_000
 # De-emphasis time constant: 50 us is the European/CCIR broadcast FM standard
 # (the US/Americas use 75 us) - without it, FM sounds thin/harsh because the
 # transmitter pre-boosts high audio frequencies expecting the receiver to
 # roll them back off.
 WFM_DEEMPHASIS_TAU_S = 50e-6
-
-# Stereo FM (pilot-tone system, ITU-R BS.450): the composite discriminator
-# output ("MPX" signal) carries mono L+R from 0-15 kHz, a 19 kHz pilot tone,
-# and a L-R difference signal DSB-SC modulated onto a (suppressed) 38 kHz
-# subcarrier - i.e. occupying 23-53 kHz. Demodulating that subcarrier needs a
-# coherent 38 kHz reference locked to the pilot's phase; squaring the
-# (bandpass-isolated) pilot doubles its frequency to exactly 38 kHz with the
-# matching phase, which is a lightweight stand-in for a proper PLL.
-WFM_PILOT_HZ = 19_000.0
-WFM_MONO_CUTOFF_HZ = 15_000.0
-WFM_SUBCARRIER_BAND_HZ = (23_000.0, 53_000.0)
-WFM_PILOT_BAND_HZ = (WFM_PILOT_HZ - 2_000.0, WFM_PILOT_HZ + 2_000.0)
-# Empirical make-up gain for the coherently-demodulated L-R baseband: squaring
-# the pilot halves its amplitude into the doubled-frequency term, and the
-# pilot itself only carries ~10% of the composite's peak deviation - final
-# output loudness is normalized regardless, but this keeps the stereo
-# separation (L-R vs L+R balance) in a sane ballpark.
-WFM_STEREO_GAIN = 4.0
 
 # Demodulator output level control (see Demodulator._apply_agc). Replaces an
 # earlier version that renormalized every single ~30ms chunk independently to
@@ -127,9 +107,8 @@ _SSB_HALF_BW_HZ = SSB_BANDWIDTH_HZ / 2.0
 # noise reduction is off) ever sees it - cheaper and more effective than
 # retuning the spectral gate's own parameters to chase a problem that isn't
 # actually broadband. SSB already gets this for free from its own tighter
-# _SSB_HALF_BW_HZ image-reject filter; WFM's audio path is unrelated (its
-# own WFM_MONO_CUTOFF_HZ already serves the same purpose at a wider cutoff
-# for broadcast-quality audio).
+# _SSB_HALF_BW_HZ image-reject filter; WFM keeps its full broadcast audio
+# bandwidth.
 VOICE_LOWPASS_HZ = 3500.0
 
 
@@ -150,7 +129,7 @@ def _resample_rate(x: np.ndarray, from_rate: float, to_rate: float) -> np.ndarra
 
 class Demodulator:
     """Stateful demodulator: converts an IQ block at `sample_rate` into audio
-    at `audio_rate` (mono, or stereo for WFM when requested), maintaining
+    mono audio at `audio_rate`, maintaining
     running state (DC estimate, FM phase, filter memory) across calls so that
     a burst starting mid-block doesn't click.
     """
@@ -162,16 +141,6 @@ class Demodulator:
         self._prev_phase = 0.0
         self._mix_index = 0
         self._deemph_zi = np.zeros(1)
-        # Stereo MPX decode filter state (see _demod_wfm_stereo) - lazily
-        # (re)built the first time it's needed, since the filter coefficients
-        # depend on the discriminator's intermediate rate.
-        self._stereo_rate = None
-        self._pilot_ba = self._sub_ba = self._mono_ba = None
-        self._pilot_zi = self._sub_zi = self._mono_zi = None
-        self._lr_lpf_zi = None
-        self._deemph_zi_l = np.zeros(1)
-        self._deemph_zi_r = np.zeros(1)
-        self._pilot_amp = 0.0
         # Smoothed level-tracking state for _apply_agc() - see the _AGC_*
         # constants' docstring for why this replaced a per-chunk peak
         # normalization. Persists across demod() calls (unlike a per-chunk
@@ -197,11 +166,6 @@ class Demodulator:
         self._mix_index = 0
         self._dc_zi = np.zeros(1)
         self._deemph_zi = np.zeros(1)
-        self._pilot_zi = self._sub_zi = self._mono_zi = None
-        self._lr_lpf_zi = None
-        self._deemph_zi_l = np.zeros(1)
-        self._deemph_zi_r = np.zeros(1)
-        self._pilot_amp = 0.0
         self._agc_envelope = _AGC_MIN_ENVELOPE
         self._ssb_zi = None
         self._ssb_mix_index = 0
@@ -261,59 +225,7 @@ class Demodulator:
         alpha = dt / (WFM_DEEMPHASIS_TAU_S + dt)
         return lfilter([alpha], [1.0, -(1.0 - alpha)], audio, zi=zi)
 
-    def _ensure_stereo_filters(self, rate: float) -> None:
-        if self._stereo_rate == rate and self._pilot_ba is not None:
-            return
-        self._stereo_rate = rate
-        nyq = rate / 2.0
-        self._pilot_ba = butter(2, [f / nyq for f in WFM_PILOT_BAND_HZ], btype="bandpass")
-        self._sub_ba = butter(2, [f / nyq for f in WFM_SUBCARRIER_BAND_HZ], btype="bandpass")
-        self._mono_ba = butter(2, WFM_MONO_CUTOFF_HZ / nyq, btype="lowpass")
-        self._pilot_zi = np.zeros(max(len(self._pilot_ba[0]), len(self._pilot_ba[1])) - 1)
-        self._sub_zi = np.zeros(max(len(self._sub_ba[0]), len(self._sub_ba[1])) - 1)
-        self._mono_zi = np.zeros(max(len(self._mono_ba[0]), len(self._mono_ba[1])) - 1)
-        self._lr_lpf_zi = np.zeros(max(len(self._mono_ba[0]), len(self._mono_ba[1])) - 1)
-
-    def _demod_wfm_stereo(self, composite: np.ndarray, rate: float) -> np.ndarray:
-        """Decodes L/R from the composite MPX signal via the 19 kHz pilot -
-        see the module-level WFM_* constants for the standard this follows.
-        Returns an (n, 2) float32 array (interleaved L, R), ready for a
-        stereo audio stream.
-        """
-        self._ensure_stereo_filters(rate)
-
-        main, self._mono_zi = lfilter(*self._mono_ba, composite, zi=self._mono_zi)
-        pilot, self._pilot_zi = lfilter(*self._pilot_ba, composite, zi=self._pilot_zi)
-        sub, self._sub_zi = lfilter(*self._sub_ba, composite, zi=self._sub_zi)
-
-        # The pilot's amplitude is in raw discriminator (Hz-deviation) units,
-        # not unity - squaring it un-normalized would blow the reference's
-        # scale up by orders of magnitude and swamp the L-R recovery with
-        # what's essentially noise. Track a slowly-smoothed RMS estimate and
-        # normalize to a unit-amplitude reference before squaring, same idea
-        # as an AGC ahead of a real PLL.
-        block_rms = float(np.sqrt(np.mean(pilot * pilot))) * np.sqrt(2.0)
-        self._pilot_amp = 0.9 * self._pilot_amp + 0.1 * block_rms if self._pilot_amp > 0 else block_rms
-        norm_pilot = pilot / max(self._pilot_amp, _EPS)
-
-        # Doubling the (bandpass-isolated, now unit-amplitude) pilot's
-        # frequency via squaring regenerates the 38 kHz subcarrier reference
-        # with the matching phase - a lightweight stand-in for a proper PLL
-        # (see module docstring). Coherently demodulate the L-R subcarrier
-        # with it, then lowpass to recover the L-R baseband.
-        reference = norm_pilot * norm_pilot
-        lr, self._lr_lpf_zi = lfilter(*self._mono_ba, sub * reference, zi=self._lr_lpf_zi)
-        lr = lr * WFM_STEREO_GAIN
-
-        left, self._deemph_zi_l = self._deemphasize(main + lr, rate, self._deemph_zi_l)
-        right, self._deemph_zi_r = self._deemphasize(main - lr, rate, self._deemph_zi_r)
-        if rate != self.audio_rate:
-            left = _resample_rate(left, rate, self.audio_rate)
-            right = _resample_rate(right, rate, self.audio_rate)
-        n = min(len(left), len(right))
-        return np.stack([left[:n], right[:n]], axis=-1)
-
-    def _demod_wfm(self, iq: np.ndarray, stereo: bool) -> np.ndarray:
+    def _demod_wfm(self, iq: np.ndarray) -> np.ndarray:
         # Demodulate at a wide intermediate rate so the discriminator actually
         # sees the full +/-75 kHz swing, de-emphasize, and only *then* narrow
         # down to audio_rate - that just trims already-correct audio
@@ -326,21 +238,13 @@ class Demodulator:
         self._prev_phase = phase[-1]
         composite = np.clip(np.diff(phase), -3.0, 3.0)
 
-        if stereo:
-            return self._demod_wfm_stereo(composite, intermediate_rate)
-
         audio, self._deemph_zi = self._deemphasize(composite, intermediate_rate, self._deemph_zi)
         if intermediate_rate != self.audio_rate:
             audio = _resample_rate(audio, intermediate_rate, self.audio_rate)
         return audio
 
-    def demod(
-        self, iq: np.ndarray, modulation: Modulation, offset_hz: float = 0.0, stereo: bool = False,
-    ) -> np.ndarray:
-        """Returns mono audio as a 1-D array, or - only for WFM with
-        ``stereo=True`` - an (n, 2) interleaved L/R array. ``stereo`` has no
-        effect on AM/NFM.
-        """
+    def demod(self, iq: np.ndarray, modulation: Modulation, offset_hz: float = 0.0) -> np.ndarray:
+        """Returns mono audio as a 1-D float32 array."""
         if iq.size == 0:
             return np.zeros(0, dtype=np.float32)
 
@@ -365,7 +269,7 @@ class Demodulator:
             self._mix_index = (self._mix_index + n) % fs
 
         if modulation == Modulation.WFM:
-            audio = self._demod_wfm(iq, stereo)
+            audio = self._demod_wfm(iq)
         else:
             baseband = self._decimate(iq)
             if modulation in (Modulation.USB, Modulation.LSB):
@@ -400,9 +304,7 @@ class Demodulator:
         ``audio`` to bring that *tracked* envelope to _AGC_TARGET_PEAK,
         instead of forcing every individual chunk's own peak there
         independently - see the module-level docstring above _AGC_TARGET_PEAK
-        for the real, audible pumping bug this replaced. Works unchanged on
-        mono (n,) or stereo (n, 2) - a single shared gain keeps L/R balance
-        intact either way."""
+        for the real, audible pumping bug this replaced."""
         if audio.size == 0:
             return audio
         peak = float(np.max(np.abs(audio)))

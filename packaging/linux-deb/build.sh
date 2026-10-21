@@ -1,9 +1,9 @@
 #!/usr/bin/env bash
 # Builds a self-contained ("fat") .deb for SmartScanATC: a PyInstaller
-# --onedir bundle (its own Python + PySide6/numpy/scipy/pyqtgraph/
-# pyrtlsdrlib/sounddevice, all frozen in) wrapped in a Debian package, so an
-# end user needs nothing beyond `sudo apt install ./smartscanatc_*.deb` -
-# no system python3-pyside6, no pip, no venv.
+# --onedir bundle (its own Python + numpy/scipy/pyrtlsdrlib + the web UI's
+# static files, all frozen in) wrapped in a Debian package, so an end user
+# needs nothing beyond `sudo apt install ./smartscanatc_*.deb` - no pip, no
+# venv. The UI itself runs in the browser the app opens.
 #
 # Deliberately built in a *throwaway* venv (packaging/linux-deb/build-venv,
 # gitignored, never the project's own .venv) so nothing from an existing dev
@@ -16,7 +16,7 @@
 #     the bundled pyrtlsdrlib native backend is the only supported hardware
 #     in this build. SoapySDR is a system C library with its own plugin
 #     architecture, not something that freezes cleanly into a single bundle.
-#   - The in-app "Install transcription" button - it needs a real, writable
+#   - The in-UI "Install transcription" button - it needs a real, writable
 #     Python/pip environment to install into, which a frozen build isn't.
 #   - MP3 recording output - still works, but only if the user separately
 #     has `ffmpeg` on PATH (a system binary this build can't bundle either).
@@ -88,24 +88,13 @@ mkdir -p "$BUILD"
   # while ldconfig -p is still writing - under `set -o pipefail` (this
   # script's own header) that SIGPIPE makes the whole pipeline (and the
   # script) exit nonzero, so pipefail is turned off just for this one line.
-  set +o pipefail
-  PORTAUDIO_SO="$(ldconfig -p | grep -m1 'libportaudio\.so\.2 ' | awk '{print $NF}')"
-  set -o pipefail
-  if [ -z "$PORTAUDIO_SO" ]; then
-    echo "ERROR: libportaudio.so.2 not found via ldconfig - install libportaudio2" \
-         "on this build machine (live audio would silently fail in the frozen build otherwise)." >&2
-    exit 1
-  fi
-  echo "   bundling $PORTAUDIO_SO for live audio (sounddevice)"
   "$VENV/bin/pyinstaller" \
     --name "$PKG" \
     --onedir \
-    --windowed \
-    --add-binary "$PORTAUDIO_SO:." \
     --noconfirm \
     --add-data "$REPO_ROOT/smartscan/locale/pl.po:smartscan/locale" \
     --add-data "$REPO_ROOT/smartscan/presets/band_presets.json:smartscan/presets" \
-    --add-data "$REPO_ROOT/smartscan/gui/resources:smartscan/gui/resources" \
+    --add-data "$REPO_ROOT/smartscan/web/static:smartscan/web/static" \
     --collect-data tzdata \
     --collect-data pyrtlsdrlib \
     --distpath "$BUILD/dist" \
@@ -135,7 +124,7 @@ WRAPPER
 chmod 755 "$DEBROOT/usr/bin/$PKG"
 
 cp "$SCRIPT_DIR/smartscanatc.desktop" "$DEBROOT/usr/share/applications/"
-cp "$REPO_ROOT/smartscan/gui/resources/app_icon.svg" \
+cp "$REPO_ROOT/smartscan/web/static/icon.svg" \
    "$DEBROOT/usr/share/icons/hicolor/scalable/apps/smartscanatc.svg"
 cp "$SCRIPT_DIR/README.md" "$DEBROOT/usr/share/doc/$PKG/packaging-README.md"
 # GPL: the license text must ship with the binary package.
@@ -163,16 +152,20 @@ Section: hamradio
 Priority: optional
 Architecture: $ARCH
 Installed-Size: $INSTALLED_SIZE_KB
-Depends: libgl1, libegl1, libxkbcommon-x11-0, libxcb-cursor0, libasound2t64 | libasound2
+Recommends: ffmpeg
 Maintainer: rafafunt <rafafunt@gmail.com>
 Description: Wideband SDR ATC/radio scanner (self-contained build)
  Scans a radio band via RTL-SDR and records audio only for transmissions
  the scanner actually stops on.
  .
+ The interface runs in the web browser (http://127.0.0.1:8765), which the
+ app opens on start; other devices on the network can use it too when run
+ with --server.
+ .
  This is a self-contained ("fat") build: its own Python runtime and all
- pip-installable dependencies (PySide6, numpy, scipy, pyqtgraph,
- pyrtlsdrlib, sounddevice) are bundled in /opt/$PKG - nothing from the
- system Python is required. RTL-SDR hardware works out of the box.
+ pip-installable dependencies (numpy, scipy, pyrtlsdrlib) are bundled in
+ /opt/$PKG - nothing from the system Python is required. RTL-SDR hardware
+ works out of the box.
  .
  Not included in this build: SoapySDR-based hardware (HackRF, LimeSDR,
  Airspy, SDRplay, USRP - needs a normal pip/source install instead), the
