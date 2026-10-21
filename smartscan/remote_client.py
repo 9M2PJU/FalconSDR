@@ -85,6 +85,13 @@ class RemoteClient:
             raise
 
 
+# The last Stop sent to the receiver. A new proxy's Start waits for it:
+# sent unordered, a Stop -> quick Start let the Start reach the receiver
+# first, then the late Stop stopped the fresh scan ("disconnects after a
+# moment").
+_pending_stop: threading.Thread | None = None
+
+
 class RemoteScannerProxy:
     """ScannerEngine-shaped proxy so the existing Listen panel stays intact."""
 
@@ -93,6 +100,8 @@ class RemoteScannerProxy:
         self._client = RemoteClient(config.remote_receiver)
         self._config, self._channels, self._blacklist = config, list(channels), list(blacklist)
         self._stop = threading.Event()
+        self._stopping = False
+        self._stopping_lock = threading.Lock()
         self._thread: threading.Thread | None = None
         self._sync_thread: threading.Thread | None = None
         self._audio_thread: threading.Thread | None = None
@@ -124,6 +133,9 @@ class RemoteScannerProxy:
 
     def _run(self) -> None:
         try:
+            pending = _pending_stop
+            if pending is not None:
+                pending.join(timeout=10.0)
             self._client.start(self._config, self._channels, self._blacklist)
             self.signals.gain_range_changed.emit(0.0, 50.0)
             while not self._stop.is_set():
@@ -158,6 +170,11 @@ class RemoteScannerProxy:
         except Exception as exc:  # noqa: BLE001 - surfaced in the existing status bar
             self.signals.log.emit(str(exc))
         finally:
+            # However the poll loop ended (Stop, receiver stopped, network
+            # error), this proxy's audio/sync threads must end with it. They
+            # used to keep running after "finished" - the next Start then
+            # added a second live stream, heard as an echo.
+            self._stop_local_threads(also_stop_receiver=False)
             self.signals.finished.emit()
 
     def _sync_loop(self) -> None:
@@ -239,7 +256,17 @@ class RemoteScannerProxy:
         # exactly the kind of multi-hundred-ms block that makes Qt show
         # "window not responding" - so none of this runs here, only on the
         # background thread below.
+        global _pending_stop
+        with self._stopping_lock:
+            if self._stopping:
+                return
+            self._stopping = True
         self._stop.set()
+        if also_stop_receiver:
+            # Own thread, sent first - never queued behind the slow audio
+            # teardown below (see _pending_stop).
+            _pending_stop = threading.Thread(target=self._send_stop, daemon=True)
+            _pending_stop.start()
 
         def _cleanup() -> None:
             if self._audio_response is not None:
@@ -249,10 +276,14 @@ class RemoteScannerProxy:
                     pass
             if self._audio_out is not None:
                 self._audio_out.close()
-            if also_stop_receiver:
-                self._client.stop()
 
         threading.Thread(target=_cleanup, daemon=True).start()
+
+    def _send_stop(self) -> None:
+        try:
+            self._client.stop()
+        except Exception as exc:  # noqa: BLE001 - surfaced in the existing status bar
+            self.signals.log.emit(str(exc))
 
     def request_skip(self) -> None:
         threading.Thread(target=self._client.command, args=("skip",), daemon=True).start()

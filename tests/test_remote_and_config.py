@@ -8,6 +8,7 @@ from __future__ import annotations
 
 import json
 import tempfile
+import time
 import unittest
 from pathlib import Path
 from unittest import mock
@@ -99,6 +100,66 @@ class SyncDeleteTest(unittest.TestCase):
             full = self.FakeClient(listed_size=5, served=b"12345")
             self.assertEqual(len(_sync_new_recordings(full, tmp, delete_synced=True)), 1)
             self.assertEqual(full.deleted, ["2026-01-01/a.wav"])
+
+
+class ProxyLifecycleTest(unittest.TestCase):
+    """Echo + "disconnects after Stop->Start": both came from proxy threads
+    outliving their poll loop and from an unordered Stop."""
+
+    class FakeClient:
+        base_url, token = "http://127.0.0.1:9", "t"
+        log: list = []
+
+        def __init__(self, status_error: bool = False, stop_delay: float = 0.0):
+            self.status_error, self.stop_delay = status_error, stop_delay
+
+        def start(self, *_args):
+            self.log.append("start")
+
+        def stop(self):
+            time.sleep(self.stop_delay)
+            self.log.append("stop")
+
+        def status(self, timeout: float = 8.0):
+            if self.status_error:
+                raise RuntimeError("network hiccup")
+            return {"running": True, "state": "SCANNING"}
+
+        def recordings(self):
+            return []
+
+    def _proxy(self, client):
+        from smartscan import remote_client
+        proxy = remote_client.RemoteScannerProxy(config_mod.AppConfig(), [], [])
+        proxy._client = client
+        return proxy
+
+    def setUp(self) -> None:
+        from smartscan import remote_client
+        patcher = mock.patch.object(remote_client, "AudioOutput", mock.MagicMock())
+        patcher.start()
+        self.addCleanup(patcher.stop)
+        self.FakeClient.log = []
+
+    def test_failed_poll_loop_ends_audio_and_sync_threads(self) -> None:
+        proxy = self._proxy(self.FakeClient(status_error=True))
+        proxy.start()
+        proxy._thread.join(2)
+        self.assertTrue(proxy._stop.is_set())
+        proxy.join(2)
+        self.assertFalse(proxy._audio_thread.is_alive())
+
+    def test_quick_start_waits_for_previous_stop(self) -> None:
+        first = self._proxy(self.FakeClient())
+        first.start()
+        time.sleep(0.1)
+        first._client.stop_delay = 0.5
+        first.request_stop()
+        second = self._proxy(self.FakeClient())
+        second.start()
+        time.sleep(1.0)
+        second.request_stop()
+        self.assertEqual(self.FakeClient.log[:3], ["start", "stop", "start"])
 
 
 if __name__ == "__main__":
