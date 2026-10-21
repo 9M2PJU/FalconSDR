@@ -22,7 +22,7 @@ from ..widgets import BAND_OVERRIDE_ACCENT, LevelMeter, SliderSpin, SpectrumView
 RESOURCES_DIR = Path(__file__).resolve().parent.parent / "resources"
 _FOLDER_ICON = QIcon(str(RESOURCES_DIR / "folder.svg"))
 
-_MODULATIONS = ["AM", "NFM", "WFM"]
+_MODULATIONS = ["AM", "NFM", "WFM", "SSB"]
 _FOLDER_BG = QColor(70, 110, 170, 130)
 
 
@@ -660,12 +660,26 @@ class ScannerPanel(QGroupBox):
         w = QWidget()
         lay = QHBoxLayout(w)
         lay.setContentsMargins(0, 0, 0, 0)
-        self.agc_check = QCheckBox(tr("Auto (AGC)"))
-        self.agc_check.toggled.connect(self._on_agc_toggled)
+        self.gain_mode_combo = QComboBox()
+        self.gain_mode_combo.addItem(tr("Manual"), "manual")
+        self.gain_mode_combo.addItem(tr("Auto (hardware AGC)"), "auto")
+        self.gain_mode_combo.addItem(tr("Auto (software AGC)"), "sw_auto")
+        self.gain_mode_combo.setToolTip(tr(
+            "Hardware AGC: the tuner's own onboard AGC - fast, but can\n"
+            "overdrive on a strong station (measured: +0.7dBFS, past full\n"
+            "scale, with spurious extra detections on adjacent channels from\n"
+            "the resulting spectral leakage).\n\n"
+            "Software AGC: a slower, cleaner control loop driven from this\n"
+            "app's own measurement of the captured signal's peak - never\n"
+            "overdrives, but reacts slower and settles at a less aggressive\n"
+            "gain, so it can miss some marginal/edge-of-band signals hardware\n"
+            "AGC would have pushed over the trigger. Try both."
+        ))
+        self.gain_mode_combo.currentIndexChanged.connect(self._on_gain_mode_changed)
         lo, hi = DEFAULT_GAIN_RANGE_DB
         self.gain_slider = SliderSpin(lo, hi, 30.0, decimals=1, suffix="dB")
         self.gain_slider.valueChanged.connect(self._on_gain_changed)
-        lay.addWidget(self.agc_check)
+        lay.addWidget(self.gain_mode_combo)
         lay.addWidget(self.gain_slider, 1)
         return w
 
@@ -855,9 +869,9 @@ class ScannerPanel(QGroupBox):
         self.linger_slider.set_value(self.config.timing.linger_time_ms)
         self.trigger_slider.set_value(self.config.trigger_level_dbfs)
         self.level_meter.set_trigger(self.config.trigger_level_dbfs)
-        self.agc_check.setChecked(self.config.device.gain_mode == "auto")
+        self._set_gain_mode_combo(self.config.device.gain_mode)
         self.gain_slider.set_value(self.config.device.gain_db)
-        self.gain_slider.set_enabled_all(self.config.device.gain_mode != "auto")
+        self.gain_slider.set_enabled_all(self.config.device.gain_mode == "manual")
         self.nr_check.setChecked(self.config.noise_reduction.enabled)
         self.nr_strength_slider.set_value(round(self.config.noise_reduction.strength * 100))
         self.nr_strength_slider.set_enabled_all(self.config.noise_reduction.enabled)
@@ -933,9 +947,9 @@ class ScannerPanel(QGroupBox):
         )
         gain_mode = band.gain_mode if band.gain_mode is not None else self.config.device.gain_mode
         gain_db = band.gain_db if band.gain_db is not None else self.config.device.gain_db
-        self.agc_check.setChecked(gain_mode == "auto")
+        self._set_gain_mode_combo(gain_mode)
         self.gain_slider.set_value(gain_db)
-        self.gain_slider.set_enabled_all(gain_mode != "auto")
+        self.gain_slider.set_enabled_all(gain_mode == "manual")
         nr_enabled = (
             band.noise_reduction_enabled if band.noise_reduction_enabled is not None
             else self.config.noise_reduction.enabled
@@ -982,7 +996,7 @@ class ScannerPanel(QGroupBox):
         band.trigger_level_dbfs = self.trigger_slider.value()
         band.tuning_time_ms = int(self.tuning_slider.value())
         band.linger_time_ms = int(self.linger_slider.value())
-        band.gain_mode = "auto" if self.agc_check.isChecked() else "manual"
+        band.gain_mode = self.gain_mode_combo.currentData()
         band.gain_db = self.gain_slider.value()
         band.noise_reduction_enabled = self.nr_check.isChecked()
         band.noise_reduction_strength = self.nr_strength_slider.value() / 100.0
@@ -1059,11 +1073,15 @@ class ScannerPanel(QGroupBox):
             self.config.trigger_level_dbfs = value
         self.settings_changed.emit()
 
-    def _on_agc_toggled(self, checked: bool) -> None:
-        self.gain_slider.set_enabled_all(not checked)
+    def _set_gain_mode_combo(self, mode: str) -> None:
+        idx = self.gain_mode_combo.findData(mode)
+        self.gain_mode_combo.setCurrentIndex(idx if idx >= 0 else 0)
+
+    def _on_gain_mode_changed(self, _index: int) -> None:
+        mode = self.gain_mode_combo.currentData()
+        self.gain_slider.set_enabled_all(mode == "manual")
         if self._loading:
             return
-        mode = "auto" if checked else "manual"
         if self._editing_band is not None:
             self._editing_band.gain_mode = mode
         else:

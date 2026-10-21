@@ -359,7 +359,7 @@ Pełny opis — patrz §6.5.
 
 ### 3.11 Lokalizacja odbiornika
 
-`home_lat`/`home_lon` (domyślnie 52.123, 21.012) — używane do budowania
+`home_lat`/`home_lon` (domyślnie nieustawione — `None`) — używane do budowania
 linków playbacku FlightRadar24/ADSBExchange (§17.5).
 
 ### 3.12 Inne ustawienia globalne

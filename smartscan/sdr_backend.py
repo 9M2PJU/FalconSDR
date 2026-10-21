@@ -101,7 +101,19 @@ class SoapyBackend(SdrBackend):
         if not HAVE_SOAPY:
             raise RuntimeError("The python3-soapysdr module is not installed")
         self._wait_for_reopen_cooldown()
-        args = {"driver": driver} if driver and driver != "auto" else {}
+        # An unfiltered {} for "auto"/"" used to match whatever SoapySDR
+        # enumerates first - including the "audio" driver (gotcha 4) misreading
+        # a sound card as an SDR, or, confirmed on real hardware, just a
+        # different *instance*/path to the same actual RTL-SDR than an
+        # explicit driver="rtlsdr" open: same dongle, but measured channel
+        # power up to ~10dB apart between the two for the *same* gain_mode
+        # ("auto"/hardware AGC) - one was overdriving (+1dBFS peak), the
+        # other wasn't (-9dBFS peak). "auto" here only ever means "let the
+        # app pick, don't ask the user" for an RTL-SDR dongle specifically
+        # (gotcha 16/35: this app's device list is RTL-SDR-first), so there's
+        # no ambiguity worth preserving - filter for it explicitly instead of
+        # leaving it to whatever SoapySDR happens to enumerate first.
+        args = {"driver": driver if driver and driver != "auto" else "rtlsdr"}
         if device_args:
             for kv in device_args.split(","):
                 if "=" in kv:
@@ -112,7 +124,14 @@ class SoapyBackend(SdrBackend):
                         # unconditional writeSetting() disable below.
                         continue
                     args[k] = v.strip()
-        self.device = SoapySDR.Device(args)
+        # Passing `args` as a dict here (the old code) is broken on the
+        # Ubuntu-26.04-packaged python3-soapysdr (0.8.1-7build1): dict/Kwargs
+        # marshalling silently fails to match any device ("no match"), while
+        # the equivalent "k=v,k=v" string - what SoapySDRUtil's CLI uses -
+        # works every time. Confirmed by direct A/B testing on real hardware:
+        # identical args, dict always fails, string always succeeds.
+        args_str = ",".join(f"{k}={v}" for k, v in args.items())
+        self.device = SoapySDR.Device(args_str)
         self._disable_bias_tee()
         self.sample_rate = sample_rate
         self.device.setSampleRate(SOAPY_SDR_RX, 0, sample_rate)
@@ -840,18 +859,30 @@ class AcquisitionThread:
         return getattr(self._backend, "stream_mtu", None)
 
 
-def create_backend(driver: str, device_args: str, sample_rate: float, gain_mode: str, gain_db: float) -> SdrBackend:
+def create_backend(
+    driver: str, device_args: str, sample_rate: float, gain_mode: str, gain_db: float,
+    debug_mode: bool = False,
+) -> SdrBackend:
     if driver == "simulated":
         backend = SimulatedBackend(sample_rate)
         backend.set_gain(gain_mode, gain_db)
         return backend
 
     if not driver or driver == "auto":
-        # No specific device was requested - fall back to simulation quietly
-        # so the app is still usable/demoable with nothing plugged in.
+        # Real, reported case: a real device that merely failed to open (USB
+        # permissions, already in use by another process, DVB-T driver
+        # grabbed it first) looks, from here, identical to "no hardware at
+        # all" - silently simulating on it is indistinguishable from a
+        # genuinely working scan, which is exactly the deceptive state a
+        # normal user must never be left in. So the quiet fallback below -
+        # letting the app still be usable/demoable with nothing plugged in -
+        # is gated on debug_mode now: off by default, meaning a real open
+        # failure propagates (visible error) instead of quietly faking data.
         try:
             return open_real_backend(driver, device_args, sample_rate, gain_mode, gain_db)
         except Exception:
+            if not debug_mode:
+                raise
             backend = SimulatedBackend(sample_rate)
             backend.set_gain(gain_mode, gain_db)
             return backend

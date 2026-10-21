@@ -133,6 +133,7 @@ Everything below operates on (n, 2) float32 arrays uniformly.
 from __future__ import annotations
 
 import os
+import sys
 import threading
 import time
 from pathlib import Path
@@ -148,9 +149,34 @@ except ImportError:
 
 # Fallback when PyAudio isn't available - the usual case on Windows/macOS,
 # where PyAudio has no wheel for newer Pythons and needs a C compiler (plus
-# PortAudio from brew on macOS). sounddevice's wheels bundle PortAudio
-# itself. Same PortAudio underneath, so the same device indices, rates and
-# callback model - only the Python wrapper differs.
+# PortAudio from brew on macOS). On those platforms sounddevice's wheels
+# bundle PortAudio itself (the `_sounddevice_data` package) - but on Linux
+# sounddevice has NO such bundled fallback at all: it only ever calls
+# ctypes.util.find_library("portaudio"), a *system-wide* search (ldconfig's
+# cache) that has no idea a PyInstaller --onedir bundle's own _internal/
+# directory exists, even with that directory on LD_LIBRARY_PATH (confirmed:
+# bundling libportaudio.so.2 there changed nothing, find_library() still
+# returned None in a clean container with no system libportaudio2 - unlike
+# pyrtlsdrlib's own importlib.resources-based absolute-path loader, which
+# doesn't have this problem). So in a frozen build, hand find_library() the
+# bundled copy's real path directly before sounddevice ever asks - see
+# packaging/linux-deb/build.sh for how that file actually gets bundled
+# (same "PyInstaller can't see a runtime-dynamic native-lib lookup" class of
+# bug as pyrtlsdrlib/tzdata, just with a different fix shape since this
+# loader has no package-relative path of its own to exploit).
+if getattr(sys, "frozen", False):
+    import ctypes.util as _ctypes_util
+    _bundled_portaudio = os.path.join(getattr(sys, "_MEIPASS", ""), "libportaudio.so.2")
+    if os.path.exists(_bundled_portaudio):
+        _orig_find_library = _ctypes_util.find_library
+
+        def _find_library_with_bundled_portaudio(name, _orig=_orig_find_library, _bundled=_bundled_portaudio):
+            if name == "portaudio":
+                return _bundled
+            return _orig(name)
+
+        _ctypes_util.find_library = _find_library_with_bundled_portaudio
+
 try:
     import sounddevice
     HAVE_SOUNDDEVICE = True

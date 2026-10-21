@@ -29,6 +29,33 @@ class Modulation(str, Enum):
     AM = "AM"
     NFM = "NFM"
     WFM = "WFM"
+    SSB = "SSB"  # user-facing only - resolve_ssb_sideband() turns this into USB/LSB
+    USB = "USB"
+    LSB = "LSB"
+
+
+# Amateur-radio sideband convention: LSB below 10 MHz, USB at/above - except
+# 60m (5.3305-5.4035 MHz in most countries), which is USB by international
+# agreement despite being below 10 MHz. Not configurable per band on purpose
+# (this is what "SSB" picks for you - gotcha: a few administrations/older
+# band plans use LSB on parts of 60m instead; if that ever matters here, add
+# an explicit USB/LSB override on the band rather than special-casing this
+# table further).
+_SSB_60M_USB_RANGE_HZ = (5_330_500, 5_403_500)
+
+
+def resolve_ssb_sideband(modulation: Modulation, freq_hz: float) -> Modulation:
+    """Modulation.SSB -> USB or LSB for this specific frequency (anything
+    else is returned unchanged). Called once wherever a Modulation gets
+    attached to a concrete frequency (see scanner_engine.py's _claim()) -
+    never stored back into config/channels.csv, so a saved "SSB" channel/band
+    keeps re-resolving itself if the user later moves its frequency."""
+    if modulation != Modulation.SSB:
+        return modulation
+    lo, hi = _SSB_60M_USB_RANGE_HZ
+    if lo <= freq_hz <= hi:
+        return Modulation.USB
+    return Modulation.USB if freq_hz >= 10_000_000 else Modulation.LSB
 
 
 # Audio-path states in which the recorder/speaker are allowed to be live.

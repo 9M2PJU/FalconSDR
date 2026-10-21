@@ -6,7 +6,7 @@ needs to be reconfigured after a restart, per spec section 4.5.
 from __future__ import annotations
 
 import json
-from dataclasses import asdict, dataclass, field
+from dataclasses import asdict, dataclass, field, fields
 from pathlib import Path
 
 CONFIG_DIR = Path.home() / ".config" / "SmartScanATC"
@@ -16,12 +16,45 @@ BLACKLIST_CSV = CONFIG_DIR / "blacklist.csv"
 DEFAULT_RECORDINGS_DIR = str(Path.home() / "SmartScanATC" / "recordings")
 
 
+def atomic_write_text(path: Path, text: str) -> None:
+    """Write-then-rename, so a crash/power cut mid-write never leaves a
+    truncated file behind - a half-written config.json used to load as
+    "corrupt" -> silent defaults, which the next save() then made permanent."""
+    path.parent.mkdir(parents=True, exist_ok=True)
+    temporary = path.with_suffix(path.suffix + ".tmp")
+    # newline="": csv already writes its own "\r\n" - no second translation on Windows.
+    with temporary.open("w", encoding="utf-8", newline="") as f:
+        f.write(text)
+    temporary.replace(path)
+
+
+def _from_dict(cls, raw: dict):
+    """Builds a config dataclass ignoring keys it doesn't know - a config.json
+    written by a newer/older version (or pushed by a newer desktop client to
+    a remote receiver) must never crash load() with an unexpected-keyword
+    TypeError. Also covers stale keys of removed options ("mode",
+    "insert_marker", "audio_format")."""
+    known = {f.name for f in fields(cls)}
+    return cls(**{k: v for k, v in raw.items() if k in known})
+
+
 @dataclass
 class DeviceConfig:
     driver: str = "auto"          # "auto", "rtlsdr", "simulated", or a SoapySDR driver key
     device_args: str = ""         # extra SoapySDR device args, e.g. "serial=00000001"
     sample_rate_hz: float = 2_400_000.0  # capture bandwidth; RTL-SDR handles ~2.4 MSPS
-    gain_mode: str = "auto"       # "auto" or "manual"
+    # "manual" (fixed gain_db), "auto" (the tuner's own onboard hardware AGC),
+    # or "sw_auto" (SoftwareAgc control loop - see agc.py). "auto" is the
+    # default: hardware AGC is lower-latency but can overdrive on a strong
+    # station (confirmed: +0.7dBFS, past full scale, with spurious extra
+    # detections on adjacent channels from the resulting spectral leakage -
+    # see AGENTS.md gotcha 27); "sw_auto" fixes that but reacts slower and
+    # sits at a lower, less aggressive gain, so it can miss some marginal/
+    # edge-of-band signals hardware AGC would have pushed over the trigger.
+    # Both are legitimate; this app doesn't have enough real-world data yet
+    # to default to "sw_auto" unconditionally, so it's an explicit opt-in.
+    gain_mode: str = "auto"
+
     gain_db: float = 30.0
     audio_output_device: int = -1  # -1 = system default (PyAudio index)
 
@@ -171,6 +204,19 @@ class TranscriptionConfig:
 
 
 @dataclass
+class RemoteReceiverConfig:
+    """Optional LAN receiver.  Audio files are copied locally for playback and Whisper."""
+    enabled: bool = False
+    url: str = ""  # e.g. "http://receiver.local:8765"
+    token: str = ""
+    # Deletes a recording from the receiver only after this machine's own
+    # download of it has fully completed (confirmed by size match) and the
+    # file has been handed to Odtwarzacz - never mid-transfer, never on a
+    # guess. See RemoteClient.delete_recording()/_sync_new_recordings().
+    delete_synced: bool = False
+
+
+@dataclass
 class LegalDisclaimerConfig:
     """Which UI languages (see i18n.current_language()) have already seen
     each disclaimer - not a single "seen ever" flag, since dismissing it in
@@ -203,6 +249,7 @@ class AppConfig:
     recency_boost: RecencyBoostConfig = field(default_factory=RecencyBoostConfig)
     noise_reduction: NoiseReductionConfig = field(default_factory=NoiseReductionConfig)
     transcription: TranscriptionConfig = field(default_factory=TranscriptionConfig)
+    remote_receiver: RemoteReceiverConfig = field(default_factory=RemoteReceiverConfig)
     location: LocationConfig = field(default_factory=LocationConfig)
     trigger_level_dbfs: float = -30.0
     # Extra cutoff for BOTH the live speaker and the recording, expressed as
@@ -264,33 +311,22 @@ class AppConfig:
         except (json.JSONDecodeError, OSError):
             return AppConfig()
         if "bands" in raw:
-            bands = [VfoRangeConfig(**b) for b in raw["bands"]]
+            bands = [_from_dict(VfoRangeConfig, b) for b in raw["bands"]]
         else:
             # Migrate pre-band-list configs (single "vfo_range" + "extra_vfo_ranges").
             legacy_primary = raw.get("vfo_range")
-            bands = [VfoRangeConfig(**legacy_primary)] if legacy_primary else [VfoRangeConfig()]
-            bands += [VfoRangeConfig(**r) for r in raw.get("extra_vfo_ranges", [])]
-        # An early, never-shipped mp3 attempt used the key "audio_format" -
-        # drop it if present so it doesn't collide with RecordingConfig's
-        # current, differently-named "output_format" field. "mode" and
-        # "insert_marker" are stale keys from the removed "Single File"
-        # auto-recording option (see RecordingConfig's own comment) - an
-        # existing user's config.json may still have either, which would
-        # otherwise crash RecordingConfig(**recording_raw) below with an
-        # unexpected-keyword error.
-        recording_raw = dict(raw.get("recording", {}))
-        recording_raw.pop("audio_format", None)
-        recording_raw.pop("mode", None)
-        recording_raw.pop("insert_marker", None)
+            bands = [_from_dict(VfoRangeConfig, legacy_primary)] if legacy_primary else [VfoRangeConfig()]
+            bands += [_from_dict(VfoRangeConfig, r) for r in raw.get("extra_vfo_ranges", [])]
         return AppConfig(
-            device=DeviceConfig(**raw.get("device", {})),
+            device=_from_dict(DeviceConfig, raw.get("device", {})),
             bands=bands,
-            timing=TimingConfig(**raw.get("timing", {})),
-            recording=RecordingConfig(**recording_raw),
-            recency_boost=RecencyBoostConfig(**raw.get("recency_boost", {})),
-            noise_reduction=NoiseReductionConfig(**raw.get("noise_reduction", {})),
-            transcription=TranscriptionConfig(**raw.get("transcription", {})),
-            location=LocationConfig(**raw.get("location", {})),
+            timing=_from_dict(TimingConfig, raw.get("timing", {})),
+            recording=_from_dict(RecordingConfig, raw.get("recording", {})),
+            recency_boost=_from_dict(RecencyBoostConfig, raw.get("recency_boost", {})),
+            noise_reduction=_from_dict(NoiseReductionConfig, raw.get("noise_reduction", {})),
+            transcription=_from_dict(TranscriptionConfig, raw.get("transcription", {})),
+            remote_receiver=_from_dict(RemoteReceiverConfig, raw.get("remote_receiver", {})),
+            location=_from_dict(LocationConfig, raw.get("location", {})),
             trigger_level_dbfs=raw.get("trigger_level_dbfs", -30.0),
             squelch_enabled=raw.get("squelch_enabled", False),
             squelch_offset_db=raw.get("squelch_offset_db", -6.0),
@@ -300,10 +336,9 @@ class AppConfig:
             memory_list_enabled=raw.get("memory_list_enabled", True),
             wfm_stereo_enabled=raw.get("wfm_stereo_enabled", False),
             language=raw.get("language", "auto"),
-            legal_disclaimer=LegalDisclaimerConfig(**raw.get("legal_disclaimer", {})),
+            legal_disclaimer=_from_dict(LegalDisclaimerConfig, raw.get("legal_disclaimer", {})),
             debug_mode=raw.get("debug_mode", False),
         )
 
     def save(self) -> None:
-        CONFIG_DIR.mkdir(parents=True, exist_ok=True)
-        CONFIG_PATH.write_text(json.dumps(asdict(self), indent=2, ensure_ascii=False))
+        atomic_write_text(CONFIG_PATH, json.dumps(asdict(self), indent=2, ensure_ascii=False))

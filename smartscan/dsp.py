@@ -90,6 +90,48 @@ _AGC_RELEASE_TAU_S = 0.4
 # accurately than a single chunk's own peak did.
 _AGC_MAX_GAIN = 6.0
 
+# SSB (USB/LSB): a correctly-tuned SSB signal, mixed to baseband with its own
+# dial/suppressed-carrier frequency at 0 Hz, is m(t) +/- j*hilbert(m(t)) -
+# taking the real part alone already recovers m(t) exactly, for *either*
+# sideband, with no sign distinction needed (verified algebraically: Re of a
+# one-sided-spectrum complex signal reconstructs the same real signal
+# regardless of which side the energy is on). What USB vs LSB actually
+# changes here is which *extra* half-bandwidth to re-center before that: real
+# noise/an adjacent station on the *wrong* side of the dial frequency would
+# otherwise pass straight through un-rejected (Re{} alone doesn't distinguish
+# sides at all) - shifting the wanted side to be centered on 0 and then
+# low-pass filtering tightly is what actually rejects it, same real-rejection
+# problem a hardware receiver's IF filter solves.
+SSB_BANDWIDTH_HZ = 2700.0
+_SSB_HALF_BW_HZ = SSB_BANDWIDTH_HZ / 2.0
+
+# Final audio-band lowpass for AM/NFM, applied after demodulation. _decimate()
+# only band-limits to the *complex IQ* channel-select width (+/-audio_rate/2 =
+# +/-6.25 kHz at AUDIO_RATE=12500) - that's the right width for keeping
+# neighbouring RF channels out (gotcha 7), but it leaves a good 3+ kHz of
+# passband above real voice's own ~3 kHz occupied bandwidth (ATC/NFM
+# transmitters don't modulate up there at all) where nothing useful ever
+# lives but filter-rolloff leakage/residual adjacent-channel energy does -
+# and AM's envelope detector (abs(baseband), a nonlinear op) folds whatever
+# leaks through into in-band-looking noise across the whole audio span, not
+# just that high end. Real-data finding (40-file survey of post-antenna-
+# upgrade airband recordings with real recognized speech, SNR<=20dB): mean
+# signal-vs-noise gap by band was 23.5dB at 300Hz-1kHz (voice fundamentals -
+# noise reduction already works great there) but collapsed to ~1dB above
+# 3kHz - i.e. that whole region is pure residual noise with no signal
+# advantage left for NoiseReducer's broadband spectral gate to exploit, and
+# 11/40 files had a genuine narrowband spike up there (median ~4.9kHz) that
+# a *stationary*-noise model (minimum-statistics) won't fully track since it
+# isn't stationary. A hard lowpass here removes that region deterministically
+# regardless of its exact cause, before NoiseReducer (or live listening, if
+# noise reduction is off) ever sees it - cheaper and more effective than
+# retuning the spectral gate's own parameters to chase a problem that isn't
+# actually broadband. SSB already gets this for free from its own tighter
+# _SSB_HALF_BW_HZ image-reject filter; WFM's audio path is unrelated (its
+# own WFM_MONO_CUTOFF_HZ already serves the same purpose at a wider cutoff
+# for broadcast-quality audio).
+VOICE_LOWPASS_HZ = 3500.0
+
 
 def level_dbfs(iq: np.ndarray) -> float:
     """RMS power of a complex baseband block, expressed in dBFS (0 dB = full scale)."""
@@ -138,6 +180,17 @@ class Demodulator:
         # gain - only reset alongside every other piece of this
         # demodulator's running state.
         self._agc_envelope = _AGC_MIN_ENVELOPE
+        # SSB image-reject lowpass (see SSB_BANDWIDTH_HZ) - lazily built the
+        # first time USB/LSB is actually demodulated, since its coefficients
+        # depend on audio_rate.
+        self._ssb_ba = None
+        self._ssb_zi = None
+        self._ssb_mix_index = 0
+        # AM/NFM post-demod voice-band lowpass (see VOICE_LOWPASS_HZ) -
+        # lazily built like _ssb_ba since its coefficients depend on
+        # audio_rate.
+        self._voice_lpf_ba = None
+        self._voice_lpf_zi = None
 
     def reset(self) -> None:
         self._prev_phase = 0.0
@@ -150,6 +203,48 @@ class Demodulator:
         self._deemph_zi_r = np.zeros(1)
         self._pilot_amp = 0.0
         self._agc_envelope = _AGC_MIN_ENVELOPE
+        self._ssb_zi = None
+        self._ssb_mix_index = 0
+        self._voice_lpf_zi = None
+
+    def _ensure_ssb_filter(self) -> None:
+        if self._ssb_ba is not None:
+            return
+        nyq = self.audio_rate / 2.0
+        self._ssb_ba = butter(4, min(_SSB_HALF_BW_HZ / nyq, 0.99), btype="lowpass")
+        self._ssb_zi = np.zeros(max(len(self._ssb_ba[0]), len(self._ssb_ba[1])) - 1)
+
+    def _demod_ssb(self, baseband: np.ndarray, sideband: Modulation) -> np.ndarray:
+        """USB/LSB via the product-detector method. By the time this runs,
+        demod() has already re-centered the wanted sideband on 0 Hz (an
+        extra +/-SSB_BANDWIDTH_HZ/2 folded into the ordinary channel-select
+        mix - see SSB_BANDWIDTH_HZ's own comment for why) and decimated.
+        After rejecting whatever's left on the wrong side with a tight
+        lowpass, the recentering shift must be undone *before* taking the
+        real part, or the recovered audio comes out frequency-shifted by
+        that same amount instead of restored to its original pitch (taking
+        Re{} of a shifted signal doesn't "shift back" on its own - verified
+        the hard way with a synthetic tone, off by exactly half the SSB
+        bandwidth before this undo step was added)."""
+        self._ensure_ssb_filter()
+        baseband, self._ssb_zi = lfilter(*self._ssb_ba, baseband, zi=self._ssb_zi)
+
+        extra = _SSB_HALF_BW_HZ if sideband == Modulation.USB else -_SSB_HALF_BW_HZ
+        n = baseband.size
+        rate = int(round(self.audio_rate))
+        t = (self._ssb_mix_index + np.arange(n)) / self.audio_rate
+        baseband = baseband * np.exp(2j * np.pi * extra * t)
+        self._ssb_mix_index = (self._ssb_mix_index + n) % rate
+
+        return baseband.real
+
+    def _apply_voice_lowpass(self, audio: np.ndarray) -> np.ndarray:
+        if self._voice_lpf_ba is None:
+            nyq = self.audio_rate / 2.0
+            self._voice_lpf_ba = butter(4, min(VOICE_LOWPASS_HZ / nyq, 0.99), btype="lowpass")
+            self._voice_lpf_zi = np.zeros(max(len(self._voice_lpf_ba[0]), len(self._voice_lpf_ba[1])) - 1)
+        audio, self._voice_lpf_zi = lfilter(*self._voice_lpf_ba, audio, zi=self._voice_lpf_zi)
+        return audio
 
     def _decimate(self, x: np.ndarray) -> np.ndarray:
         # Channel-select + resample *before* demodulating: resample_poly's
@@ -249,21 +344,33 @@ class Demodulator:
         if iq.size == 0:
             return np.zeros(0, dtype=np.float32)
 
-        if offset_hz:
+        # USB/LSB fold an extra +/-SSB_BANDWIDTH_HZ/2 into this same mix (see
+        # SSB_BANDWIDTH_HZ's comment) so the wanted sideband ends up centered
+        # on 0 Hz, not just the channel itself - needed even when offset_hz
+        # is 0 (a single-channel capture still needs that extra shift).
+        total_shift_hz = offset_hz
+        if modulation == Modulation.USB:
+            total_shift_hz += _SSB_HALF_BW_HZ
+        elif modulation == Modulation.LSB:
+            total_shift_hz -= _SSB_HALF_BW_HZ
+
+        if total_shift_hz:
             # Digitally shift a single channel out of a wideband capture down
             # to baseband before demodulating it, since in wideband mode the
             # tuner sits on the *window* center, not on this specific channel.
             n = iq.size
             fs = int(round(self.sample_rate))
             t = (self._mix_index + np.arange(n)) / self.sample_rate
-            iq = iq * np.exp(-2j * np.pi * offset_hz * t)
+            iq = iq * np.exp(-2j * np.pi * total_shift_hz * t)
             self._mix_index = (self._mix_index + n) % fs
 
         if modulation == Modulation.WFM:
             audio = self._demod_wfm(iq, stereo)
         else:
             baseband = self._decimate(iq)
-            if modulation == Modulation.AM:
+            if modulation in (Modulation.USB, Modulation.LSB):
+                audio = self._demod_ssb(baseband, modulation)
+            elif modulation == Modulation.AM:
                 # DC-block the envelope: same one-pole leaky-integrator math
                 # as _deemphasize() above (dc[n] = (1-alpha)*dc[n-1] +
                 # alpha*v[n], out = v - dc), just expressed as an
@@ -275,11 +382,13 @@ class Demodulator:
                 alpha = 0.05
                 dc, self._dc_zi = lfilter([alpha], [1.0, -(1.0 - alpha)], env, zi=self._dc_zi)
                 audio = env - dc
+                audio = self._apply_voice_lowpass(audio)
             else:
                 phase = np.angle(baseband)
                 phase = np.unwrap(np.concatenate(([self._prev_phase], phase)))
                 self._prev_phase = phase[-1]
                 audio = np.clip(np.diff(phase), -3.0, 3.0)
+                audio = self._apply_voice_lowpass(audio)
 
         audio = audio.astype(np.float32)
         audio = self._apply_agc(audio)
@@ -304,6 +413,26 @@ class Demodulator:
         self._agc_envelope = max(self._agc_envelope, _AGC_MIN_ENVELOPE)
         gain = min(_AGC_TARGET_PEAK / self._agc_envelope, _AGC_MAX_GAIN)
         return audio * gain
+
+    def notify_rf_gain_change(self, linear_factor: float) -> None:
+        """Pre-scales the tracked output envelope by the same ratio an RF
+        gain step (SoftwareAgc, see scanner_engine.py's _maybe_run_software_agc)
+        is about to apply to the raw captured IQ - called right when that
+        step happens, *before* the next demod() call ever sees audio at the
+        new level.
+
+        Without this, _apply_agc() only finds out about the new level the
+        normal way - by noticing this chunk's peak no longer matches the
+        envelope it was tracking, and chasing it via the ordinary attack/
+        release filter. That's exactly the right behavior for a real change
+        in the signal itself, but an RF gain step is a *known, instant* step
+        the engine already knows the exact size of - real, user-reported
+        symptom: audible level jumps right when SoftwareAgc adjusted,
+        described as sounding like a different transmission starting. Pre-
+        scaling the envelope means the next gain computation already reflects
+        the new RF level, so output loudness stays continuous through the
+        step instead of jumping and then being pulled back by the filter."""
+        self._agc_envelope = max(self._agc_envelope * linear_factor, _AGC_MIN_ENVELOPE)
 
 
 class NoiseReducer:

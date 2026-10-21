@@ -44,6 +44,21 @@ class _DeletableTable(QTableWidget):
         super().keyPressEvent(event)
 
 
+class _NumericTableWidgetItem(QTableWidgetItem):
+    """Sorts by a real number (stashed in UserRole) instead of the displayed
+    string - a plain QTableWidgetItem sorts "121.5" before "50.0" (lexical
+    comparison), which is wrong for a frequency/margin column."""
+
+    def __init__(self, text: str, value: float):
+        super().__init__(text)
+        self.setData(Qt.ItemDataRole.UserRole, value)
+
+    def __lt__(self, other) -> bool:
+        if isinstance(other, _NumericTableWidgetItem):
+            return self.data(Qt.ItemDataRole.UserRole) < other.data(Qt.ItemDataRole.UserRole)
+        return super().__lt__(other)
+
+
 class _ChannelTree(QTreeWidget):
     """QTreeWidget for the Memory List: folders as parent nodes (bulk
     enable/disable via a tri-state checkbox), channels as draggable leaves.
@@ -582,6 +597,12 @@ class FrequencyManager(QTabWidget):
     def _build_blacklist_tab(self) -> None:
         w = QWidget()
         lay = QVBoxLayout(w)
+
+        self.blacklist_search = QLineEdit()
+        self.blacklist_search.setPlaceholderText(tr("Search blacklist..."))
+        self.blacklist_search.textChanged.connect(self._apply_blacklist_filter)
+        lay.addWidget(self.blacklist_search)
+
         self.blacklist_table = _DeletableTable(0, 4)
         self.blacklist_table.setHorizontalHeaderLabels([
             tr("Frequency (MHz)"), tr("Margin (kHz)"), tr("Description"), tr("Added"),
@@ -589,6 +610,7 @@ class FrequencyManager(QTabWidget):
         self.blacklist_table.horizontalHeader().setSectionResizeMode(2, QHeaderView.ResizeMode.Stretch)
         self.blacklist_table.setSelectionBehavior(QAbstractItemView.SelectionBehavior.SelectRows)
         self.blacklist_table.setEditTriggers(QAbstractItemView.EditTrigger.NoEditTriggers)
+        self.blacklist_table.setSortingEnabled(True)
         self.blacklist_table.deleteRequested.connect(self._delete_blacklist_entry)
         lay.addWidget(self.blacklist_table)
 
@@ -605,12 +627,35 @@ class FrequencyManager(QTabWidget):
         self._refresh_blacklist_table()
 
     def _refresh_blacklist_table(self) -> None:
+        # Sorting must be off while repopulating - QTableWidget re-sorts
+        # after every single setItem() otherwise, scrambling row indices
+        # mid-population (and making this O(n^2) for no reason).
+        self.blacklist_table.setSortingEnabled(False)
         self.blacklist_table.setRowCount(len(self.blacklist))
         for row, e in enumerate(self.blacklist):
-            self.blacklist_table.setItem(row, 0, QTableWidgetItem(f"{e.freq_hz / 1e6:.4f}"))
-            self.blacklist_table.setItem(row, 1, QTableWidgetItem(f"{e.margin_hz / 1000:.2f}"))
+            freq_item = _NumericTableWidgetItem(f"{e.freq_hz / 1e6:.4f}", e.freq_hz)
+            # The entry itself, not just its row - sorting/filtering means a
+            # row's position no longer matches its index in self.blacklist,
+            # so deletion must look the entry up by reference instead.
+            freq_item.setData(Qt.ItemDataRole.UserRole + 1, e)
+            self.blacklist_table.setItem(row, 0, freq_item)
+            self.blacklist_table.setItem(row, 1, _NumericTableWidgetItem(f"{e.margin_hz / 1000:.2f}", e.margin_hz))
             self.blacklist_table.setItem(row, 2, QTableWidgetItem(e.label))
             self.blacklist_table.setItem(row, 3, QTableWidgetItem(e.date_added))
+        self.blacklist_table.setSortingEnabled(True)
+        self._apply_blacklist_filter(self.blacklist_search.text())
+
+    def _apply_blacklist_filter(self, text: str) -> None:
+        needle = text.strip().lower()
+        for row in range(self.blacklist_table.rowCount()):
+            if not needle:
+                self.blacklist_table.setRowHidden(row, False)
+                continue
+            haystack = " ".join(
+                self.blacklist_table.item(row, col).text().lower()
+                for col in range(self.blacklist_table.columnCount())
+            )
+            self.blacklist_table.setRowHidden(row, needle not in haystack)
 
     def _add_blacklist_entry(self) -> None:
         dlg = _BlacklistDialog(self.default_margin_hz, parent=self)
@@ -620,11 +665,11 @@ class FrequencyManager(QTabWidget):
             self.blacklist_changed.emit(self.blacklist)
 
     def _delete_blacklist_entry(self) -> None:
-        rows = sorted({i.row() for i in self.blacklist_table.selectedIndexes()}, reverse=True)
+        rows = {i.row() for i in self.blacklist_table.selectedIndexes()}
         if not rows:
             return
-        for row in rows:
-            del self.blacklist[row]
+        to_delete = [self.blacklist_table.item(row, 0).data(Qt.ItemDataRole.UserRole + 1) for row in rows]
+        self.blacklist = [e for e in self.blacklist if not any(e is d for d in to_delete)]
         self._refresh_blacklist_table()
         self.blacklist_changed.emit(self.blacklist)
 

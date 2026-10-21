@@ -88,7 +88,7 @@ class _PresetEditDialog(QDialog):
         form.addRow(tr("Step:"), self.step_spin)
 
         self.modulation_combo = QComboBox()
-        self.modulation_combo.addItems(["AM", "NFM", "WFM"])
+        self.modulation_combo.addItems(["AM", "NFM", "WFM", "SSB"])
         self.modulation_combo.setCurrentText(preset.modulation if preset else "AM")
         form.addRow(tr("Modulation:"), self.modulation_combo)
 

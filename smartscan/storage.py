@@ -2,10 +2,11 @@
 from __future__ import annotations
 
 import csv
+import io
 import logging
 from pathlib import Path
 
-from .config import BLACKLIST_CSV, CHANNELS_CSV, CONFIG_DIR
+from .config import BLACKLIST_CSV, CHANNELS_CSV, atomic_write_text
 from .models import BlacklistEntry, Channel
 
 logger = logging.getLogger(__name__)
@@ -30,12 +31,12 @@ def load_channels() -> list[Channel]:
 
 
 def save_channels(channels: list[Channel]) -> None:
-    CONFIG_DIR.mkdir(parents=True, exist_ok=True)
-    with CHANNELS_CSV.open("w", newline="", encoding="utf-8") as f:
-        writer = csv.writer(f)
-        writer.writerow(["freq_hz", "name", "modulation", "enabled", "folder", "weight"])
-        for ch in channels:
-            writer.writerow(ch.to_row())
+    buf = io.StringIO(newline="")
+    writer = csv.writer(buf)
+    writer.writerow(["freq_hz", "name", "modulation", "enabled", "folder", "weight"])
+    for ch in channels:
+        writer.writerow(ch.to_row())
+    atomic_write_text(CHANNELS_CSV, buf.getvalue())
 
 
 def load_blacklist() -> list[BlacklistEntry]:
@@ -57,9 +58,9 @@ def load_blacklist() -> list[BlacklistEntry]:
 
 
 def save_blacklist(entries: list[BlacklistEntry]) -> None:
-    CONFIG_DIR.mkdir(parents=True, exist_ok=True)
-    with BLACKLIST_CSV.open("w", newline="", encoding="utf-8") as f:
-        writer = csv.writer(f)
-        writer.writerow(["freq_hz", "margin_hz", "label", "date_added"])
-        for e in entries:
-            writer.writerow(e.to_row())
+    buf = io.StringIO(newline="")
+    writer = csv.writer(buf)
+    writer.writerow(["freq_hz", "margin_hz", "label", "date_added"])
+    for e in entries:
+        writer.writerow(e.to_row())
+    atomic_write_text(BLACKLIST_CSV, buf.getvalue())

@@ -59,15 +59,55 @@ mkdir -p "$BUILD"
   # this flag, the frozen build raised ZoneInfoNotFoundError as soon as
   # anything touched a timezone - exactly the failure tzdata was added to
   # fix in the first place, silently reopened by freezing it.
+  #
+  # --collect-data pyrtlsdrlib: same class of bug, found on a real clean VM
+  # test. pyrtlsdrlib.lib.load_librtlsdr() locates its bundled librtlsdr.so*
+  # via importlib.resources.files() at runtime - invisible to PyInstaller's
+  # static import analysis, so the .so was silently dropped. Without this
+  # flag the build "worked" on the dev machine only because a *system*
+  # rtl-sdr package happened to be installed there too (pyrtlsdr's own
+  # fallback chain found that instead) - a genuinely clean machine has
+  # neither, so RtlSdrBackend's native import fails, HAVE_RTLSDR_NATIVE
+  # ends up False, and the app falls through to the SoapySDR path this
+  # build deliberately doesn't ship, surfacing as "the python3-soapysdr
+  # module is not installed" instead of ever finding the real dongle.
+  #
+  # --add-binary for libportaudio.so.2: live audio's equivalent of the same
+  # bug again, but PyInstaller's automatic binary-dependency scan can't be
+  # trusted here at all (unlike pyrtlsdrlib, fixable with --collect-data) -
+  # sounddevice's Linux loader only ever calls ctypes.util.find_library(),
+  # a system-wide ldconfig-cache search with no concept of this bundle's own
+  # _internal/ directory, even on LD_LIBRARY_PATH (confirmed in a clean
+  # container: the .so was present and still not found). Explicitly bundled
+  # here, found at *this* build, and audio_output.py's own sys.frozen-gated
+  # find_library() monkeypatch hands sounddevice its real path directly
+  # instead of ever letting it search. Requires libportaudio2 installed on
+  # the build machine (not in requirements.txt - it's a system package, same
+  # category as the Linux dev README's SoapySDR/PyAudio system packages).
+  # grep -m1 exits as soon as it finds a match, closing its end of the pipe
+  # while ldconfig -p is still writing - under `set -o pipefail` (this
+  # script's own header) that SIGPIPE makes the whole pipeline (and the
+  # script) exit nonzero, so pipefail is turned off just for this one line.
+  set +o pipefail
+  PORTAUDIO_SO="$(ldconfig -p | grep -m1 'libportaudio\.so\.2 ' | awk '{print $NF}')"
+  set -o pipefail
+  if [ -z "$PORTAUDIO_SO" ]; then
+    echo "ERROR: libportaudio.so.2 not found via ldconfig - install libportaudio2" \
+         "on this build machine (live audio would silently fail in the frozen build otherwise)." >&2
+    exit 1
+  fi
+  echo "   bundling $PORTAUDIO_SO for live audio (sounddevice)"
   "$VENV/bin/pyinstaller" \
     --name "$PKG" \
     --onedir \
     --windowed \
+    --add-binary "$PORTAUDIO_SO:." \
     --noconfirm \
     --add-data "$REPO_ROOT/smartscan/locale/pl.po:smartscan/locale" \
     --add-data "$REPO_ROOT/smartscan/presets/band_presets.json:smartscan/presets" \
     --add-data "$REPO_ROOT/smartscan/gui/resources:smartscan/gui/resources" \
     --collect-data tzdata \
+    --collect-data pyrtlsdrlib \
     --distpath "$BUILD/dist" \
     --workpath "$BUILD/work" \
     --specpath "$BUILD" \
@@ -98,6 +138,8 @@ cp "$SCRIPT_DIR/smartscanatc.desktop" "$DEBROOT/usr/share/applications/"
 cp "$REPO_ROOT/smartscan/gui/resources/app_icon.svg" \
    "$DEBROOT/usr/share/icons/hicolor/scalable/apps/smartscanatc.svg"
 cp "$SCRIPT_DIR/README.md" "$DEBROOT/usr/share/doc/$PKG/packaging-README.md"
+# GPL: the license text must ship with the binary package.
+cp "$SCRIPT_DIR/../../LICENSE" "$DEBROOT/usr/share/doc/$PKG/copyright"
 
 # Real user-reported gap: a fresh Ubuntu install has no udev rule granting a
 # plain user access to an RTL-SDR dongle's USB device node (the `rtl-sdr`
@@ -122,7 +164,7 @@ Priority: optional
 Architecture: $ARCH
 Installed-Size: $INSTALLED_SIZE_KB
 Depends: libgl1, libegl1, libxkbcommon-x11-0, libxcb-cursor0, libasound2t64 | libasound2
-Maintainer: SmartScanATC <noreply@example.com>
+Maintainer: rafafunt <rafafunt@gmail.com>
 Description: Wideband SDR ATC/radio scanner (self-contained build)
  Scans a radio band via RTL-SDR and records audio only for transmissions
  the scanner actually stops on.

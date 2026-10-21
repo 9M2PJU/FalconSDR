@@ -59,6 +59,12 @@ Builds in a **throwaway venv** (`packaging/linux-deb/build-venv/`, gitignored)
 setup can leak into the frozen bundle by accident. Output:
 `packaging/linux-deb/out/smartscanatc_<date>_<arch>.deb`.
 
+Needs `libportaudio2` installed on the **build machine** (`sudo apt install
+libportaudio2`) — not a pip package, so it's not in requirements.txt; live
+audio would silently fail in the frozen build without it (`build.sh` now
+fails loudly at build time if it's missing, rather than producing a .deb
+that's broken this specific way).
+
 ## Testing in a VirtualBox VM
 
 - **Can't fullscreen / window won't resize with the VM window** — install

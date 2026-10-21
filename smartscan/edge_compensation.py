@@ -14,16 +14,25 @@ pre-compensation behaviour - never a regression, just ungraded until data
 accumulates.
 
 Deliberately axed on offset-from-window-center (not absolute frequency) and
-pooled across every window/gain this has ever run under: the physical cause
-is the tuner's own IF response relative to wherever it's currently tuned,
-not a property of any one frequency, so a bucket's data from one band's
-window is just as valid evidence for another band's window at the same
-offset. Not (yet) gain-aware - the real data this shipped with only ever
-saw one steady auto-gain value across a 12+ hour session, so there was
-nothing to differentiate by; if you regularly run wildly different manual
-gain settings, the curve pools across them, which may be slightly less
-accurate than a per-gain curve would be (differential roll-off shape should
-be fairly gain-independent physically, but this hasn't been verified).
+pooled across every window this has ever run under: the physical cause is
+the tuner's own IF response relative to wherever it's currently tuned, not
+a property of any one frequency, so a bucket's data from one band's window
+is just as valid evidence for another band's window at the same offset.
+
+Keyed by ``gain_mode`` ("auto"/hardware, "sw_auto"/software, "manual") -
+NOT pooled across those: real, user-reported case - switching between
+hardware and software AGC (gotcha 27) measurably shifts the *absolute*
+level by several to ~10dB (hardware AGC can run hotter/closer to
+overdriving), and a curve built from a mix of both ends up under- or over-
+correcting for whichever mode is actually active, which looked exactly
+like "edge roll-off randomly got worse" after a session of switching modes
+back and forth to compare them. Still pooled across different *gain_db*
+values within the same mode (differential roll-off shape should be fairly
+gain-independent physically - the real risk was always the qualitative
+hardware-vs-software difference, not fine gain variation within one mode -
+this hasn't been verified further, but splitting by exact gain_db as well
+would fragment an already-small sample count for comparatively little
+expected benefit).
 
 Incremental cache (_CACHE_PATH): re-parsing the *entire* raw log from
 scratch on every single scanner start doesn't scale - measured for real on
@@ -65,37 +74,50 @@ _MAX_CORRECTION_DB = 10.0
 _CACHE_PATH = CONFIG_DIR / "edge_compensation_cache.json"
 
 
-def _read_cache() -> tuple[dict[int, float], dict[int, int], int]:
-    """Returns (sums, counts, processed_bytes); all empty/zero if there's no
-    cache yet (first run ever) or it's unreadable/corrupt - safe to treat
-    exactly like "haven't processed anything yet", never a crash."""
+def _bucket_key(gain_mode: str, offset: int) -> str:
+    return f"{gain_mode}|{offset}"
+
+
+def _read_cache() -> tuple[dict[str, float], dict[str, int], int]:
+    """Returns (sums, counts, processed_bytes), keyed by _bucket_key(gain_mode,
+    offset); all empty/zero if there's no cache yet (first run ever), it's
+    unreadable/corrupt, or it's still the old pre-gain_mode cache format (a
+    plain int-keyed dict) - safe to treat exactly like "haven't processed
+    anything yet" and rebuild from the raw log, never a crash."""
     try:
         raw = json.loads(_CACHE_PATH.read_text(encoding="utf-8"))
-        sums = {int(k): v for k, v in raw["sums"].items()}
-        counts = {int(k): v for k, v in raw["counts"].items()}
+        sums = {str(k): v for k, v in raw["sums"].items()}
+        counts = {str(k): v for k, v in raw["counts"].items()}
+        if sums and not all("|" in k for k in sums):
+            # Old pre-gain_mode cache format (plain offset-int keys) - can't
+            # tell which gain_mode those sums came from, so there's nothing
+            # safe to salvage. Forces a one-time full re-read of the raw log
+            # below to rebuild cleanly in the new format.
+            return {}, {}, 0
         return sums, counts, int(raw["processed_bytes"])
     except (OSError, json.JSONDecodeError, KeyError, ValueError, TypeError):
         return {}, {}, 0
 
 
-def _write_cache(sums: dict[int, float], counts: dict[int, int], processed_bytes: int) -> None:
+def _write_cache(sums: dict[str, float], counts: dict[str, int], processed_bytes: int) -> None:
     try:
         CONFIG_DIR.mkdir(parents=True, exist_ok=True)
         _CACHE_PATH.write_text(json.dumps({
-            "sums": {str(k): v for k, v in sums.items()},
-            "counts": {str(k): v for k, v in counts.items()},
+            "sums": sums,
+            "counts": counts,
             "processed_bytes": processed_bytes,
         }), encoding="utf-8")
     except OSError:
         pass  # diagnostic cache only - never worth failing scanner startup over
 
 
-def _load_floor_curve() -> dict[int, float]:
-    """Offset-from-window-center (Hz, 100kHz buckets) -> average measured
-    floor dBFS across every "floor" record ever logged, averaged in the
-    linear power domain (dB values don't average correctly). See the module
-    docstring for why this only parses newly-appended bytes, not the whole
-    log, on every call after the first."""
+def _load_floor_curve() -> dict[str, dict[int, float]]:
+    """gain_mode -> {offset-from-window-center (Hz, 100kHz buckets) ->
+    average measured floor dBFS}, averaged in the linear power domain (dB
+    values don't average correctly) - separately per gain_mode (see module
+    docstring for why). See the module docstring for why this only parses
+    newly-appended bytes, not the whole log, on every call after the
+    first."""
     sums, counts, processed_bytes = _read_cache()
 
     try:
@@ -138,23 +160,34 @@ def _load_floor_curve() -> dict[int, float]:
                         continue
                     if rec.get("t") != "floor":
                         continue
+                    gain_mode = rec.get("gain_mode") or "unknown"
                     for off_str, dbfs in rec.get("buckets", {}).items():
-                        off = int(off_str)
+                        key = _bucket_key(gain_mode, int(off_str))
                         power = 10.0 ** (dbfs / 10.0)
-                        sums[off] = sums.get(off, 0.0) + power
-                        counts[off] = counts.get(off, 0) + 1
+                        sums[key] = sums.get(key, 0.0) + power
+                        counts[key] = counts.get(key, 0) + 1
                 processed_bytes += last_nl + 1
         _write_cache(sums, counts, processed_bytes)
 
-    return {
-        off: 10.0 * np.log10(max(sums[off] / counts[off], 1e-12))
-        for off in sums if counts[off] >= _MIN_SAMPLES_PER_BUCKET
-    }
+    by_mode: dict[str, dict[int, float]] = {}
+    for key in sums:
+        if counts[key] < _MIN_SAMPLES_PER_BUCKET:
+            continue
+        gain_mode, off_str = key.split("|", 1)
+        by_mode.setdefault(gain_mode, {})[int(off_str)] = 10.0 * np.log10(max(sums[key] / counts[key], 1e-12))
+    return by_mode
 
 
 class EdgeCompensation:
-    def __init__(self) -> None:
-        curve = _load_floor_curve()
+    def __init__(self, gain_mode: str = "") -> None:
+        """``gain_mode`` is this session's active DeviceConfig.gain_mode -
+        only that regime's own calibration history is used (see module
+        docstring: hardware vs software AGC shift the absolute floor level
+        enough to otherwise under/over-correct). A regime with no history
+        yet (including a brand new install) gets 0dB correction everywhere,
+        same as always - never a regression, just ungraded until that
+        specific regime accumulates its own data."""
+        curve = _load_floor_curve().get(gain_mode or "unknown", {})
         if curve:
             reference = max(curve.values())  # the window's own strongest bucket, not assumed to be exactly offset 0
             self._correction = {

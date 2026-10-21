@@ -25,6 +25,7 @@ import datetime as dt
 import os
 import threading
 import time
+from collections import deque
 from concurrent.futures import ThreadPoolExecutor
 from pathlib import Path
 
@@ -44,7 +45,7 @@ from .config import AppConfig, CONFIG_DIR, RecordingConfig, VfoRangeConfig
 from .dsp import Demodulator, NoiseReducer
 from .i18n import tr
 from .iq_recorder import IQRecorder
-from .models import BlacklistEntry, Channel, Modulation, ScannerState
+from .models import BlacklistEntry, Channel, Modulation, ScannerState, resolve_ssb_sideband
 from .recorder import Recorder
 from .sdr_backend import AcquisitionThread, create_backend, open_real_backend
 from .wav_metadata import append_metadata_chunk
@@ -52,6 +53,44 @@ from .wav_metadata import append_metadata_chunk
 AUDIO_RATE = 12500
 CHUNK_SECONDS = 0.03
 MAX_VFO_CHANNELS = 20_000
+
+# Reflection/splatter detection (see ScannerEngine._detect_reflections) - a
+# receiver-generated weaker copy of a much stronger simultaneously-active
+# channel (intermod/image/phase-noise splatter, not a real transmission).
+# Real, measured case: a strong signal on one channel produced a correlated,
+# 10-25dB-weaker "echo" on another channel in the same capture window,
+# timed within 0-3s, confirmed across dozens of real recordings.
+#
+# _REFLECTION_HISTORY_TICKS: ~30ms/tick, so 50 ticks = ~1.5s of rolling level
+# history kept per active slot.
+_REFLECTION_HISTORY_TICKS = 50
+# Never judge on a snap coincidence - two genuinely independent transmissions
+# can easily start in the same tick just because the scanner retuned to a
+# window where both happen to be active. Only once they've *both* been
+# active for this many ticks (~450ms) do their envelopes have enough shared
+# history to tell "moving together" apart from "just overlapping".
+_REFLECTION_MIN_OVERLAP_TICKS = 15
+# How tightly the two envelopes must track each other (Pearson correlation
+# of their last _REFLECTION_MIN_OVERLAP_TICKS+ levels) - high on purpose:
+# two unrelated real signals doing their own thing essentially never hit
+# this by chance, but a receiver-generated artifact (mechanically derived
+# from the same source) reliably does.
+_REFLECTION_CORR_THRESHOLD = 0.92
+# The weaker one must be substantially weaker on average - matches the
+# 10-25dB gaps actually measured, with margin. Guards against ever treating
+# two comparably-strong simultaneous real signals as one being a reflection
+# of the other, no matter how correlated they looked (e.g. two stations
+# keyed by the same net controller/repeater system).
+_REFLECTION_MIN_GAP_DB = 8.0
+# Hard cap on how many simultaneously-active slots this check ever looks at
+# (checks are O(n^2) pairs) - this is cheap in the normal case (a handful of
+# slots at most), but must never be allowed to grow unbounded if something
+# else goes wrong and many channels trigger at once. Real-hardware lesson
+# from gotcha 30 (the spectrum-view GIL stall that caused genuinely dropped
+# IQ chunks): anything added to this per-tick path must stay provably cheap,
+# never "cheap in the common case" - above this many active slots, skip the
+# check entirely for this tick rather than let the pair count balloon.
+_REFLECTION_MAX_SLOTS_CHECKED = 8
 # Reuses SMARTSCAN_DEBUG_LIVE_AUDIO (see live-audio debugging history) to
 # also gate a once-a-second scanner-loop timing summary: how many SCANNING
 # ticks in the last second took longer than CHUNK_SECONDS to process (demod
@@ -333,6 +372,12 @@ class _Slot:
         # therefore which band's "advanced" overrides, if any) this slot was
         # opened from. See _effective_* / _apply_noise_reduction.
         self.window: ScanWindow | None = None
+        # Rolling per-tick level history (dBFS) - see
+        # ScannerEngine._detect_reflections(). Every slot active at the same
+        # time gets one level appended per tick in lockstep (same loop, same
+        # call), so the last N entries of any two slots' deques are already
+        # time-aligned with each other - no timestamps needed.
+        self.level_history: deque[float] = deque(maxlen=_REFLECTION_HISTORY_TICKS)
 
 
 class ScannerSignals(QObject):
@@ -358,6 +403,14 @@ class ScannerSignals(QObject):
     # freqs_hz, db, trigger_dbfs, custom (True = this window's band has its
     # own "advanced" overrides - see ScannerPanel/SpectrumView's accent color)
     spectrum_ready = Signal(object, object, float, bool)
+    # Mono float32 audio (AUDIO_RATE) for the primary slot, only while it's
+    # not muted - the exact same samples that go to the local speaker (see
+    # _play_and_record_slot). Unconnected (the normal local case - the
+    # engine writes straight to AudioOutput, not through this) this costs
+    # nothing; remote_server.py is the one real subscriber, forwarding it
+    # to the desktop client so "remote" also means audible, not just
+    # recorded.
+    live_audio_ready = Signal(object)
     # Real, *measured* seconds since this same window (by center_hz) was
     # last tuned to - not a theoretical estimate (weighted scheduling makes
     # that dishonest - different windows get visited at very different real
@@ -575,13 +628,9 @@ class ScannerEngine(threading.Thread):
             renamed = Recorder.rename_session_file_with_frequency(Path(path), first_freq)
             if renamed is not None:
                 path = str(renamed)
-        if path and self.config.recording.output_format == "mp3":
-            mp3_path = transcode_to_mp3(Path(path))
-            if mp3_path is not None:
-                path = str(mp3_path)
         self.signals.manual_recording_changed.emit(False, "")
         if path:
-            self.signals.recording_finished.emit(path)
+            self._finish_recording(Path(path))
 
     def is_manual_recording(self) -> bool:
         with self._manual_recorder_lock:
@@ -783,7 +832,7 @@ class ScannerEngine(threading.Thread):
         # a stable physical property of the tuner, so there's no need to
         # keep re-loading the (potentially large) calibration log while
         # scanning. See edge_compensation.py.
-        self._edge_compensation = EdgeCompensation()
+        self._edge_compensation = EdgeCompensation(self.config.device.gain_mode)
         _checkpoint(f"EdgeCompensation loaded, buckets={self._edge_compensation.bucket_count}")
         if self._edge_compensation.has_data:
             self.signals.log.emit(
@@ -798,7 +847,10 @@ class ScannerEngine(threading.Thread):
         dev = self.config.device
         _checkpoint(f"_open_backend: constructing (driver={dev.driver!r})")
         if allow_simulated_fallback or dev.driver == "simulated":
-            raw_backend = create_backend(dev.driver, dev.device_args, dev.sample_rate_hz, dev.gain_mode, dev.gain_db)
+            raw_backend = create_backend(
+                dev.driver, dev.device_args, dev.sample_rate_hz, dev.gain_mode, dev.gain_db,
+                debug_mode=self.config.debug_mode,
+            )
         else:
             # Bypass create_backend()'s friendly auto-simulate fallback: this
             # is a reconnect after real hardware was already proven present,
@@ -941,7 +993,10 @@ class ScannerEngine(threading.Thread):
 
         def _claim(freq: int, bw: float, mod: Modulation, name: str = "", weight: float = 0.0) -> None:
             bw_map[freq] = bw
-            mod_map[freq] = mod
+            # Modulation.SSB only ever means "auto USB/LSB" to the user - the
+            # rest of the engine (and Demodulator) only ever sees a concrete
+            # USB or LSB from here on, resolved from this exact frequency.
+            mod_map[freq] = resolve_ssb_sideband(mod, freq)
             weight_map[freq] = weight
             if name:
                 name_map[freq] = name
@@ -1194,23 +1249,25 @@ class ScannerEngine(threading.Thread):
 
     def _maybe_apply_gain(self, window: ScanWindow | None) -> None:
         """Applies a live Gain-slider/mode change mid-scan (see AGENTS.md) -
-        polled once per loop iteration. "Auto" is a software-driven control
-        loop now (see agc.py's own module docstring for why), never the
-        device's own onboard AGC hardware: entering it here just establishes
-        a starting manual gain (this band/global's own configured ``db`` -
-        same starting point Manual mode would use, so toggling Auto<->Manual
-        doesn't jump gain around for no reason) and creates a SoftwareAgc,
-        which _maybe_run_software_agc() then drives every SCANNING tick from
-        the real captured IQ's own peak. Leaving "auto" (mode flips to
-        "manual", globally or via a band's own advanced override) discards
-        it - the next real gain change goes back to a plain, one-shot
-        backend.set_gain() call."""
+        polled once per loop iteration. Three modes: "manual" (fixed gain),
+        "auto" (the tuner's own onboard AGC hardware - passed straight
+        through to the backend), and "sw_auto" (a software-driven control
+        loop - see agc.py's own module docstring for why this exists
+        alongside hardware AGC, not instead of it). Entering "sw_auto" here
+        just establishes a starting manual gain (this band/global's own
+        configured ``db`` - same starting point Manual mode would use, so
+        switching modes doesn't jump gain around for no reason) and creates
+        a SoftwareAgc, which _maybe_run_software_agc() then drives every
+        SCANNING tick from the real captured IQ's own peak. Leaving
+        "sw_auto" discards it - the next real gain change goes back to a
+        plain, one-shot backend.set_gain() call (which is also exactly what
+        "auto" itself always was and still is - real hardware AGC)."""
         mode, db = self._effective_gain(window)
-        if mode == "auto":
-            if self._applied_gain_mode != "auto" or self._software_agc is None:
+        if mode == "sw_auto":
+            if self._applied_gain_mode != "sw_auto" or self._software_agc is None:
                 self._software_agc = SoftwareAgc(db)
                 self._backend.set_gain("manual", db)
-                self._applied_gain_mode, self._applied_gain_db = "auto", db
+                self._applied_gain_mode, self._applied_gain_db = "sw_auto", db
             return
         self._software_agc = None
         if mode != self._applied_gain_mode or db != self._applied_gain_db:
@@ -1219,7 +1276,7 @@ class ScannerEngine(threading.Thread):
 
     def _maybe_run_software_agc(self, iq: np.ndarray) -> None:
         """Called once per SCANNING tick with that tick's raw captured IQ -
-        a no-op whenever "auto" gain isn't actually active (see
+        a no-op whenever "sw_auto" gain isn't actually active (see
         _maybe_apply_gain). Most calls do nothing even while active (see
         SoftwareAgc.step's rate limit/dead zone) - this is deliberately cheap
         (one np.abs().max() over a block already read this tick, no extra
@@ -1227,10 +1284,23 @@ class ScannerEngine(threading.Thread):
         if self._software_agc is None or iq.size == 0:
             return
         peak = float(np.max(np.abs(iq)))
+        old_gain_db = self._software_agc.gain_db
         new_gain = self._software_agc.step(peak, self._backend.gain_range_db)
         if new_gain is not None:
             self._backend.set_gain("manual", new_gain)
             self._applied_gain_db = new_gain
+            # Telegraph the step to every currently active slot's own
+            # output-loudness AGC *before* it ever sees audio at the new RF
+            # level - see Demodulator.notify_rf_gain_change()'s own
+            # docstring for the real, user-reported "sounds like a
+            # different transmission" symptom this avoids.
+            factor = 10.0 ** ((new_gain - old_gain_db) / 20.0)
+            for slot in self._slots.values():
+                slot.demod.notify_rf_gain_change(factor)
+                # A gain step moves every channel's dB level together -
+                # left in the history it reads as "correlated" to
+                # _detect_reflections() and got real signals discarded.
+                slot.level_history.clear()
 
     def _next_window(self) -> ScanWindow | None:
         with self._lock:
@@ -1738,6 +1808,7 @@ class ScannerEngine(threading.Thread):
             # shouldn't have to cling to a lower real level than one near
             # the center just to avoid lingering out.
             level = raw_powers.get(freq_hz, -120.0) + self._correction_db(slot.offset_hz)
+            slot.level_history.append(level)
             # Squelch (see _effective_squelch_dbfs) mutes the live speaker
             # AND skips writing this block to the recording (see
             # _play_and_record_slot) - but never the LINGER timer/slot-close
@@ -1764,7 +1835,69 @@ class ScannerEngine(threading.Thread):
                 slot.linger_deadline = time.monotonic() + linger_time_ms / 1000.0
             elif time.monotonic() >= slot.linger_deadline:
                 self._close_slot(freq_hz)
+        self._detect_reflections(tasks)
         return primary_level
+
+    def _detect_reflections(self, tasks: list[tuple[int, "_Slot", float, object]]) -> None:
+        """Closes (and discards the recording of) any active slot whose
+        level has been tracking another, much stronger active slot's too
+        closely for too long to be coincidence - see the _REFLECTION_*
+        constants above for the exact thresholds and why each exists.
+        Deliberately conservative: two real transmissions merely starting
+        in the same tick (the scanner just retuned to a window where both
+        happen to be active) must never get flagged on that alone - only
+        sustained, tight tracking of *both* slots' own level histories does.
+
+        Cheap by construction - bails out immediately if there are more
+        than _REFLECTION_MAX_SLOTS_CHECKED active slots, and otherwise does
+        nothing heavier than a handful of small numpy correlations (tens of
+        floats each). This runs on the main scanning-loop thread every tick,
+        same budget as everything else in _service_active_slots - see
+        AGENTS.md gotcha 30 for exactly how expensive "looks cheap" can
+        actually get here if that's not kept true by construction, not just
+        checked after the fact."""
+        slots = [slot for _freq, slot, _level, _future in tasks]
+        if len(slots) < 2 or len(slots) > _REFLECTION_MAX_SLOTS_CHECKED:
+            return
+        # Each slot's history array/mean/std is the same input to every pair
+        # it appears in - with up to _REFLECTION_MAX_SLOTS_CHECKED slots that's
+        # up to _REFLECTION_MAX_SLOTS_CHECKED-1 pairs per slot, so computing
+        # these once per slot instead of once per *pair* matters here, not
+        # just in principle (measured ~3x fewer numpy calls at the slot cap).
+        prepared: dict[int, tuple[np.ndarray, float, float]] = {}
+        for slot in slots:
+            if len(slot.level_history) < _REFLECTION_MIN_OVERLAP_TICKS:
+                continue
+            arr = np.array(slot.level_history)
+            std = float(np.std(arr))
+            if std < 1e-6:
+                continue  # near-constant level (e.g. a steady carrier) - correlation is meaningless here
+            prepared[slot.freq_hz] = (arr, float(np.mean(arr)), std)
+
+        to_close: list[tuple[int, int]] = []
+        ready = [s for s in slots if s.freq_hz in prepared]
+        for i, a in enumerate(ready):
+            arr_a, mean_a, std_a = prepared[a.freq_hz]
+            for b in ready[i + 1:]:
+                arr_b, mean_b, std_b = prepared[b.freq_hz]
+                n = min(len(arr_a), len(arr_b))
+                la, lb = arr_a[-n:], arr_b[-n:]
+                corr = np.corrcoef(la, lb)[0, 1]
+                if not np.isfinite(corr) or corr < _REFLECTION_CORR_THRESHOLD:
+                    continue
+                gap = mean_a - mean_b
+                if abs(gap) < _REFLECTION_MIN_GAP_DB:
+                    continue
+                weaker, stronger = (b, a) if gap > 0 else (a, b)
+                to_close.append((weaker.freq_hz, stronger.freq_hz))
+        for weak_freq, strong_freq in to_close:
+            if weak_freq in self._slots:
+                self.signals.log.emit(
+                    tr("{weak:.4f} MHz looks like a reflection of {strong:.4f} MHz - discarding.").format(
+                        weak=weak_freq / 1e6, strong=strong_freq / 1e6,
+                    )
+                )
+                self._close_slot(weak_freq, reason="reflection")
 
     def _process_one_slot(self, slot: _Slot, iq: np.ndarray, squelched: bool) -> None:
         """Runs on self._slot_pool's worker threads - see
@@ -1861,7 +1994,21 @@ class ScannerEngine(threading.Thread):
         if self.config.recording.enabled:
             finished_path = slot.recorder.end_transmission()
             slot.recorder.stop_session()
-            if finished_path is not None:
+            if finished_path is not None and reason == "reflection":
+                # A receiver-generated reflection/splatter of another, much
+                # stronger simultaneously-active channel (see
+                # _detect_reflections) - never a real transmission, so the
+                # recording is actively wrong to keep, not just skippable -
+                # discard it outright rather than filing it with metadata.
+                # Renamed, not deleted: a false positive stays recoverable
+                # (strip ".rejected"), and the extra suffix keeps it out of
+                # every .wav/.mp3 glob (Playback library, remote sync).
+                try:
+                    Path(finished_path).rename(f"{finished_path}.rejected")
+                except OSError:
+                    pass
+                finished_path = None
+            elif finished_path is not None:
                 # Metadata is a bonus on top of an already-successfully-
                 # written recording - never let a problem here (disk full,
                 # weird path, ...) take down the scanner or be mistaken for
@@ -1875,12 +2022,8 @@ class ScannerEngine(threading.Thread):
                     append_metadata_chunk(Path(finished_path), slot.meta)
                 except Exception:
                     pass
-                if self.config.recording.output_format == "mp3":
-                    mp3_path = transcode_to_mp3(Path(finished_path))
-                    if mp3_path is not None:
-                        finished_path = mp3_path
         if finished_path is not None:
-            self.signals.recording_finished.emit(str(finished_path))
+            self._finish_recording(Path(finished_path))
         if reason == "linger":
             # Only a natural end-of-transmission earns a boost - a manual
             # Skip means the user actively wants to move on, and
@@ -1891,6 +2034,25 @@ class ScannerEngine(threading.Thread):
             self._reassign_primary()
         self.signals.recording_changed.emit(bool(self._slots), self._active_recording_path())
         self._emit_freqs()
+
+    def _finish_recording(self, path: Path) -> None:
+        """Emits recording_finished for a closed (and metadata-tagged) file -
+        after the mp3 transcode when that format is on (gotcha 14). The
+        transcode runs on self._slot_pool, never on this scan-loop thread:
+        ffmpeg can take longer than AcquisitionThread's ~1.9s queue, which
+        dropped IQ for every other still-open slot. run()'s final
+        _slot_pool.shutdown(wait=True) waits for any still in flight."""
+        if self.config.recording.output_format != "mp3":
+            self.signals.recording_finished.emit(str(path))
+            return
+
+        def _transcode() -> None:
+            self.signals.recording_finished.emit(str(transcode_to_mp3(path) or path))
+
+        try:
+            self._slot_pool.submit(_transcode)
+        except RuntimeError:  # pool already shut down - engine has stopped, nothing left to stall
+            _transcode()
 
     def _register_recency_boost(self, window: ScanWindow) -> None:
         """See RecencyBoostConfig - starts (or refreshes) a limited-time
@@ -2004,6 +2166,7 @@ class ScannerEngine(threading.Thread):
             mono = audio.mean(axis=1).astype(np.float32)
         if slot.freq_hz == self._primary_freq and not self._muted_evt.is_set():
             self._audio_out.write(audio)
+            self.signals.live_audio_ready.emit(mono.copy())
         if slot.freq_hz == self._primary_freq:
             # Manual recording mirrors the primary slot's real audio
             # regardless of mute - like the automatic recording below, it's

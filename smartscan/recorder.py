@@ -133,8 +133,11 @@ class Recorder:
 
     # -- internals ---------------------------------------------------
     def _single_file_path(self) -> Path:
-        stamp = dt.datetime.now().strftime("%Y-%m-%d_%H-%M-%S")
-        return Path(self.config.output_dir) / f"{stamp}_session.wav"
+        # Straight into the date folder (like _split_file_path) - a loose
+        # file in the root would get moved by organize() on any Playback
+        # refresh while still open, breaking the rename/mp3 step on stop.
+        now = dt.datetime.now()
+        return Path(self.config.output_dir) / now.strftime("%Y-%m-%d") / f"{now.strftime('%Y-%m-%d_%H-%M-%S')}_session.wav"
 
     @staticmethod
     def rename_session_file_with_frequency(path: Path, freq_hz: int) -> Path | None:
@@ -147,10 +150,8 @@ class Recorder:
         its own to inspect), it should read as a normal frequency-tagged
         recording in the Odtwarzacz library instead of the generic "Manual
         recording" fallback (models.MANUAL_FREQ_KHZ) that name would
-        otherwise parse to. Left in the output root rather than moved into
-        a date subfolder here - organizer.organize() already does that for
-        any recognized loose filename (frequency-tagged or "_session") on
-        the next library refresh, so this doesn't need to duplicate that.
+        otherwise parse to. Renamed in place, inside its date folder (see
+        _single_file_path()).
         Returns None (leaving the original "_session" name in place) if the
         name doesn't actually contain that marker, or on any filesystem
         error - a failed rename must never be treated as the recording

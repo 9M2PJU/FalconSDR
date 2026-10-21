@@ -1,0 +1,18 @@
+[Unit]
+Description=SmartScanATC RTL-SDR receiver
+After=network-online.target
+Wants=network-online.target
+
+[Service]
+Type=simple
+# Not root: the dongle only needs the plugdev group (60-rtl-sdr.rules).
+User=smartscan
+SupplementaryGroups=plugdev
+WorkingDirectory=/opt/smartscanatc
+EnvironmentFile=/etc/smartscanatc/receiver.env
+ExecStart=/opt/smartscanatc/.venv/bin/python -m smartscan.remote_server --start
+Restart=always
+RestartSec=3
+
+[Install]
+WantedBy=multi-user.target

@@ -95,6 +95,17 @@ class RecordingsTableModel(QAbstractTableModel):
         # Frequency column shows e.g. "128.950 MHz — Downtown Tower" instead
         # of just the number, when the frequency is recognized.
         self._freq_names: dict[int, str] = {}
+        # Precomputed, lowercased "search blob" per recording (see
+        # search_blob()/RecordingsFilterProxy) - rebuilt only when a
+        # recording's own searchable fields actually change (new file,
+        # transcript arrives, channel renamed), never per keystroke. Real,
+        # measured cause of a reported search lag at 18k+ recordings:
+        # rebuilding this (path.name.lower() + freq_label.lower() +
+        # freq_name().lower() + strftime() + transcript_text.lower(), per
+        # row) on every single textChanged was 115ms/keystroke at 18101
+        # rows - purely Python string work, no I/O. Looking it up here
+        # instead drops that to ~5ms.
+        self._search_cache: dict[Path, str] = {}
 
     def set_freq_names(self, freq_names: dict[int, str]) -> None:
         self._freq_names = freq_names
@@ -102,6 +113,32 @@ class RecordingsTableModel(QAbstractTableModel):
             top_left = self.index(0, COL_FREQ)
             bottom_right = self.index(self.rowCount() - 1, COL_FREQ)
             self.dataChanged.emit(top_left, bottom_right, [Qt.ItemDataRole.DisplayRole])
+        # Channel names feed into the search blob - a rename must be
+        # reflected there too. Rare (user editing Memory List), so an O(n)
+        # full rebuild here (unlike per-keystroke) is a non-issue.
+        self._rebuild_search_cache()
+
+    def _build_search_blob(self, rec: Recording) -> str:
+        return " ".join(
+            [
+                rec.path.name.lower(),
+                rec.freq_label.lower(),
+                self._freq_names.get(rec.freq_khz, "").lower(),
+                rec.dt_local.strftime("%Y-%m-%d %H:%M:%S"),
+                rec.transcript_text.lower(),
+            ]
+        )
+
+    def _rebuild_search_cache(self) -> None:
+        self._search_cache = {rec.path: self._build_search_blob(rec) for rec in self._recordings}
+
+    def search_blob(self, rec: Recording) -> str:
+        """Lowercased, pre-joined text to substring-search against - see
+        RecordingsFilterProxy.filterAcceptsRow(). Falls back to building it
+        on the spot for a recording that somehow missed a cache-maintaining
+        call below (defensive only - every real path keeps this in sync)."""
+        cached = self._search_cache.get(rec.path)
+        return cached if cached is not None else self._build_search_blob(rec)
 
     def _freq_display(self, freq_khz: int) -> str:
         if freq_khz == MANUAL_FREQ_KHZ:
@@ -121,6 +158,7 @@ class RecordingsTableModel(QAbstractTableModel):
         # append_recording() for a new recording, filtering on delete) -
         # sharing one list caused double insertions/removals.
         self._recordings = list(recordings)
+        self._rebuild_search_cache()
         self.endResetModel()
 
     def set_use_utc(self, use_utc: bool) -> None:
@@ -231,6 +269,7 @@ class RecordingsTableModel(QAbstractTableModel):
         row = len(self._recordings)
         self.beginInsertRows(QModelIndex(), row, row)
         self._recordings.append(rec)
+        self._search_cache[rec.path] = self._build_search_blob(rec)
         self.endInsertRows()
 
     def remove_recording(self, path: Path) -> Optional[Recording]:
@@ -240,6 +279,7 @@ class RecordingsTableModel(QAbstractTableModel):
             if rec.path == path:
                 self.beginRemoveRows(QModelIndex(), row, row)
                 del self._recordings[row]
+                self._search_cache.pop(rec.path, None)
                 self.endRemoveRows()
                 return rec
         return None
@@ -249,6 +289,7 @@ class RecordingsTableModel(QAbstractTableModel):
         for row, rec in enumerate(self._recordings):
             if rec.path == path:
                 rec.transcript = result
+                self._search_cache[rec.path] = self._build_search_blob(rec)
                 idx = self.index(row, COL_TRANSCRIPT)
                 self.dataChanged.emit(
                     idx, idx,
@@ -257,24 +298,41 @@ class RecordingsTableModel(QAbstractTableModel):
                 break
 
 
+# Selection keys (see freq_panel.py): a recording is shown when it matches ANY
+# key in the selection - union semantics, like a multi-select in a file
+# manager. An empty selection or ALL_KEY shows everything.
+ALL_KEY = ("all",)
+FAV_KEY = ("fav",)
+
+
+def freq_key(freq_khz: int) -> tuple:
+    return ("freq", freq_khz)
+
+
+def band_key(start_hz: int, stop_hz: int) -> tuple:
+    return ("band", start_hz, stop_hz)
+
+
+def lang_key(language: str) -> tuple:
+    return ("lang", language)
+
+
+def _recording_language(rec) -> str:
+    return rec.transcript.language if rec.transcript and rec.transcript.language else ""
+
+
 class RecordingsFilterProxy(QSortFilterProxyModel):
-    """Filters by frequency, date range, minimum quality and search text."""
+    """Filters by selection (frequencies / bands / languages / favorites),
+    date range, minimum quality and search text."""
 
     def __init__(self, parent=None):
         super().__init__(parent)
         self.setSortRole(SORT_ROLE)
-        self._freq_khz: Optional[int] = None
+        self._selection: set = set()
         self._date_from: Optional[datetime] = None
         self._date_to: Optional[datetime] = None
         self._min_quality: float = 0.0
         self._search_text: str = ""
-        self._favorites_only: bool = False
-        # None = no language filter; "" (NO_LANGUAGE, see stats.py) = only
-        # recordings with no detected language; an ISO code = only that
-        # language. A separate dimension from _freq_khz - freq_panel.py
-        # clears this one when selecting in Frequency mode and vice versa,
-        # so the two filters never unexpectedly combine.
-        self._language: Optional[str] = None
 
     def source(self) -> RecordingsTableModel:
         return self.sourceModel()  # type: ignore[return-value]
@@ -286,8 +344,8 @@ class RecordingsFilterProxy(QSortFilterProxyModel):
         toggled) instead of a filter setting."""
         self.invalidateRowsFilter()
 
-    def set_frequency_filter(self, freq_khz: Optional[int]) -> None:
-        self._freq_khz = freq_khz
+    def set_selection(self, keys) -> None:
+        self._selection = set(keys) if keys else set()
         self.invalidateRowsFilter()
 
     def set_date_range(self, dt_from: Optional[datetime], dt_to: Optional[datetime]) -> None:
@@ -303,26 +361,25 @@ class RecordingsFilterProxy(QSortFilterProxyModel):
         self._search_text = text.strip().lower()
         self.invalidateRowsFilter()
 
-    def set_favorites_only(self, favorites_only: bool) -> None:
-        self._favorites_only = favorites_only
-        self.invalidateRowsFilter()
-
-    def set_language_filter(self, language: Optional[str]) -> None:
-        self._language = language
-        self.invalidateRowsFilter()
+    def _matches_selection(self, rec) -> bool:
+        if not self._selection or ALL_KEY in self._selection:
+            return True
+        for key in self._selection:
+            kind = key[0]
+            if kind == "fav" and rec.is_favorite:
+                return True
+            if kind == "freq" and rec.freq_khz == key[1]:
+                return True
+            if kind == "band" and key[1] <= rec.freq_khz * 1000 <= key[2]:
+                return True
+            if kind == "lang" and _recording_language(rec) == key[1]:
+                return True
+        return False
 
     def filterAcceptsRow(self, source_row: int, source_parent: QModelIndex) -> bool:
         rec = self.source().recording_at(source_row)
 
-        if self._freq_khz is not None and rec.freq_khz != self._freq_khz:
-            return False
-
-        if self._language is not None:
-            rec_lang = rec.transcript.language if rec.transcript and rec.transcript.language else ""
-            if rec_lang != self._language:
-                return False
-
-        if self._favorites_only and not rec.is_favorite:
+        if not self._matches_selection(rec):
             return False
 
         if self._min_quality > 0.0:
@@ -334,17 +391,7 @@ class RecordingsFilterProxy(QSortFilterProxyModel):
         if self._date_to is not None and rec.dt_local > self._date_to:
             return False
 
-        if self._search_text:
-            haystack = " ".join(
-                [
-                    rec.path.name.lower(),
-                    rec.freq_label.lower(),
-                    self.source().freq_name(rec.freq_khz).lower(),
-                    rec.dt_local.strftime("%Y-%m-%d %H:%M:%S"),
-                    rec.transcript_text.lower(),
-                ]
-            )
-            if self._search_text not in haystack:
-                return False
+        if self._search_text and self._search_text not in self.source().search_blob(rec):
+            return False
 
         return True

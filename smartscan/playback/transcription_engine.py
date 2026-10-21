@@ -106,8 +106,14 @@ _gpu_compute_type: Optional[str] = None
 # if it fails again, _force_cpu and _force_cpu_since simply get set again,
 # pushing the next attempt out by the same amount - zero risk of hammering
 # the GPU on every file, unlike the original, even more stubborn approach
-# this replaced).
-_GPU_RETRY_COOLDOWN_S = 1800.0
+# this replaced). 1800s (30 min) was itself too stubborn in the other
+# direction - real, reported case: one transient OOM (other GPU-using apps
+# briefly spiking VRAM - Firefox/Steam/the desktop compositor, not this
+# process) forced CPU transcription for the next half hour, visibly
+# bogging down the whole machine the entire time. Measured directly: VRAM
+# that momentarily squeezed out the models recovered within seconds, not
+# minutes - a 1800s wait was paying for a problem that was already gone.
+_GPU_RETRY_COOLDOWN_S = 120.0
 # CPU transcription (once it gets there) tries to claim ALL cores by
 # default - and those are exactly what the scanner/audio thread needs in
 # real time. Actually observed (see the session that added this): a busy CPU

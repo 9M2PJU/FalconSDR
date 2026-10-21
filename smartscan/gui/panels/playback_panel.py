@@ -43,7 +43,8 @@ from ...playback.audio_analysis import analyze_wav, compute_waveform_peaks
 from ...playback.audio_player import AudioPlayer
 from ...playback.config import POLAND_TZ, UTC_TZ
 from ...playback.favorites_store import FavoritesStore
-from ...playback.freq_panel import ALL_ITEM_FREQ, FAVORITES_ITEM, FrequencyPanel
+from ...playback.freq_panel import FrequencyPanel
+from ...military_presets import get_all_presets
 from ...playback.models import MANUAL_FREQ_KHZ, Recording, TranscriptionResult
 from ...playback.models_qt import COL_DATE, COL_QUALITY, RecordingsFilterProxy, RecordingsTableModel
 from ...playback.organizer import parse_filename
@@ -523,7 +524,18 @@ class PlaybackPanel(QWidget):
         self.utc_checkbox.toggled.connect(self._on_utc_toggled)
         self.date_combo.currentIndexChanged.connect(self._apply_date_filter)
         self.quality_slider.valueChanged.connect(self._on_quality_slider_changed)
-        self.search_edit.textChanged.connect(self.proxy.set_search_text)
+        # Debounced: even with the cached search blob (models_qt.py), a
+        # fast typist re-triggers invalidateRowsFilter() + a view repaint
+        # once per keystroke - cheap individually, but needless to repeat
+        # mid-word. Restarted on every keystroke, so only the pause after
+        # typing actually applies the filter.
+        self._search_debounce = QTimer(self)
+        self._search_debounce.setSingleShot(True)
+        self._search_debounce.setInterval(150)
+        self._search_debounce.timeout.connect(
+            lambda: self.proxy.set_search_text(self.search_edit.text())
+        )
+        self.search_edit.textChanged.connect(lambda: self._search_debounce.start())
         self.sort_newest_btn.clicked.connect(
             lambda: self.table_view.sortByColumn(COL_DATE, Qt.SortOrder.DescendingOrder)
         )
@@ -531,8 +543,8 @@ class PlaybackPanel(QWidget):
             lambda: self.table_view.sortByColumn(COL_QUALITY, Qt.SortOrder.DescendingOrder)
         )
 
-        self.freq_panel.frequencySelected.connect(self._on_freq_panel_selection)
-        self.freq_panel.languageSelected.connect(self._on_language_panel_selection)
+        self.freq_panel.selectionChanged.connect(self._on_freq_panel_selection)
+        self.freq_panel.set_band_provider(get_all_presets)
         self.stats_tab.frequencySelected.connect(self._jump_to_frequency)
 
         self.transcription_checkbox.setChecked(self.config.transcription.enabled)
@@ -699,6 +711,19 @@ class PlaybackPanel(QWidget):
         parsed = parse_filename(path.name)
         if parsed is None:
             return
+        if any(r.path == path for r in self._recordings):
+            # A real, reported duplicate-row case: the remote receiver's
+            # background sync (remote_client.py's _sync_loop) can end up
+            # emitting recording_finished for the same path more than once
+            # (a later file in the same sync batch failing mid-loop drops
+            # the whole batch's return value, so a retried file on the next
+            # cycle can re-emit here) - harmless on disk (one real file),
+            # but without this guard it added a second row that only went
+            # away on the next full rescan (trigger_refresh's set_recordings
+            # replaces the list wholesale, which is why "odśwież" always
+            # "fixed" it). Ingesting the same path twice should always be a
+            # no-op, not a second row.
+            return
 
         rec = Recording(
             path=path,
@@ -768,12 +793,7 @@ class PlaybackPanel(QWidget):
         filters the browser to this frequency. MainWindow, separately hooked
         to the same signal, switches to the top-level Odtwarzacz tab so this
         is actually visible (Statistics is now its own tab)."""
-        self.freq_panel.switch_to_frequency_mode()
-        for row in range(self.freq_panel.list_widget.count()):
-            item = self.freq_panel.list_widget.item(row)
-            if item.data(Qt.ItemDataRole.UserRole) == freq_khz:
-                self.freq_panel.list_widget.setCurrentRow(row)
-                break
+        self.freq_panel.select_frequency(freq_khz)
 
     # ----------------------------------------------------------- transcription
     def _hydrate_transcripts(self, recordings: List[Recording]) -> None:
@@ -785,22 +805,8 @@ class PlaybackPanel(QWidget):
             rec.transcript = self._transcription_cache.get(rec.cache_key())
             rec.is_favorite = self._favorites_store.is_favorite(rec.cache_key())
 
-    def _on_freq_panel_selection(self, value) -> None:
-        # A selection in Frequency mode is independent of Language mode -
-        # clear any language filter so the two never unexpectedly combine
-        # (see freq_panel.py).
-        self.proxy.set_language_filter(None)
-        if value == FAVORITES_ITEM:
-            self.proxy.set_frequency_filter(ALL_ITEM_FREQ)
-            self.proxy.set_favorites_only(True)
-        else:
-            self.proxy.set_favorites_only(False)
-            self.proxy.set_frequency_filter(value)
-
-    def _on_language_panel_selection(self, value) -> None:
-        self.proxy.set_favorites_only(False)
-        self.proxy.set_frequency_filter(ALL_ITEM_FREQ)
-        self.proxy.set_language_filter(value)
+    def _on_freq_panel_selection(self, keys) -> None:
+        self.proxy.set_selection(keys)
 
     def _toggle_favorite(self) -> None:
         rec = self._selected_recording
@@ -1409,6 +1415,7 @@ class PlaybackPanel(QWidget):
         needing a restart (the common case - see
         TranscriptionInstallWorker's docstring)."""
         installed = is_transcription_installed()
+        self.freq_panel.set_language_mode_available(installed)
         self.transcription_checkbox.setVisible(installed)
         self.transcription_progress_label.setVisible(installed)
         self.transcribe_now_btn.setVisible(installed)

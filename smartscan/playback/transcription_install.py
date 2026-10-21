@@ -31,7 +31,14 @@ from PySide6.QtCore import QThread, Signal
 
 from ..venv_paths import VENV_DIR, VENV_PYTHON
 
-_PACKAGES = ["faster-whisper>=1.2"]
+# faster-whisper 1.2.1 still calls av.open(..., metadata_errors=...), an
+# argument PyAV removed outright in 19.0.0 - faster-whisper itself only
+# declares "av>=11" with no upper bound, so an unpinned install grabs the
+# newest av and every transcription fails at decode_audio() with
+# "TypeError: open() got an unexpected keyword argument 'metadata_errors'".
+# Pinning <19 here is what actually avoids it; PyAV's manylinux wheels are
+# abi3 (cp311+), so this doesn't force a source build on a newer Python.
+_PACKAGES = ["faster-whisper>=1.2", "av<19"]
 _GPU_PACKAGES = ["nvidia-cublas-cu12", "nvidia-cudnn-cu12"]
 _EXTERNALLY_MANAGED_MARKER = "externally-managed-environment"
 

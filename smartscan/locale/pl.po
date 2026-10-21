@@ -1222,3 +1222,51 @@ msgstr "Tryb debug (pokazuje urządzenie Symulacja)"
 
 msgid "Adds a \"Simulation (no hardware)\" entry to the SDR device list in the Listen tab, for testing without a real receiver. Hidden by default so it can't be picked by accident instead of your actual hardware."
 msgstr "Dodaje pozycję \"Symulacja (brak sprzętu)\" do listy urządzeń SDR w zakładce Nasłuch, do testowania bez prawdziwego odbiornika. Domyślnie ukryte, żeby nie dało się jej wybrać przez pomyłkę zamiast prawdziwego sprzętu."
+
+msgid "Bands"
+msgstr "Pasma"
+
+msgid "Search bands..."
+msgstr "Szukaj pasm..."
+
+msgid "Manual"
+msgstr "Ręczny"
+
+msgid "Auto (hardware AGC)"
+msgstr "Auto (sprzętowe AGC)"
+
+msgid "Auto (software AGC)"
+msgstr "Auto (programowe AGC)"
+
+
+# --- Options: Remote receiver (remote_receiver_panel.py) ---
+
+msgid "Remote RTL-SDR receiver"
+msgstr "Zdalny odbiornik RTL-SDR"
+
+msgid "Use the always-on receiver for scanning and recording. Finished recordings are copied here for playback and local transcription."
+msgstr "Używa stale działającego odbiornika do skanowania i nagrywania. Zakończone nagrania są kopiowane tutaj do odsłuchu i lokalnej transkrypcji."
+
+msgid "Use remote receiver"
+msgstr "Użyj zdalnego odbiornika"
+
+msgid "Server address:"
+msgstr "Adres serwera:"
+
+msgid "Access token:"
+msgstr "Token dostępu:"
+
+msgid "Test connection"
+msgstr "Testuj połączenie"
+
+msgid "Download recordings"
+msgstr "Pobierz nagrania"
+
+msgid "Connected — {state}"
+msgstr "Połączono — {state}"
+
+msgid "Downloading recordings…"
+msgstr "Pobieranie nagrań…"
+
+msgid "Downloaded {count} recordings"
+msgstr "Pobrano nagrania: {count}"

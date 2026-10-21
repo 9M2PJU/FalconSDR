@@ -15,6 +15,7 @@ from ..config import AppConfig
 from ..i18n import tr
 from ..military_presets import USER_PRESETS_PATH
 from ..models import Channel
+from ..remote_client import RemoteClient, RemoteScannerProxy, RemoteSyncWorker
 from ..scanner_engine import ScannerEngine
 from .legal_disclaimer import confirm_recording_disclaimer, maybe_show_launch_disclaimer
 from .panels.frequency_manager import FrequencyManager
@@ -24,6 +25,7 @@ from .panels.playback_panel import PlaybackPanel
 from .panels.preset_manager_panel import PresetManagerPanel
 from .panels.recency_boost_panel import RecencyBoostPanel
 from .panels.recording_panel import RecordingPanel
+from .panels.remote_receiver_panel import RemoteReceiverPanel
 from .panels.scanner_panel import ScannerPanel
 from .panels.transcription_panel import TranscriptionPanel
 
@@ -83,6 +85,8 @@ class MainWindow(QMainWindow):
         options_layout = QVBoxLayout(self.options_tab)
         self.recording_panel = RecordingPanel(self.config.recording)
         options_layout.addWidget(self.recording_panel)
+        self.remote_receiver_panel = RemoteReceiverPanel(self.config.remote_receiver)
+        options_layout.addWidget(self.remote_receiver_panel)
         self.recency_boost_panel = RecencyBoostPanel(self.config.recency_boost)
         options_layout.addWidget(self.recency_boost_panel)
         self.transcription_panel = TranscriptionPanel(self.config.transcription)
@@ -142,6 +146,8 @@ class MainWindow(QMainWindow):
         self.scanner_panel.channel_weight_changed.connect(self._on_channel_weight_changed)
         self.scanner_panel.solo_band_changed.connect(self._on_solo_band_changed)
         self.recording_panel.settings_changed.connect(self._save_config)
+        self.remote_receiver_panel.settings_changed.connect(self._save_config)
+        self.remote_receiver_panel.sync_requested.connect(self._sync_remote_recordings)
         self.recency_boost_panel.settings_changed.connect(self._save_config)
         self.transcription_panel.settings_changed.connect(self._save_config)
         self.transcription_panel.enabled_changed.connect(self.playback_panel.set_transcription_enabled)
@@ -161,6 +167,26 @@ class MainWindow(QMainWindow):
         self.playback_panel.stats_tab.frequencySelected.connect(self._on_stats_freq_selected)
 
         self._maybe_show_launch_disclaimer()
+
+        # A remote receiver is meant to be always-on - but "always on"
+        # means "stays as the user left it", not "unconditionally resumes
+        # whether they stopped it on purpose or not". So: attach (and
+        # issue the equivalent of Start) only if the receiver is actually
+        # running right now; if the user explicitly pressed Stop last
+        # session, launching the desktop app must not silently turn it
+        # back on behind their back - that defeated the whole point of a
+        # working Stop button. A quick, bounded status check (same
+        # RemoteClient the rest of this mode uses) decides which case this
+        # is; an unreachable server just means no auto-attach, same as if
+        # it were off - the user can still press Start by hand.
+        if self.config.remote_receiver.enabled:
+            try:
+                # Short timeout: this runs on the GUI thread before the window shows.
+                already_running = bool(RemoteClient(self.config.remote_receiver).status(timeout=1.5).get("running"))
+            except Exception:
+                already_running = False
+            if already_running:
+                self._start_scanner()
 
     # -- persistence -----------------------------------------------------
     def _save_config(self) -> None:
@@ -275,7 +301,10 @@ class MainWindow(QMainWindow):
         if self.engine is not None:
             return
         self._save_config()
-        self.engine = ScannerEngine(self.config, self.channels, self.blacklist)
+        self.engine = (
+            RemoteScannerProxy(self.config, self.channels, self.blacklist)
+            if self.config.remote_receiver.enabled else ScannerEngine(self.config, self.channels, self.blacklist)
+        )
         s = self.engine.signals
         s.state_changed.connect(self.scanner_panel.update_state)
         s.level_changed.connect(self.scanner_panel.update_level)
@@ -377,6 +406,8 @@ class MainWindow(QMainWindow):
         self.recording_panel.set_enabled(checked)
         self.playback_panel.update_recording_notice()
         self._save_config()
+        if isinstance(self.engine, RemoteScannerProxy):
+            self.engine.set_auto_recording(checked)
 
     def _on_options_auto_recording_toggled(self, checked: bool) -> None:
         if checked and not self._confirm_recording_disclaimer():
@@ -386,6 +417,27 @@ class MainWindow(QMainWindow):
         self.scanner_panel.set_auto_recording(checked)
         self.playback_panel.update_recording_notice()
         self._save_config()
+        if isinstance(self.engine, RemoteScannerProxy):
+            self.engine.set_auto_recording(checked)
+
+    def _sync_remote_recordings(self) -> None:
+        """Downloads completed server files before the existing local refresh queues Whisper."""
+        if getattr(self, "_remote_sync_worker", None) is not None and self._remote_sync_worker.isRunning():
+            return
+        self.remote_receiver_panel.set_sync_status(tr("Downloading recordings…"))
+        self._remote_sync_worker = RemoteSyncWorker(
+            self.config.remote_receiver, self.config.recording.output_dir, self,
+        )
+        self._remote_sync_worker.completed.connect(self._on_remote_sync_completed)
+        self._remote_sync_worker.failed.connect(self._on_remote_sync_failed)
+        self._remote_sync_worker.start()
+
+    def _on_remote_sync_completed(self, copied: int) -> None:
+        self.remote_receiver_panel.set_sync_status(tr("Downloaded {count} recordings").format(count=copied))
+        self.playback_panel.trigger_refresh()
+
+    def _on_remote_sync_failed(self, message: str) -> None:
+        self.remote_receiver_panel.set_sync_status(message)
 
     def _on_auto_lockout(self, freq_hz: int) -> None:
         self.freq_manager.add_lockout(freq_hz)
@@ -403,7 +455,17 @@ class MainWindow(QMainWindow):
         closeEvent() and _restart_app(), so restarting to apply a language
         change leaves state exactly as clean as a normal quit would."""
         if self.engine is not None:
-            self.engine.request_stop()
+            # Closing this window must not be the same as pressing Stop
+            # for a remote receiver - it's meant to keep scanning/recording
+            # headlessly regardless of whether any desktop client is open
+            # (a real, reported case: closing SmartScan stopped the
+            # receiver itself, so reopening it found nothing running,
+            # despite Stop never having been pressed). A local engine owns
+            # real hardware on this machine, so it still stops for real.
+            if isinstance(self.engine, RemoteScannerProxy):
+                self.engine.detach()
+            else:
+                self.engine.request_stop()
             self.engine.join(timeout=3.0)
         self.playback_panel.shutdown()
         self._save_config()

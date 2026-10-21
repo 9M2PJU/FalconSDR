@@ -1,9 +1,11 @@
-"""Software-driven RF gain control for "Auto" gain mode.
+"""Software-driven RF gain control for "sw_auto" gain mode - an explicit
+alternative to "auto" (real hardware AGC), not a replacement for it; see
+``DeviceConfig.gain_mode`` for why both are kept as user-facing options.
 
 Real-hardware finding (RTL-SDR Blog V4, real strong FM broadcast stations):
-the tuner's own onboard AGC (what ``gain_mode == "auto"`` used to mean -
-``SoapyBackend``/``RtlSdrBackend`` just called ``setGainMode(True)`` and left
-the hardware to it) does *not* reliably keep the ADC out of overload. Measured
+the tuner's own onboard AGC (``gain_mode == "auto"`` - ``SoapyBackend``/
+``RtlSdrBackend`` just call ``setGainMode(True)`` and leave the hardware to
+it) does *not* reliably keep the ADC out of overload. Measured
 directly: a 180 kHz slice of a real capture read back at +0.7 dBFS - *above*
 full scale - with a locally-strong FM station and the tuner's own AGC engaged.
 RTL-SDR/R820T-family tuner AGC is a coarse, slow, multi-step hardware
@@ -14,7 +16,7 @@ wideband capture (routine in a dense FM broadcast band, or several strong ATC
 transmitters) makes it worse, not better, since the hardware only sees the
 combined captured band's overall level, not any specific signal of interest.
 
-Fix: "Auto" no longer touches the tuner's own AGC hardware at all - see
+Fix: "sw_auto" never touches the tuner's own AGC hardware at all - see
 ``ScannerEngine._maybe_apply_gain``/``_maybe_run_software_agc``, which instead
 drive the device with ordinary explicit (``"manual"``) gain values,
 periodically recomputed here from the actual captured IQ's own peak
@@ -43,8 +45,16 @@ class SoftwareAgc:
     # peaks, fading, or more than one strong station landing in the same
     # capture don't reach the ADC's actual clipping point, without giving up
     # so much headroom that weak signals sit needlessly close to the noise
-    # floor. -9 dBFS ~= 0.354 linear.
-    TARGET_PEAK = 0.354
+    # floor. Real user-reported case: hardware AGC on a real antenna/location
+    # measured peak at +1dBFS (genuinely overdriving) while this was -9dBFS -
+    # a real ~10dB gap, part of which showed up as "software AGC sounds
+    # quieter", since the demod-stage output AGC's own makeup-gain ceiling
+    # (dsp.py's _AGC_TARGET_PEAK/_AGC_MIN_ENVELOPE, ~+7.2dB) can't fully
+    # absorb a gap that large on its own. Raised from -9dBFS to -6dBFS to
+    # close 3dB of that gap - still a real 6dB clipping margin, nowhere near
+    # the hardware-AGC overdrive case that motivated this class existing
+    # (gotcha 27) in the first place. -6 dBFS ~= 0.501 linear.
+    TARGET_PEAK = 0.501
     TARGET_PEAK_DB = 20.0 * math.log10(TARGET_PEAK)
     # No adjustment while the measured peak is within this many dB of
     # TARGET_PEAK - without a dead zone the controller would nudge gain on

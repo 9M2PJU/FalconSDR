@@ -7,7 +7,7 @@ that only works if there's a single, findable panel to land on.
 """
 from __future__ import annotations
 
-from PySide6.QtCore import Signal
+from PySide6.QtCore import QLocale, Signal
 from PySide6.QtWidgets import QDoubleSpinBox, QFormLayout, QGroupBox, QLabel, QVBoxLayout
 
 from ...config import LocationConfig
@@ -52,6 +52,19 @@ class LocationPanel(QGroupBox):
         self.lat_spin = QDoubleSpinBox()
         self.lat_spin.setRange(_LAT_UNSET, 90.0)
         self.lat_spin.setDecimals(4)
+        # GPS coordinates are copy-pasted from maps (Google Maps, etc.) with
+        # a "." decimal point - a QDoubleSpinBox otherwise inherits the
+        # app's own display locale (see i18n.py's set_language), and on any
+        # comma-decimal locale (Polish among them) its validator silently
+        # rejects "." and everything typed after it, with no error shown:
+        # typing "52.123" truncates to "52" the instant "." is pressed.
+        # Real, reported case: looked like "the app adds extra zeros" (the
+        # truncated 52.0 then displays padded to setDecimals(4) as
+        # "52,0000") and broke the FR24/ADSBExchange buttons (wrong
+        # location silently saved). Forcing the C locale here makes "."
+        # always work regardless of UI language - these two fields are the
+        # one place in the app where a decimal comma would actively hurt.
+        self.lat_spin.setLocale(QLocale.c())
         self.lat_spin.setSpecialValueText(tr("(not set)"))
         self.lat_spin.valueChanged.connect(self._push_settings)
         form.addRow(tr("Latitude:"), self.lat_spin)
@@ -59,6 +72,7 @@ class LocationPanel(QGroupBox):
         self.lon_spin = QDoubleSpinBox()
         self.lon_spin.setRange(_LON_UNSET, 180.0)
         self.lon_spin.setDecimals(4)
+        self.lon_spin.setLocale(QLocale.c())
         self.lon_spin.setSpecialValueText(tr("(not set)"))
         self.lon_spin.valueChanged.connect(self._push_settings)
         form.addRow(tr("Longitude:"), self.lon_spin)

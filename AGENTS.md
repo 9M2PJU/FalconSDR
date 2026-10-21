@@ -20,10 +20,16 @@ python3 main.py
 `PySide6`, `numpy`, `scipy`, `pyqtgraph`, `pyrtlsdr`/`pyrtlsdrlib`,
 `sounddevice` — `pip install -r requirements.txt` covers Windows/macOS fully.
 `SoapySDR`/`PyAudio` need system packages on Linux (see `requirements.txt`),
-optional-but-preferred elsewhere. No SDR hardware/library at all →
-`SimulatedBackend` fallback rather than failing to start.
+optional-but-preferred elsewhere. No SDR hardware/library at all, with
+`AppConfig.debug_mode` on → `SimulatedBackend` fallback rather than failing
+to start; with debug off (the default), a real connection failure stays
+visible (retry/backoff state) instead of silently simulating — gotcha 8.
 
-PySide6 (LGPLv3), not PyQt6 (GPLv3) — `Signal`/`Slot`, not `pyqtSignal`. Set
+**License: GPL-3.0-or-later** (`LICENSE`) — forced by `pyrtlsdr` (GPL-3.0-or-later)
+and the bundled `librtlsdr` (GPL-2.0-or-later); every other dependency is
+permissive or LGPL. A new dependency must be GPLv3-compatible.
+
+PySide6, not PyQt6 — `Signal`/`Slot`, not `pyqtSignal`. Set
 `PYQTGRAPH_QT_LIB=PySide6` if both bindings are ever installed side by side.
 
 **i18n**: every user string goes through `tr()` (`smartscan/i18n.py`);
@@ -111,9 +117,17 @@ the `scanner_panel.py` call site).
    neighbouring channels in a wideband capture.
 8. **`SoapyBackend.read()` must raise on a fully empty read** (a dead/
    unplugged device just returns nothing, never raises on its own), **and
-   `create_backend()` must only auto-fall-back to `SimulatedBackend` for
-   `driver in ("", "auto")`** — an explicitly-picked real driver that fails
-   must propagate the error, never quietly simulate.
+   `create_backend()` only ever auto-falls-back to `SimulatedBackend` for
+   `driver in ("", "auto")` AND only when `debug_mode` is on** (its new
+   `debug_mode` param) — a real open failure with debug off propagates
+   instead (the existing `_open_backend_with_retry()` reconnect/backoff
+   loop then shows it as a visible "Failed to connect... retrying" state).
+   Real, reported case: a real device that merely failed to open (USB
+   permission, already in use, DVB-T driver grabbed it first) looked
+   identical to "no hardware at all" and silently simulated instead -
+   indistinguishable from a genuinely working scan. An explicitly-picked
+   real driver that fails must always propagate the error regardless of
+   debug_mode, never quietly simulate.
 9. **`SimulatedBackend` must inject its fake signal at its offset from the
    *currently tuned* frequency** (`abs(active_freq - freq_hz) <= half_bw`),
    not only on an exact match — the tuner sits on a window center, nudged
@@ -159,9 +173,12 @@ the `scanner_panel.py` call site).
     strictly after a WAV is closed AND its metadata chunk written**
     (`append_metadata_chunk()` first, transcode second — an mp3 container
     can't hold the RIFF chunk). `Recorder` is WAV-only and knows nothing
-    about `output_format`; transcoding lives at the engine's close sites
-    (`_close_slot`, `stop_manual_recording`). Missing `ffmpeg` silently
-    keeps the WAV.
+    about `output_format`; both close sites (`_close_slot`,
+    `stop_manual_recording`) hand the file to `_finish_recording()`, which
+    runs ffmpeg on `self._slot_pool` — never on the scan-loop thread (a slow
+    transcode outlasted `AcquisitionThread`'s ~1.9s queue and dropped IQ for
+    other open slots) — and emits `recording_finished` only afterwards.
+    Missing `ffmpeg` silently keeps the WAV.
 15. **Raw IQ recording (`iq_recorder.py`) is a third, independent
     mechanism** — not audio, not `Recorder`-based. Writes SigMF from the
     *shared* window capture (never a second hardware read). Manual/
@@ -175,10 +192,19 @@ the `scanner_panel.py` call site).
     same CF32 scaling `(i - 127.4) / 128` (so a threshold means the same
     dBFS cross-platform). `open_real_backend()` picks Soapy vs native based
     on driver string/what's installed; `"auto"` tries Soapy then native,
-    only simulates if both fail. **Known unfixed caveat**: `SoapyBackend`'s
-    own `"auto"` passes an unfiltered `{}` to `SoapySDR.Device()`, which can
-    match the `"audio"` driver (gotcha 4) instead of `rtlsdr` — masked in
-    practice by native RTL-SDR being tried second, not actually fixed.
+    only simulates if both fail. **`SoapyBackend.__init__` must turn `driver
+    in ("", "auto")` into an explicit `{"driver": "rtlsdr"}` args filter,
+    never pass `{}` to `SoapySDR.Device()`** — a real, measured bug, not just
+    the theoretical "could match the `audio` driver" risk (gotcha 4) it was
+    first flagged as: on a real dev machine, opening the *same* physical
+    RTL-SDR dongle via unfiltered `{}` vs explicit `{"driver": "rtlsdr"}`
+    produced **~10dB different channel power** for the identical gain_mode
+    ("auto"/hardware AGC) - one path was overdriving (peak +1dBFS), the
+    other wasn't (peak -9dBFS). Confirmed by direct A/B measurement, fixed
+    by always filtering explicitly - `driver="auto"` only ever means "let
+    the app pick an RTL-SDR, don't ask the user" here anyway (gotcha 16/35:
+    this app's device list is RTL-SDR-first), so there's no real ambiguity
+    being preserved by leaving the filter open.
 17. **Other SoapySDR hardware (HackRF/LimeSDR/Airspy/SDRplay/USRP) already
     works via `SoapyBackend`** with no code changes once the matching
     `soapysdr-module-*` is installed — nothing in it is RTL-SDR-specific.
@@ -262,15 +288,19 @@ the `scanner_panel.py` call site).
     missed callback is an instant audible glitch. Best-effort; prints its
     outcome unconditionally (not just under `SMARTSCAN_DEBUG_LIVE_AUDIO`) —
     check this line first when debugging a live-audio report.
-27. **"Auto" gain mode is a software control loop (`smartscan/agc.py`'s
-    `SoftwareAgc`), never the tuner's own onboard AGC hardware** — RTL-SDR's
-    built-in AGC doesn't reliably prevent ADC overload, and overload also
-    worsens spurious neighbour-channel detections.
-    `ScannerEngine._maybe_apply_gain()`/`_maybe_run_software_agc()` send
-    explicit `"manual"` gain values computed from each tick's own captured
-    IQ peak (target ≈ −9 dBFS peak, ±3 dB dead zone, ≥1s between
-    adjustments). Backends never receive `"auto"` from the engine anymore —
-    never call `backend.set_gain("auto", ...)` from the engine again.
+27. **Three gain modes (`DeviceConfig.gain_mode`): `"manual"`, `"auto"` =
+    the tuner's own hardware AGC (passed straight to `backend.set_gain`,
+    the default), `"sw_auto"` = `SoftwareAgc` (`smartscan/agc.py`).**
+    Hardware AGC can overdrive the ADC (measured +0.7/+1 dBFS peaks, extra
+    spurious neighbour detections), so `"sw_auto"` exists as an explicit
+    opt-in: `_maybe_apply_gain()`/`_maybe_run_software_agc()` send explicit
+    `"manual"` values computed from each tick's IQ peak (target ≈ −6 dBFS,
+    ±3 dB dead zone, ≥1s between steps) and never touch the hardware AGC.
+    Each step pre-scales every slot's output AGC
+    (`Demodulator.notify_rf_gain_change`) and clears its `level_history` —
+    a gain step moves all channels' dB levels together, which
+    `_detect_reflections()` would otherwise read as correlation and discard
+    a real signal (rejected files are renamed `*.rejected`, never deleted).
 28. **`_service_active_slots()` processes the primary slot (the only one
     that reaches the live speaker) synchronously, first** — before any
     non-primary slot is submitted to `self._slot_pool`. The old design gave
@@ -351,14 +381,45 @@ the `scanner_panel.py` call site).
 35. **`packaging/linux-deb/build.sh`** builds a self-contained PyInstaller
     `--onedir` bundle wrapped in a .deb (RTL-SDR + sounddevice only - no
     SoapySDR, no system PyAudio - see its own header comment and README.md
-    for the full rationale/known limitations). Two real, clean-container-
-    verified gotchas any other frozen build (Windows .exe, AppImage) will
-    also hit:
+    for the full rationale/known limitations). Several real, clean-
+    container-verified gotchas any other frozen build (Windows .exe,
+    AppImage) will also hit - all three below are the same underlying
+    failure mode (a native library loaded dynamically at *runtime*, not
+    linked at import time, so PyInstaller's static analysis can't see it
+    needs bundling) with three different fix shapes depending on how each
+    library does its own loading:
     - **`tzdata` needs `--collect-data tzdata` explicitly** - it ships only
       data files, so PyInstaller's static import analysis never sees
       `zoneinfo`'s own runtime fallback to it and silently drops it,
       reopening the exact `ZoneInfoNotFoundError` this package was added to
       requirements.txt to prevent in the first place.
+    - **`pyrtlsdrlib` needs `--collect-data pyrtlsdrlib` explicitly** -
+      `pyrtlsdrlib.lib.load_librtlsdr()` locates its own bundled
+      `librtlsdr.so*` via `importlib.resources.files()` at runtime, which
+      this fix makes visible to the bundle at its correct package-relative
+      path. Without it, the build can appear to work on a dev machine that
+      happens to also have a *system* `rtl-sdr` package installed (pyrtlsdr's
+      own fallback chain silently finds that instead) while failing on a
+      genuinely clean machine with neither - `HAVE_RTLSDR_NATIVE` ends up
+      False there, and the app falls through to the SoapySDR path this build
+      deliberately doesn't ship, surfacing as "the python3-soapysdr module is
+      not installed" instead of ever finding the real dongle.
+    - **`libportaudio.so.2` (live audio) needs an explicit `--add-binary`,
+      found via `ldconfig` at build time, plus a `sys.frozen`-gated
+      `ctypes.util.find_library()` monkeypatch in `audio_output.py`** -
+      `--collect-data` doesn't work here like it did for pyrtlsdrlib: Linux
+      `sounddevice` only ever calls `find_library("portaudio")`, a *system-
+      wide* ldconfig-cache search with no concept of a bundle's own
+      `_internal/` directory, even with that directory on `LD_LIBRARY_PATH`
+      (confirmed in a clean container: the .so was physically present there
+      and still not found). The monkeypatch hands `find_library` the bundled
+      file's real path directly instead of ever letting it search. Real,
+      user-reported symptom: recording worked (demod doesn't touch audio
+      output) but live listening was completely silent, with no error
+      shown - `AudioOutput.available` was simply `False`. Needs
+      `libportaudio2` installed on the *build* machine (system package, not
+      in requirements.txt) - `build.sh` now fails loudly at build time if
+      it's missing, rather than silently producing a .deb broken this way.
     - **`main.py`'s venv re-exec check and `transcription_install.py`'s
       installer both gate on `getattr(sys, "frozen", False)`** - a frozen
       build's own `sys.executable` *is* the app itself, not a real Python;
@@ -377,10 +438,13 @@ the `scanner_panel.py` call site).
       driver from claiming it first** - the `rtl-sdr` apt package normally
       provides both, but this self-contained build intentionally depends on
       no system package. Real, reported symptom: the device "isn't
-      detected" and the app silently falls back to `Simulated` (its "auto"
-      driver mode does that on *any* open failure, including a plain
-      permission error - gotcha 8), indistinguishable from a genuine
-      hardware problem. Fixed by shipping `60-rtl-sdr.rules` (udev,
+      detected" and the app silently fell back to `Simulated` (its "auto"
+      driver mode did that on *any* open failure, including a plain
+      permission error) - indistinguishable from a genuine hardware
+      problem. Gotcha 8's `debug_mode` gate (added later) means a non-debug
+      install now surfaces this as a visible "Failed to connect... retrying"
+      state instead, but the real udev/DVB-T fix below is still needed so
+      it connects at all. Fixed by shipping `60-rtl-sdr.rules` (udev,
       0bda:2832/2838 → group `plugdev`) and `blacklist-rtl-dvb.conf`
       (modprobe blacklist for `dvb_usb_rtl28xxu`/`rtl2832`/`rtl2830`) via
       `postinst`. **Every `udevadm`/`rmmod` call in `postinst` is wrapped in
@@ -391,7 +455,7 @@ the `scanner_panel.py` call site).
 
 ## Testing without touching the user's real config/recordings
 
-There's no test suite yet. To smoke-test end to end, run the app with
+Unit tests: `.venv/bin/python -m unittest tests/test_remote_and_config.py` (config load/save, receiver path checks, sync-delete rule). To smoke-test end to end, run the app with
 `QT_QPA_PLATFORM=offscreen`, select the "Symulacja" device entry, and point
 `recording.output_dir` at a scratch directory before starting — otherwise
 config edits during a manual test run land in the real
