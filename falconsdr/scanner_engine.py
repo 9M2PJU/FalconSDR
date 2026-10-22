@@ -824,7 +824,10 @@ class ScannerEngine(threading.Thread):
             try:
                 self._main_loop()
             except Exception as exc:
-                self.signals.log.emit(tr("SDR connection lost: {error}").format(error=exc))
+                # A bug in the loop lands here too, not only a lost device - keep its traceback.
+                traceback.print_exc()
+                error = str(exc) if isinstance(exc, (RuntimeError, OSError)) else f"{type(exc).__name__}: {exc}"
+                self.signals.log.emit(tr("SDR connection lost: {error}").format(error=error))
                 for freq_hz in list(self._slots.keys()):
                     self._close_slot(freq_hz, reason="connection_lost")
                 if self._backend is not None:
