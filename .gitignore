@@ -25,3 +25,7 @@ packaging/linux-deb/out/
 
 # Claude Code per-machine state (session notes, local settings)
 .claude/
+
+# Locally installed agent skills (third-party text, not part of this project)
+.agents/
+skills-lock.json
