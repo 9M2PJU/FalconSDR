@@ -1,13 +1,10 @@
 <svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 256 256">
-  <!-- FalconSDR app icon - the one source; packaging/icons/make-icons.sh renders the PNG/ICO from it. -->
-  <rect x="4" y="4" width="248" height="248" rx="56" fill="#ffb340"/>
-  <!-- falcon in flight: long, pointed, swept-back wings -->
-  <g transform="translate(-10 14) rotate(35 128 128)">
-    <path fill="#14171c" d="M128 50 C 133 53, 135 62, 135 76 C 135 86, 138 90, 146 92 C 180 98, 210 118, 228 156 C 200 138, 168 130, 142 134 C 141 148, 140 160, 139 170 L 146 204 C 134 208, 122 208, 110 204 L 117 170 C 116 160, 115 148, 114 134 C 88 130, 56 138, 28 156 C 46 118, 76 98, 110 92 C 118 90, 121 86, 121 76 C 121 62, 123 53, 128 50 Z"/>
+  <!-- FalconSDR app icon: an F whose bars are wings, plus a signal peak. The one source -
+       packaging/icons/make-icons.sh renders the PNG/ICO from it. -->
+  <rect x="4" y="4" width="248" height="248" rx="56" fill="#0D1117"/>
+  <g fill="#00E5FF">
+    <path d="M 62 214 L 62 70 C 62 56, 70 48, 84 48 L 226 34 C 196 62, 160 80, 104 84 L 104 214 Z"/>
+    <path d="M 96 121 L 190 112 C 170 136, 140 148, 96 153 Z"/>
   </g>
-  <!-- what it listens to, ahead of its head -->
-  <g fill="none" stroke="#14171c" stroke-width="10" stroke-linecap="round">
-    <path d="M 158.5 52.4 A 26 26 0 0 1 188.6 73.5"/>
-    <path d="M 154.7 30.7 A 48 48 0 0 1 210.3 69.7" opacity="0.55"/>
-  </g>
+  <path fill="none" stroke="#FF6B00" stroke-width="12" stroke-linecap="round" stroke-linejoin="round" d="M 136 214 L 160 214 L 178 170 L 196 214 L 214 214"/>
 </svg>
