@@ -84,6 +84,8 @@ class VfoRangeConfig:
     gain_db: float | None = None
     noise_reduction_enabled: bool | None = None
     noise_reduction_strength: float | None = None
+    squelch_enabled: bool | None = None
+    squelch_offset_db: float | None = None
 
     @property
     def has_advanced_overrides(self) -> bool:
@@ -96,7 +98,8 @@ class VfoRangeConfig:
             self.trigger_level_dbfs is not None, self.tuning_time_ms is not None,
             self.linger_time_ms is not None, self.gain_mode is not None,
             self.gain_db is not None, self.noise_reduction_enabled is not None,
-            self.noise_reduction_strength is not None,
+            self.noise_reduction_strength is not None, self.squelch_enabled is not None,
+            self.squelch_offset_db is not None,
         ))
 
 

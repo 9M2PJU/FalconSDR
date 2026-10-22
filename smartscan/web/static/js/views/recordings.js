@@ -52,11 +52,12 @@ export function recordingsView(root) {
     select([[0, t('Any quality')], [40, t('Quality 40+')], [60, t('Quality 60+')], [80, t('Quality 80+')]], F.minq, (v) => { F.minq = +v; reload(); }),
     select([['new', t('Newest first')], ['old', t('Oldest first')], ['quality', t('Best quality')], ['long', t('Longest')]], F.sort, (v) => { F.sort = v; reload(); }));
   const statusLine = h('div.row.wrap.small.muted');
+  const recordingNow = h('div.row.wrap.small.hidden');
   const bulk = h('div.bulk.hidden');
   const list = h('div.rec-list');
   const more = h('div.empty.hidden', h('button', { onclick: () => load() }, t('Load more')));
   const player = h('div.player.hidden');
-  const main = h('section.card', toolbar, statusLine, bulk, list, more, player);
+  const main = h('section.card', toolbar, statusLine, recordingNow, bulk, list, more, player);
 
   mount(root, h('div.page', h('div.page-head', h('h1', t('Recordings'))), h('div.library', aside, main)));
 
@@ -282,17 +283,22 @@ export function recordingsView(root) {
     ctx.clearRect(0, 0, W, H);
     const pos = audio.duration ? audio.currentTime / audio.duration : 0;
     const styles = getComputedStyle(document.documentElement);
+    const played = styles.getPropertyValue('--accent').trim();
+    const ahead = styles.getPropertyValue('--secondary').trim();  // must stay visible on the card in both themes
     const n = peaks.length || 1;
     const bw = W / n;
     for (let i = 0; i < peaks.length; i++) {
       const v = Math.max(0.02, peaks[i]);
-      ctx.fillStyle = i / n <= pos ? styles.getPropertyValue('--accent') : styles.getPropertyValue('--line-2');
+      ctx.fillStyle = (i + 1) / n <= pos ? played : ahead;
       ctx.fillRect(i * bw, (H - v * H * 0.92) / 2, Math.max(1, bw - dpr * 0.6), v * H * 0.92);
     }
     if (!peaks.length) {
-      ctx.fillStyle = styles.getPropertyValue('--accent');
-      ctx.fillRect(0, H / 2 - dpr, W * pos, 2 * dpr);
+      ctx.fillStyle = ahead;
+      ctx.fillRect(0, H / 2 - dpr, W, 2 * dpr);
     }
+    // playhead
+    ctx.fillStyle = played;
+    ctx.fillRect(Math.min(W - 2 * dpr, W * pos), 0, 2 * dpr, H);
     timeText.textContent = `${fmtDuration(audio.currentTime)} / ${fmtDuration(audio.duration || current?.duration)}`;
   }
 
@@ -434,6 +440,19 @@ export function recordingsView(root) {
     } catch { /* offline */ }
   }, 4000);
 
+  // Files still being written aren't in the list yet (they appear once the
+  // transmission's hold time ends) - say what's being recorded right now.
+  const renderRecordingNow = () => {
+    const live = S.live;
+    const freqs = live && live.recording && ['SIGNAL_DETECTED', 'LINGER'].includes(live.state) ? live.frequencies : [];
+    recordingNow.classList.toggle('hidden', !freqs.length);
+    if (freqs.length) {
+      mount(recordingNow, h('span.chip.bad.live', h('span.dot'), t('Recording now')),
+        freqs.map(([f, n]) => h('span.chip', h('b.mono', fmtKhz(Math.round(f / 1000))), n ? ` ${n}` : '')),
+        h('span.muted', t('appears in the list when the transmission ends')));
+    }
+  };
+  offs.push(on('live', renderRecordingNow));
   offs.push(on('settings', () => current && renderPlayer()));
   reload();
   loadFacets();

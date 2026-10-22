@@ -2280,3 +2280,15 @@ msgstr "Język i odsłuch"
 
 msgid "Play or pause (Space)"
 msgstr "Odtwórz / wstrzymaj (spacja)"
+
+msgid "{freq:.4f} MHz: nothing above the squelch level - recording discarded"
+msgstr "{freq:.4f} MHz: nic powyżej blokady szumów - nagranie odrzucone"
+
+msgid "Limit of {n} simultaneous recordings reached - {freq:.4f} MHz not recorded"
+msgstr "Osiągnięto limit {n} jednoczesnych nagrań - {freq:.4f} MHz nie zostanie nagrana"
+
+msgid "Recording now"
+msgstr "Trwa nagrywanie"
+
+msgid "appears in the list when the transmission ends"
+msgstr "pojawi się na liście po zakończeniu transmisji"

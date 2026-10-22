@@ -126,6 +126,8 @@ class Controller:
 
     def log(self, message: str) -> None:
         with self._lock:
+            if self._log and self._log[-1]["text"] == message:
+                return  # e.g. the "wideband scanning" line on every rebuild - it flooded out real events
             self._log_id += 1
             self._log.append({"id": self._log_id, "time": time.time(), "text": message})
 

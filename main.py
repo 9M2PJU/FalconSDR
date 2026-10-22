@@ -109,7 +109,8 @@ def main() -> int:
     else:
         from smartscan.controller import Controller
         controller = Controller(config)
-        controller.start_background()
+        # Indexing a large library takes a while - never hold up the UI or the scanner for it.
+        threading.Thread(target=controller.start_background, daemon=True, name="library-start").start()
         app = App(config, controller, token, "server" if args.server else "local", on_switch=switch_mode,
                   on_quit=stop.set)
         browser_url = f"http://127.0.0.1:{args.port}/"

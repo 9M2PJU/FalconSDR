@@ -267,7 +267,8 @@ label.field > span.hint { color: var(--secondary); font-weight: 400; }
 /* ---- recordings --------------------------------------------------------------------- */
 .library { display: grid; grid-template-columns: 270px minmax(0, 1fr); gap: 20px; align-items: start; }
 .library aside { position: sticky; top: 0; max-height: calc(100vh - 140px); display: flex; flex-direction: column; }
-.library aside .list { overflow: auto; margin: 0 -8px; padding: 0 8px; }
+.library aside > * { flex-shrink: 0; }  /* the mode switch must never be squeezed by a long list */
+.library aside .list { overflow: auto; margin: 0 -8px; padding: 0 8px; flex: 1 1 auto; min-height: 0; flex-shrink: 1; }
 @media (max-width: 980px) {
   .library { grid-template-columns: minmax(0, 1fr); }
   .library aside { position: static; max-height: none; }

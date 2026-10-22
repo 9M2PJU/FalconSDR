@@ -5,7 +5,7 @@ import { liveAudio } from '../live-audio.js';
 import { S, cfg, confirmRecording, on, patchConfig, setFastPolling } from '../state.js';
 
 const MODULATIONS = ['AM', 'NFM', 'WFM', 'SSB'];
-const OVERRIDES = ['trigger_level_dbfs', 'tuning_time_ms', 'linger_time_ms', 'gain_mode', 'gain_db', 'noise_reduction_enabled', 'noise_reduction_strength'];
+const OVERRIDES = ['trigger_level_dbfs', 'tuning_time_ms', 'linger_time_ms', 'gain_mode', 'gain_db', 'noise_reduction_enabled', 'noise_reduction_strength', 'squelch_enabled', 'squelch_offset_db'];
 const hasOverrides = (b) => OVERRIDES.some((k) => b[k] !== null && b[k] !== undefined);
 const clearOverrides = (b) => OVERRIDES.forEach((k) => { b[k] = null; });
 
@@ -327,6 +327,7 @@ export function listenView(root) {
       trigger_level_dbfs: c.trigger_level_dbfs, tuning_time_ms: c.timing.tuning_time_ms, linger_time_ms: c.timing.linger_time_ms,
       gain_mode: c.device.gain_mode, gain_db: c.device.gain_db,
       noise_reduction_enabled: c.noise_reduction.enabled, noise_reduction_strength: c.noise_reduction.strength,
+      squelch_enabled: c.squelch_enabled, squelch_offset_db: c.squelch_offset_db,
     };
     const ov = (keys, label, makeInput, globalValue) => {
       const own = () => keys.some((k) => b[k] !== null && b[k] !== undefined);
@@ -344,6 +345,12 @@ export function listenView(root) {
     const gainModes = [['manual', t('Manual')], ['auto', t('Auto (hardware)')], ['sw_auto', t('Auto (software)')]];
     const overrides = h('div.overrides',
       ov(['trigger_level_dbfs'], t('Trigger level'), () => rangeInput('trigger_level_dbfs', -90, 0, 1, (v) => `${v} dBFS`), `${c.trigger_level_dbfs} dBFS`),
+      ov(['squelch_enabled', 'squelch_offset_db'], t('Squelch'), (redraw) => {
+        const on = b.squelch_enabled ?? defaults.squelch_enabled;
+        const offset = rangeInput('squelch_offset_db', -40, 0, 1, (v) => `${v} dB`);
+        offset.input.disabled = !on;
+        return [toggle(t('On'), on, (v) => { b.squelch_enabled = v; save(); redraw(); }), offset];
+      }, c.squelch_enabled ? `${t('On')}, ${c.squelch_offset_db} dB` : t('Off')),
       ov(['tuning_time_ms'], t('Tuning time'), () => rangeInput('tuning_time_ms', 0, 1000, 10, (v) => `${v} ms`), `${c.timing.tuning_time_ms} ms`),
       ov(['linger_time_ms'], t('Hold after a transmission'), () => rangeInput('linger_time_ms', 0, 30000, 100, (v) => `${(v / 1000).toFixed(1)} s`), `${(c.timing.linger_time_ms / 1000).toFixed(1)} s`),
       ov(['gain_mode', 'gain_db'], t('Gain'), (redraw) => [

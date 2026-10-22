@@ -547,6 +547,8 @@ class ScannerEngine(threading.Thread):
         # Keyed by window center_hz - throttles "floor" snapshots, see
         # _FLOOR_LOG_INTERVAL_S.
         self._last_floor_log: dict[int, float] = {}
+        # freq_hz -> monotonic time of the last "recording limit reached" log line
+        self._capacity_logged: dict[int, float] = {}
         # Keyed by window center_hz - see _register_recency_boost /
         # _due_recency_boost_locked. Only ever touched from this thread (both
         # registration in _close_slot and reads in _pick_next_locked happen
@@ -1581,6 +1583,21 @@ class ScannerEngine(threading.Thread):
                     self._emit_state(state)
                 elif (
                     best_freq is not None and best_level >= effective_trigger
+                    and self._at_recording_capacity()
+                ):
+                    now = time.monotonic()
+                    if now - self._capacity_logged.get(best_freq, 0.0) > 30.0:
+                        self._capacity_logged[best_freq] = now
+                        self.signals.log.emit(
+                            tr("Limit of {n} simultaneous recordings reached - {freq:.4f} MHz not recorded").format(
+                                n=self.config.recording.max_concurrent_recordings, freq=best_freq / 1e6,
+                            )
+                        )
+                    if not any_active and now >= scanning_deadline:
+                        state = ScannerState.CALCULATE_NEXT_FREQ
+                        self._emit_state(state)
+                elif (
+                    best_freq is not None and best_level >= effective_trigger
                     and not self._at_recording_capacity()
                 ):
                     raw_level = raw_powers[best_freq]
@@ -1724,9 +1741,12 @@ class ScannerEngine(threading.Thread):
         in SIGNAL_DETECTED (level >= trigger) - see AGENTS.md gotcha 6 for
         why that invariant (not whether recording is also squelched) is
         what actually keeps this safe."""
-        if not self.config.squelch_enabled:
+        band = window.band if window is not None else None
+        enabled = band.squelch_enabled if band is not None and band.squelch_enabled is not None else self.config.squelch_enabled
+        if not enabled:
             return None
-        return self._effective_trigger_dbfs(window) + min(0.0, self.config.squelch_offset_db)
+        offset = band.squelch_offset_db if band is not None and band.squelch_offset_db is not None else self.config.squelch_offset_db
+        return self._effective_trigger_dbfs(window) + min(0.0, offset)
 
     def _effective_noise_reduction(self, window: ScanWindow | None) -> tuple[bool, float]:
         band = window.band if window is not None else None
@@ -1993,6 +2013,13 @@ class ScannerEngine(threading.Thread):
         if self.config.recording.enabled:
             finished_path = slot.recorder.end_transmission()
             slot.recorder.stop_session()
+            if finished_path is None and reason == "linger":
+                # Recorder dropped it: not one block above the squelch level.
+                # Said out loud - silently losing a detected channel is
+                # indistinguishable from a bug otherwise.
+                self.signals.log.emit(
+                    tr("{freq:.4f} MHz: nothing above the squelch level - recording discarded").format(freq=freq_hz / 1e6)
+                )
             if finished_path is not None and reason == "reflection":
                 # A receiver-generated reflection/splatter of another, much
                 # stronger simultaneously-active channel (see

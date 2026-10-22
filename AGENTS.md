@@ -117,7 +117,8 @@ catalog loads; wrap them in a function called at point of use
    for 118–136 MHz.
 6. **Squelch (`config.squelch_enabled`/`squelch_offset_db`) must always be an
    offset from `trigger_level_dbfs` (clamped ≤ 0), never an independent
-   threshold** — `_effective_squelch_dbfs()` = trigger + offset, so it can
+   threshold** — `_effective_squelch_dbfs()` = trigger + offset (a band's
+   own `squelch_enabled`/`squelch_offset_db` win over the global ones), so it can
    never fire during SIGNAL_DETECTED, only in the LINGER tail. `trigger_level_dbfs`
    alone still drives SIGNAL_DETECTED/LINGER. A squelched block writes
    *silence* to the recording (`Recorder.write_audio(audio, real=False)`,
@@ -294,7 +295,12 @@ catalog loads; wrap them in a function called at point of use
     live scanning/listening, and doesn't affect manual/raw-IQ recording
     (separate mechanisms outside `self._slots`). A capped candidate isn't
     lost — it's simply re-evaluated next tick, opening automatically once a
-    LINGER expiry frees capacity.
+    LINGER expiry frees capacity. Both silent ways a detected channel can end
+    up with no file are logged to the Activity feed: capacity skips (once
+    per channel per 30 s) and a slot discarded for having nothing above the
+    squelch level. The feed drops consecutive duplicate lines
+    (`Controller.log`) - the per-rebuild "wideband scanning" line once
+    flooded every real event out of its 100-entry buffer.
 25. **`Demodulator`'s output-level AGC (`dsp.py`, `_apply_agc`) is a
     persistent attack-fast/release-slow envelope follower across `demod()`
     calls** (state in `self._agc_envelope`, cleared by `reset()`) — never a

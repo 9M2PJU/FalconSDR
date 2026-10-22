@@ -118,6 +118,24 @@ class LibraryTest(_LibCase):
         self.assertEqual((rec.transcript.text, rec.is_favorite), ("a", True))
 
 
+class SquelchTest(unittest.TestCase):
+    def test_band_squelch_overrides_global_and_never_exceeds_trigger(self) -> None:
+        from types import SimpleNamespace
+        from smartscan.config import VfoRangeConfig
+        from smartscan.scanner_engine import ScannerEngine
+        cfg = AppConfig()
+        cfg.squelch_enabled, cfg.squelch_offset_db = False, -6.0
+        band = VfoRangeConfig(squelch_enabled=True, squelch_offset_db=4.0)  # positive offset must clamp to 0
+        fake = SimpleNamespace(config=cfg, _effective_trigger_dbfs=lambda w: -48.0)
+        win = SimpleNamespace(band=band)
+        self.assertEqual(ScannerEngine._effective_squelch_dbfs(fake, win), -48.0)
+        band.squelch_offset_db = -10.0
+        self.assertEqual(ScannerEngine._effective_squelch_dbfs(fake, win), -58.0)
+        self.assertIsNone(ScannerEngine._effective_squelch_dbfs(fake, SimpleNamespace(band=VfoRangeConfig())))
+        cfg.squelch_enabled = True  # band without its own value follows the global one
+        self.assertEqual(ScannerEngine._effective_squelch_dbfs(fake, SimpleNamespace(band=VfoRangeConfig())), -54.0)
+
+
 class WorkerMirrorTest(unittest.TestCase):
     def test_reports_only_size_verified_copies(self) -> None:
         from smartscan.worker import Worker
