@@ -213,7 +213,7 @@ class Library:
         blob = self._blobs.get(rel)
         if blob is None:
             blob = " ".join((
-                f"{rec.freq_khz / 1000:.3f}", airband_channel(rec.freq_khz * 1000), names.get(rec.freq_khz, ""),
+                f"{rec.freq_khz / 1000:.3f}", airband_channel(rec.freq_khz * 1000, ch833=True), names.get(rec.freq_khz, ""),
                 rec.dt_local.strftime("%Y-%m-%d %H:%M:%S"), rec.dt_utc.strftime("%Y-%m-%d %H:%M"),
                 rec.path.name, rec.transcript_text,
             )).lower()

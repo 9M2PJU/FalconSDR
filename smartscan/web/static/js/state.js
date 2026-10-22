@@ -1,6 +1,6 @@
 // App-wide state: server settings (config, Memory List, blacklist, presets...),
 // the live scanner snapshot (polled), and tiny pub/sub so views can react.
-import { api, debounce, errorToast, lang, modal, t } from './core.js';
+import { api, debounce, errorToast, lang, modal, setCh833, t } from './core.js';
 
 export const S = {
   settings: null,   // GET /api/settings
@@ -17,6 +17,7 @@ export const cfg = () => S.settings.config;
 
 export async function loadSettings() {
   S.settings = await api.get('/api/settings');
+  setCh833(S.settings.channels);
   emit('settings');
   return S.settings;
 }
@@ -47,6 +48,7 @@ export function patchConfig(patch) {
 
 export async function saveChannels(channels) {
   S.settings.channels = channels;
+  setCh833(channels);
   emit('channels');
   try { await api.put('/api/channels', channels); } catch (e) { errorToast(e); }
 }

@@ -255,14 +255,27 @@ export function fmtKhz(khz) { return (khz / 1000).toFixed(3); }
 
 // Airband (118-137 MHz) voice is 8.33 kHz-channelled in the EU: pilots dial a
 // channel *name* - carrier 126.8000 is "126.805", 126.8083 "126.810", 126.8167
-// "126.815". The 121.500 guard stays a 25 kHz channel. Mirrors models.airband_channel().
+// "126.815". A carrier on the 25 kHz grid is ambiguous: many stations (most ACC
+// sectors, e.g. 130.875) are still published as 25 kHz channels, so it shows as
+// the 25 kHz name unless a Memory List channel there was typed as 8.33 (ch833).
+// The 121.500 guard stays a 25 kHz channel. Mirrors models.airband_channel().
 const GUARD_HZ = 121_500_000;
+let ch833Blocks = new Set();
+export function setCh833(channels) { ch833Blocks = new Set(channels.filter((c) => c.ch833).map((c) => Math.floor(c.freq_hz / 25000) * 25000)); }
 export function airbandChannel(hz) {
   if (hz < 118e6 || hz > 137e6 || Math.abs(hz - GUARD_HZ) < 500) return '';
   const block = Math.floor(hz / 25000) * 25000;
   const k = Math.round((hz - block) / (25000 / 3));
   if (k > 2 || Math.abs(hz - block - k * 25000 / 3) > 500) return '';
+  if (k === 0 && !ch833Blocks.has(block)) return (block / 1e6).toFixed(3);
   return ((block + [5000, 10000, 15000][k]) / 1e6).toFixed(3);
+}
+
+// True when a typed airband channel is an 8.33 name on a 25 kHz-grid carrier
+// ("126.805"), as opposed to the 25 kHz channel at that carrier ("126.800").
+export function typedAs833(mhz) {
+  const hz = Math.round(mhz * 1e6);
+  return hz >= 118e6 && hz <= 137e6 && hz % 25000 === 5000;
 }
 
 // A single channel as people know it: the 8.33 channel name in the airband, MHz elsewhere.

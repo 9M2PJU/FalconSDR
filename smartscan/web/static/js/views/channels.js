@@ -1,6 +1,6 @@
 // "Channels": the Memory List (named frequencies in folders, each with its
 // own modulation, priority weight and on/off) and the blacklist.
-import { carrierHz, confirmDialog, fmtChannel, fmtMHz, formDialog, h, icon, mount, seg, t, toast } from '../core.js';
+import { carrierHz, confirmDialog, fmtChannel, fmtMHz, formDialog, h, icon, mount, seg, t, toast, typedAs833 } from '../core.js';
 import { S, cfg, loadSettings, on, patchConfig, saveBlacklist, saveChannels } from '../state.js';
 
 const MODULATIONS = ['AM', 'NFM', 'WFM', 'SSB'];
@@ -38,7 +38,7 @@ export function channelsView(root) {
     const hz = carrierHz(v.freq);
     const channels = S.settings.channels;
     if (channels.some((c) => c.freq_hz === hz && c !== ch)) { toast(t('{f} MHz is already in the list', { f: fmtChannel(hz) }), 'bad'); return; }
-    const data = { freq_hz: hz, name: v.name.trim(), modulation: v.mod, folder: v.folder, weight: v.weight || 0 };
+    const data = { freq_hz: hz, ch833: typedAs833(v.freq), name: v.name.trim(), modulation: v.mod, folder: v.folder, weight: v.weight || 0 };
     if (isNew) channels.push({ ...data, enabled: true }); else Object.assign(ch, data);
     await saveChannels(channels);
     render();

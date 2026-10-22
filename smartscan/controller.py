@@ -72,6 +72,7 @@ def channel_from_dict(d: dict) -> Channel:
         freq_hz=int(d["freq_hz"]), name=str(d.get("name", "")),
         modulation=Modulation(mod) if mod in Modulation._value2member_map_ else Modulation.AM,
         enabled=bool(d.get("enabled", True)), folder=str(d.get("folder", "")), weight=float(d.get("weight", 0.0)),
+        ch833=bool(d.get("ch833", False)),
     )
 
 
@@ -118,7 +119,12 @@ class Controller:
 
     # -- helpers used by the library ----------------------------------------
     def freq_names(self) -> dict[int, str]:
-        return {c.freq_hz // 1000: c.name for c in self.channels if c.name}
+        names = {round(c.freq_hz / 1000): c.name for c in self.channels if c.name}
+        # Filenames keep whole kHz and the same carrier lands ±1 kHz apart (130.874/130.875).
+        for khz, name in list(names.items()):
+            names.setdefault(khz - 1, name)
+            names.setdefault(khz + 1, name)
+        return names
 
     def open_recording_paths(self) -> set[Path]:
         engine = self._engine

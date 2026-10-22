@@ -63,11 +63,14 @@ class Channel:
     # frequency proportionally more often than other items of the same kind,
     # relative to their own weights (see scanner_engine._WeightedScheduler).
     weight: float = 0.0
+    # Airband carrier on the 25 kHz grid published as an 8.33 channel
+    # (126.800 -> "126.805") rather than as the 25 kHz channel ("130.875").
+    ch833: bool = False
 
     def to_row(self) -> list[str]:
         return [
             str(self.freq_hz), self.name, self.modulation.value, "1" if self.enabled else "0", self.folder,
-            repr(self.weight),
+            repr(self.weight), "1" if self.ch833 else "0",
         ]
 
     @staticmethod
@@ -81,7 +84,8 @@ class Channel:
             weight = float(row[5]) if len(row) > 5 else 0.0
         except ValueError:
             weight = 0.0
-        return Channel(freq_hz=freq_hz, name=name, modulation=modulation, enabled=enabled, folder=folder, weight=weight)
+        ch833 = len(row) > 6 and row[6] == "1"
+        return Channel(freq_hz=freq_hz, name=name, modulation=modulation, enabled=enabled, folder=folder, weight=weight, ch833=ch833)
 
 
 @dataclass
@@ -109,10 +113,11 @@ class BlacklistEntry:
 _GUARD_HZ = 121_500_000
 
 
-def airband_channel(hz: float) -> str:
+def airband_channel(hz: float, ch833: bool = False) -> str:
     """EU airband voice is 8.33 kHz-channelled: pilots dial a channel *name*
     (carrier 126.8000 = "126.805", 126.8083 = "126.810", 126.8167 =
-    "126.815"); the 121.500 guard stays 25 kHz. "" outside the airband or
+    "126.815"). A 25 kHz-grid carrier keeps its 25 kHz name ("130.875")
+    unless ch833; the 121.500 guard stays 25 kHz. "" outside the airband or
     off the raster. Mirrors airbandChannel() in web/static/js/core.js."""
     if not 118e6 <= hz <= 137e6 or abs(hz - _GUARD_HZ) < 500:
         return ""
@@ -120,4 +125,6 @@ def airband_channel(hz: float) -> str:
     k = round((hz - block) / (25000 / 3))
     if k > 2 or abs(hz - block - k * 25000 / 3) > 500:
         return ""
+    if k == 0 and not ch833:
+        return f"{block / 1e6:.3f}"
     return f"{(block + (5000, 10000, 15000)[k]) / 1e6:.3f}"
