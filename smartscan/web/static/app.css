@@ -284,6 +284,7 @@ label.field > span.hint { color: var(--secondary); font-weight: 400; }
 .facet .label small { display: block; color: var(--secondary); overflow: hidden; text-overflow: ellipsis; white-space: nowrap; font-size: 12px; }
 .toolbar { display: flex; flex-wrap: wrap; gap: 8px; align-items: center; }
 .toolbar select { flex: 0 1 auto; }
+.toolbar .minq { flex: 0 1 180px; min-width: 140px; }
 .search { flex: 1 1 220px; position: relative; min-width: 0; }
 .search input { width: 100%; padding-left: 34px; }
 .search svg.ic { position: absolute; left: 10px; top: 50%; transform: translateY(-50%); width: 16px; height: 16px; color: var(--secondary); }

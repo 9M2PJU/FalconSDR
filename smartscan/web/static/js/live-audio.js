@@ -20,9 +20,22 @@ export const liveAudio = {
       this.ctx = new (window.AudioContext || window.webkitAudioContext)();
       this.gain = this.ctx.createGain();
       this.gain.gain.value = this.volume;
-      this.gain.connect(this.ctx.destination);
+      // Through an <audio> element, not straight to the speakers: Android then treats
+      // it as media playback - keeps it going with the screen off, shows controls.
+      if (this.ctx.createMediaStreamDestination) {
+        const dest = this.ctx.createMediaStreamDestination();
+        this.gain.connect(dest);
+        this.el = new Audio();
+        this.el.srcObject = dest.stream;
+      } else this.gain.connect(this.ctx.destination);
     }
+    if (this.el) this.el.play().catch(() => {});
     await this.ctx.resume();
+    if ('mediaSession' in navigator) {
+      navigator.mediaSession.metadata = new MediaMetadata({ title: 'SmartScanATC', artist: 'Live' });
+      navigator.mediaSession.setActionHandler('play', () => this.start());
+      navigator.mediaSession.setActionHandler('pause', () => this.stop());
+    }
     this.playing = true;
     this.onchange();
     if (!this.ctrl) this._stream();
@@ -31,6 +44,7 @@ export const liveAudio = {
   stop() {
     this.playing = false;
     if (this.ctrl) { this.ctrl.abort(); this.ctrl = null; }
+    if (this.el) this.el.pause();
     this.onchange();
   },
 

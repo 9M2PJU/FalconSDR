@@ -3,7 +3,7 @@
 // favorite/transcribe/delete one or many.
 import {
   LANGUAGE_NAMES, api, carrierHz, fmtChannel, confirmDialog, debounce, errorToast, fmtBytes, fmtDate, fmtDateShort, fmtDuration, fmtKhz, fmtTime,
-  formDialog, h, icon, modal, mount, prefs, qs, qualityBadge, select, seg, t, toast, toggle,
+  formDialog, h, icon, modal, mount, prefs, qs, qualityBadge, select, seg, slider, t, toast, toggle,
 } from '../core.js';
 import { S, cfg, on, patchConfig, saveChannels } from '../state.js';
 
@@ -49,7 +49,7 @@ export function recordingsView(root) {
   const toolbar = h('div.toolbar',
     h('div.search', icon('search'), search),
     select([['all', t('Any time')], ['today', t('Today')], ['24h', t('Last 24 h')], ['7d', t('Last 7 days')], ['30d', t('Last 30 days')]], F.range, (v) => { F.range = v; reload(); }),
-    select([[0, t('Any quality')], [40, t('Quality 40+')], [60, t('Quality 60+')], [80, t('Quality 80+')]], F.minq, (v) => { F.minq = +v; reload(); }),
+    h('div.minq', slider({ name: t('Quality'), min: 0, max: 100, step: 5, value: F.minq, format: (v) => (+v ? `${v}+` : t('Any quality')), oninput: debounce((v) => { F.minq = v; reload(); }, 300) })),
     select([['new', t('Newest first')], ['old', t('Oldest first')], ['quality', t('Best quality')], ['long', t('Longest')]], F.sort, (v) => { F.sort = v; reload(); }));
   const statusLine = h('div.row.wrap.small.muted');
   const recordingNow = h('div.row.wrap.small.hidden');
@@ -257,6 +257,7 @@ export function recordingsView(root) {
     if (el) { el.classList.add('active'); el.scrollIntoView({ block: 'nearest' }); }
     audio.src = '/api/recording?id=' + encodeURIComponent(it.id);
     if (autoplay) audio.play().catch(() => {});
+    if ('mediaSession' in navigator) navigator.mediaSession.metadata = new MediaMetadata({ title: [freqLabel(it), it.name].filter(Boolean).join(' · '), artist: `${fmtDateShort(it.time)} ${fmtTime(it.time)}`, album: 'SmartScanATC' });
     peaks = [];
     api.get('/api/recording/peaks?id=' + encodeURIComponent(it.id)).then((p) => { if (current === it) { peaks = p; drawWave(); } }).catch(() => {});
     renderPlayer();
@@ -404,6 +405,10 @@ export function recordingsView(root) {
   audio.addEventListener('pause', updatePlayButton);
   audio.addEventListener('timeupdate', drawWave);
   audio.addEventListener('ended', () => { updatePlayButton(); if (F.autoNext) step(1); });
+  // Lock screen / headset / notification controls (Android keeps playing in the background).
+  const MEDIA_ACTIONS = { play: () => audio.play(), pause: () => audio.pause(), nexttrack: () => step(1), previoustrack: () => step(-1) };
+  const setMediaActions = (on) => { if ('mediaSession' in navigator) for (const [a, fn] of Object.entries(MEDIA_ACTIONS)) { try { navigator.mediaSession.setActionHandler(a, on ? fn : null); } catch { /* unsupported action */ } } };
+  audio.addEventListener('play', () => setMediaActions(true));
 
   const onKey = (e) => {
     if (['INPUT', 'TEXTAREA', 'SELECT'].includes(document.activeElement.tagName) || document.querySelector('.modal-back')) return;
@@ -427,7 +432,16 @@ export function recordingsView(root) {
     if (F.sort !== 'new' || loading || !lastRes || document.hidden) return;
     try {
       const res = await api.get('/api/library' + qs(params({ sort: 'new', limit: 40 })));
-      const known = new Set(items.map((x) => x.id));
+      const known = new Map(items.map((x) => [x.id, x]));
+      // Quality (seconds after closing) and transcripts (later) land on rows already shown.
+      res.items.forEach((x) => {
+        const it = known.get(x.id);
+        if (it && (it.quality !== x.quality || JSON.stringify(it.transcript) !== JSON.stringify(x.transcript))) {
+          Object.assign(it, { quality: x.quality, snr: x.snr, duration: x.duration, transcript: x.transcript, queued: x.queued });
+          refreshRow(it);
+          if (current === it) renderPlayer();
+        }
+      });
       const fresh = res.items.filter((x) => !known.has(x.id) && (!items.length || x.time > items[0].time));
       if (!fresh.length) return;
       if (!items.length) list.replaceChildren();
@@ -458,7 +472,7 @@ export function recordingsView(root) {
   loadFacets();
   return {
     destroy() {
-      audio.pause(); audio.src = ''; io.disconnect(); clearInterval(freshTimer);
+      audio.pause(); audio.src = ''; io.disconnect(); clearInterval(freshTimer); setMediaActions(false);
       document.removeEventListener('keydown', onKey); offs.forEach((f) => f());
     },
   };
