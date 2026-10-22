@@ -58,8 +58,8 @@ headless receiver you listen to from any phone or PC on your network.
   the one scanning.
 
 **Server and multiple computers**
-- `--server` mode for a small always-on receiver (Raspberry Pi-class Linux
-  box, mini PC, container).
+- `--server` mode for a small always-on Linux receiver (mini PC, home
+  server, container).
 - Other computers connect to it to transcribe recordings with their GPU
   and/or keep a verified local copy of the library.
 - Optional access password; English and Polish interface (more languages are
@@ -72,7 +72,9 @@ headless receiver you listen to from any phone or PC on your network.
 | RTL-SDR (incl. RTL-SDR Blog V3/V4) | built in on Linux, Windows and macOS |
 | HackRF, Airspy, SDRplay, LimeSDR, USRP, … | through [SoapySDR](https://github.com/pothosware/SoapySDR) with the matching module installed |
 
-Developed and tested with an **RTL-SDR Blog V4** on Linux.
+Developed and tested with an **RTL-SDR Blog V4** on Linux and Windows 11.
+Other receivers and macOS should work but haven't been tested yet - reports
+are welcome.
 
 Any antenna works; one cut or tuned for the band you scan works much better.
 
@@ -100,8 +102,9 @@ Download from [Releases](../../releases) either
 administrator rights needed) or `FalconSDR-<version>-windows-x64-portable.zip`
 (unzip anywhere and run `falconsdr.exe`). Both are self-contained - no Python
 needed; MP3 recording works out of the box and transcription installs from
-Settings like in any other install. The program is not code-signed yet: if SmartScreen says "Windows
-protected your PC", choose **More info → Run anyway**.
+Settings like in any other install. The program is not code-signed yet: if
+SmartScreen says "Windows protected your PC", choose **More info → Run
+anyway**.
 
 **RTL-SDR driver:** Windows needs the WinUSB driver on the dongle, installed
 once with [Zadig](https://zadig.akeo.ie/). If SDR++, SDR# or another SDR
@@ -132,12 +135,18 @@ The interface opens at `http://127.0.0.1:8765`.
   `rtl-sdr` package (udev rules) or copy `packaging/linux-deb/60-rtl-sdr.rules`
   to `/etc/udev/rules.d/`. For SoapySDR devices install `python3-soapysdr` and
   the device's `soapysdr-module-*`.
-- **Windows:** install the WinUSB driver for the dongle once with
-  [Zadig](https://zadig.akeo.ie/) (Options → List All Devices → "Bulk-In,
-  Interface (Interface 0)" → WinUSB).
+- **Windows:** the dongle needs the WinUSB driver - see *RTL-SDR driver*
+  above.
 - **MP3 recordings** use the ffmpeg that comes with the `imageio-ffmpeg`
   package (or a system `ffmpeg` on PATH); on platforms without a wheel
   (32-bit ARM) install ffmpeg from the system, otherwise recordings stay WAV.
+
+### Updating and removing
+
+Install the newer `.deb` or Windows installer over the old one - settings,
+channels and recordings are kept. Remove with `sudo apt remove falconsdr` or
+Windows *Settings → Apps*; your recordings and settings stay on disk (see
+[Where things are stored](#where-things-are-stored)).
 
 ### Headless receiver
 
@@ -185,13 +194,18 @@ Then open `http://<receiver-ip>:8765` from any device. See
 
 ## Command line
 
+`falconsdr` for the installed packages (Windows: `falconsdr.exe` in its install
+folder), `python main.py` from source:
+
 ```
-main.py                 local mode: scan on this computer, UI on 127.0.0.1:8765
-main.py --server        reachable from the whole network
-main.py --start         start scanning right away
-main.py --local         scan locally even if this computer is set up as a client of a server
-main.py --port 9000     another port
-main.py --no-browser    don't open the browser
+falconsdr               local mode: scan on this computer, UI on 127.0.0.1:8765
+falconsdr --server      reachable from the whole network
+falconsdr --start       start scanning right away
+falconsdr --local       scan locally even if this computer is set up as a client of a server
+falconsdr --port 9000   another port
+falconsdr --no-browser  don't open the browser
+falconsdr --version     show the version
+falconsdr --self-test   check this install has everything it needs
 ```
 
 ## Where things are stored
@@ -216,6 +230,18 @@ main.py --no-browser    don't open the browser
   above) or raise the trigger level.
 - **Distorted audio on strong stations** - switch gain to *Auto (software)* or
   lower the manual gain.
+
+## Feedback and contributing
+
+- **Questions, ideas, your setup:** [Discussions](../../discussions)
+- **Bugs:** [Issues](../../issues) - please include the version (Settings →
+  Advanced, at the bottom), your OS, how you installed it, your SDR and the
+  band.
+- **Translations:** the interface is English with a Polish translation in
+  `falconsdr/locale/pl.po`; a new language is a copy of that file (see
+  `falconsdr/i18n.py`).
+- **Code:** pull requests are welcome; `AGENTS.md` describes the architecture
+  and the pitfalls already hit once. Tests: `python -m unittest tests/test_core.py`.
 
 ## Legal
 
