@@ -17,6 +17,7 @@ from pathlib import Path
 
 import numpy as np
 
+from falconsdr.audio_transcode import NO_WINDOW, ffmpeg_exe
 from falconsdr.playback.models import QualityMetrics
 
 WINDOW_SEC = 0.05          # window for computing the RMS envelope
@@ -41,9 +42,12 @@ def _mp3_to_wav_bytes(path: Path) -> bytes:
     (_read_samples(), always reached through analyze_wav()'s/
     compute_waveform_peaks()'s own try/except) treats that exactly like any
     other unreadable file, same as a truncated/corrupt WAV would."""
+    ffmpeg = ffmpeg_exe()
+    if ffmpeg is None:
+        raise RuntimeError("ffmpeg not found")
     proc = subprocess.run(
-        ["ffmpeg", "-v", "error", "-i", str(path), "-f", "wav", "-"],
-        stdout=subprocess.PIPE, stderr=subprocess.PIPE, check=True,
+        [ffmpeg, "-v", "error", "-i", str(path), "-f", "wav", "-"],
+        stdout=subprocess.PIPE, stderr=subprocess.PIPE, check=True, creationflags=NO_WINDOW,
     )
     return proc.stdout
 

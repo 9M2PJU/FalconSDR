@@ -17,6 +17,9 @@ __pycache__/
 packaging/linux-deb/build-venv/
 packaging/linux-deb/build/
 packaging/linux-deb/out/
+packaging/windows/build-venv/
+packaging/windows/build/
+packaging/windows/out/
 
 # Test/tool caches and leftovers of atomic writes (config.atomic_write_text)
 .pytest_cache/

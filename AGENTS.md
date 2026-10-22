@@ -229,7 +229,7 @@ catalog loads; wrap them in a function called at point of use
     macOS stay RTL-SDR-only for the zero-install path; conda-forge SoapySDR
     is a documented, unautomated path for other hardware there.
 18. **Transcription (faster-whisper) is an in-app-installable optional
-    extra**, not in `requirements.txt`, and runs in a `Worker` (gotcha 37) on
+    extra** (packaged builds: see gotcha 43), not in `requirements.txt`, and runs in a `Worker` (gotcha 37) on
     whichever computer has it switched on — never assume the scanning
     machine can run Whisper. `is_transcription_installed()`
     (`transcription_availability.py` — `importlib.invalidate_caches()` then
@@ -502,10 +502,49 @@ catalog loads; wrap them in a function called at point of use
     `backdrop-filter` on phones**: it becomes the containing block of the
     `position: fixed` tab bar inside it, which then renders at the top.
 
+43. **Windows release = `packaging/windows/build.ps1`** (PyInstaller
+    `--onedir --noconsole` → portable ZIP + Inno Setup installer,
+    `falconsdr.iss`; see its README). Same `--collect-data` rules as gotcha
+    35. Every build runs `main.py --self-test` (`falconsdr/selftest.py`) and
+    a smoke run on the *built* exe with `PATH` = System32 and an empty
+    profile - a dependency the bundle lacks must fail the build, never a
+    user's first launch (`build.sh` runs the self-test too). Add a check to
+    `selftest.py` for any new runtime-loaded dependency. A windowed exe has
+    `sys.stdout`/`stderr` = None - `main.py` points them at
+    `CONFIG_DIR/falconsdr.log`. The installer never touches the user's
+    profile; its `AppId` must never change (upgrades/uninstall find the
+    install by it). **Packaged builds install transcription too**: `main.py
+    --pip` runs the bundled pip (`--collect-all pip`, plus a distlib finder
+    registration for its launcher templates) into `ADDONS_DIR`
+    (`transcription_install.py`, appended to sys.path by `enable_addons()`).
+    The Windows bundle needs `python3.dll` copied in by `build.ps1` - abi3
+    wheels (PyAV) link it and PyInstaller omits it. Never `--upgrade` add-ons
+    already imported in the process (Windows locks loaded `.pyd`). MP3 in
+    every install: `audio_transcode.ffmpeg_exe()` = system ffmpeg, else
+    `imageio-ffmpeg`'s binary; spawn console tools with `NO_WINDOW` (the
+    windowed exe would flash a console per call). Never assume text files
+    are read in UTF-8 on Windows - always pass `encoding="utf-8"`. **The
+    installer's "Launch FalconSDR" goes through `explorer.exe`, never the exe
+    directly**: a process Inno Setup starts inherits its RedirectionTrust
+    mitigation and can't follow the (non-admin) symlinks of the Hugging Face
+    model cache - every model load failed with "Unable to open file
+    'model.bin'" until the app was restarted from the Start menu. A model
+    that can't load raises `ModelUnavailable` - the recording goes back to
+    the queue (worker retries in `_MODEL_RETRY_S`), never an "error" result.
+44. **"Start with the system" (`falconsdr/autostart.py`) is off by default
+    and the OS login item is its only state** (HKCU `Run` / XDG autostart
+    `.desktop` / macOS LaunchAgent - the last untested on a real Mac), no
+    config flag that could disagree with it. Always `--no-browser`. Local
+    mode only (`/api/autostart` refuses in server mode - systemd owns that).
+    Windows-only UI help for the WinUSB/Zadig driver (`listen.js`
+    `driverHelp()`, shown while `RECONNECTING` and in the SDR device card)
+    keys off `capabilities.platform`.
+
 ## Testing without touching the user's real config/recordings
 
 Unit tests: `python -m unittest tests/test_core.py` (sets its own scratch
-`HOME`). To smoke-test end to end, run `HOME=/tmp/x python3 main.py
+`HOME` *and* `USERPROFILE` - `Path.home()` reads the latter on Windows; with
+`HOME` alone the tests once overwrote the real config there). To smoke-test end to end, run `HOME=/tmp/x python3 main.py
 --no-browser --port 18810` with a config there that has
 `"debug_mode": true, "device": {"driver": "simulated"}` and a scratch
 `recording.output_dir` — otherwise

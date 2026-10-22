@@ -39,6 +39,7 @@ logger = logging.getLogger(__name__)
 _HEARTBEAT_S = 5.0
 _MIRROR_INTERVAL_S = 60.0
 _IDLE_S = 10.0
+_MODEL_RETRY_S = 60.0  # a model that failed to load (still downloading...) is tried again after this
 STATE_FILE = CONFIG_DIR / "worker_state.json"
 
 
@@ -173,6 +174,8 @@ class Worker(threading.Thread):
         for command in commands:
             if command in ("install", "install_gpu"):
                 self._install(with_gpu=command == "install_gpu")
+            elif command in ("uninstall", "uninstall_with_models"):
+                self._uninstall(with_models=command == "uninstall_with_models")
             elif command == "upload_local":
                 self._upload_local()
             elif command == "detach":
@@ -193,8 +196,23 @@ class Worker(threading.Thread):
             self.say("transcription installed" if ok else f"install failed: {message[-300:]}")
         self._status = "idle"
 
+    def _uninstall(self, with_models: bool) -> None:
+        from .playback.transcription_install import uninstall_transcription
+        self._status = "uninstalling"
+        with self._lock:
+            tconfig = self._tconfig
+        models = [tconfig.generic_model, tconfig.english_atc_model] if with_models else []
+        ok, needs_restart, message = uninstall_transcription(models, lambda line: self._log.append(line[-300:]))
+        # Off right away, also when the files only go at the next start.
+        self._installed = False if ok else is_transcription_installed()
+        if ok and needs_restart:
+            self.say("transcription uninstalled - its files are removed when FalconSDR next starts")
+        else:
+            self.say("transcription uninstalled" if ok else f"uninstall failed: {message[-300:]}")
+        self._status = "idle"
+
     def _transcribe_one(self) -> bool:
-        from .playback.transcription_engine import transcribe_recording
+        from .playback.transcription_engine import ModelUnavailable, transcribe_recording
         job = self.api.post("/api/worker/claim", {"name": self.name})["job"]
         if not job:
             return False
@@ -220,6 +238,12 @@ class Worker(threading.Thread):
             result = transcribe_recording(rec, tconfig, forced_language=job.get("language"))
             self.api.post("/api/worker/result", {"id": rel, "key": job["key"], "result": result.__dict__})
             self.say(f"transcribed {Path(rel).name} [{result.status}]")
+        except ModelUnavailable as exc:
+            # Back to the queue, untouched - the next try loads the model afresh.
+            self.api.post("/api/worker/release", {"id": rel})
+            self.say(f"transcription model not available yet ({exc}) - retrying in {_MODEL_RETRY_S:.0f} s")
+            self._stop.wait(_MODEL_RETRY_S)
+            return False
         except BaseException:
             try:
                 self.api.post("/api/worker/release", {"id": rel})
@@ -350,7 +374,7 @@ class Worker(threading.Thread):
 
 def _load_state() -> dict:
     try:
-        return json.loads(STATE_FILE.read_text())
+        return json.loads(STATE_FILE.read_text(encoding="utf-8"))
     except (OSError, ValueError):
         return {}
 
@@ -368,7 +392,8 @@ def _gpu_name() -> str:
             import subprocess
             try:
                 out = subprocess.run(["nvidia-smi", "--query-gpu=name", "--format=csv,noheader"],
-                                     capture_output=True, text=True, timeout=5)
+                                     capture_output=True, text=True, errors="replace", timeout=5,
+                                     creationflags=getattr(subprocess, "CREATE_NO_WINDOW", 0))
                 _GPU_CACHE = out.stdout.strip().splitlines()[0] if out.returncode == 0 and out.stdout.strip() else ""
             except (OSError, subprocess.TimeoutExpired):
                 pass

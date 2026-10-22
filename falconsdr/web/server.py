@@ -25,7 +25,7 @@ from urllib.error import URLError
 from urllib.parse import parse_qs, quote, unquote, urlparse
 from urllib.request import Request, urlopen
 
-from .. import i18n, military_presets
+from .. import autostart, i18n, military_presets
 from ..config import AppConfig
 from ..controller import Controller, channel_dict, channel_from_dict
 from ..military_presets import BandPreset
@@ -61,6 +61,30 @@ class App:
 def _qs(query: dict, name: str, default: Any = None) -> Any:
     values = query.get(name)
     return values[0] if values else default
+
+
+def list_dirs(path: str) -> dict:
+    """Folder browser for the recordings-folder picker: the browser can't
+    pick a folder on the scanning machine itself (server mode, phones). A
+    not-yet-created path opens at its nearest existing parent."""
+    current = Path(path).expanduser() if path.strip() else Path.home()
+    while not current.is_dir() and current.parent != current:
+        current = current.parent
+    if not current.is_dir():
+        current = Path.home()
+    current = current.resolve()
+    try:
+        names = sorted((e.name for e in os.scandir(current) if e.is_dir() and not e.name.startswith((".", "$"))), key=str.lower)
+        dirs = [{"name": n, "path": str(current / n)} for n in names]
+    except OSError:
+        dirs = []
+    listdrives = getattr(os, "listdrives", None)  # Windows, Python 3.12+
+    return {
+        "path": str(current),
+        "parent": str(current.parent) if current.parent != current else None,
+        "dirs": dirs,
+        "roots": listdrives() if listdrives else ["/"],
+    }
 
 
 def _float_or_none(value: Optional[str]) -> Optional[float]:
@@ -299,6 +323,13 @@ def make_handler(app: App):
             self._json({"ok": True})
             threading.Timer(0.3, app.on_quit).start()
 
+        def autostart(self, _query: dict) -> None:
+            # Login item of the computer the program runs on - meaningless from a server's remote UI.
+            if app.mode == "server" or not autostart.supported():
+                raise ValueError("Not available here")
+            autostart.set_enabled(bool(self._body().get("enabled")))
+            self._json({"enabled": autostart.is_enabled()})
+
         def reset(self, _query: dict) -> None:
             ctl.reset_to_defaults()
             self._json({"ok": True})
@@ -363,6 +394,9 @@ def make_handler(app: App):
 
         def stats(self, query: dict) -> None:
             self._json(lib.stats(sel=query.get("sel", []), utc=_qs(query, "utc") == "1"))
+
+        def dirs(self, query: dict) -> None:
+            self._json(list_dirs(str(_qs(query, "path", ""))))
 
         def storage(self, _query: dict) -> None:
             victims = lib.retention_victims()
@@ -526,6 +560,7 @@ def make_handler(app: App):
         ("POST", "/api/reset"): Handler.reset,
         ("POST", "/api/access"): Handler.access,
         ("POST", "/api/quit"): Handler.quit,
+        ("POST", "/api/autostart"): Handler.autostart,
         ("POST", "/api/client/quit"): Handler.quit,
         ("POST", "/api/client/connect"): Handler.connect_client,
         ("GET", "/api/client/status"): Handler.client_status,
@@ -535,6 +570,7 @@ def make_handler(app: App):
         ("GET", "/api/library/facets"): Handler.facets,
         ("GET", "/api/library/stats"): Handler.stats,
         ("GET", "/api/library/storage"): Handler.storage,
+        ("GET", "/api/dirs"): Handler.dirs,
         ("POST", "/api/library/delete"): Handler.lib_delete,
         ("POST", "/api/library/retention"): Handler.lib_retention_now,
         ("POST", "/api/library/favorite"): Handler.lib_favorite,

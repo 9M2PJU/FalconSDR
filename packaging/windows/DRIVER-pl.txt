@@ -1,0 +1,30 @@
+﻿FalconSDR - sterownik odbiornika RTL-SDR (Windows)
+==================================================
+
+Windows obsługuje odbiornik RTL-SDR tylko przez sterownik WinUSB. Instaluje
+się go raz, darmowym programem Zadig.
+
+Jeśli SDR++, SDR#, SDR Console lub inny program SDR już działa z Twoim
+odbiornikiem, sterownik jest już zainstalowany - nic nie musisz robić.
+
+Instalacja sterownika (ok. 2 minuty):
+
+  1. Podłącz odbiornik do USB. Jeśli Windows proponuje własny sterownik
+     (np. "TV tuner"), nie instaluj go.
+  2. Pobierz Zadig: https://zadig.akeo.ie/  i uruchom go
+     (zezwól na uprawnienia administratora).
+  3. W menu wybierz Options -> List All Devices.
+  4. Z listy wybierz "Bulk-In, Interface (Interface 0)" lub "RTL2838UHIDIR".
+     NIE wybieraj "Interface 1" ani klawiatury, myszy czy słuchawek.
+  5. Po prawej stronie strzałki musi być "WinUSB". Kliknij
+     "Replace Driver" (lub "Install Driver") i poczekaj na koniec.
+  6. Odłącz odbiornik, podłącz go ponownie i w FalconSDR naciśnij Start.
+
+Uwaga: po podłączeniu odbiornika do innego portu USB może być potrzebne
+powtórzenie tych kroków.
+
+Tę samą instrukcję znajdziesz w programie: strona "Nasłuch" -> karta
+"Urządzenie SDR" -> "Odbiornik niewykryty? Instrukcja sterownika (Zadig)".
+
+Interfejs FalconSDR działa w przeglądarce: http://127.0.0.1:8765
+Program działa w tle - zamkniesz go w Ustawienia -> Zaawansowane -> Zamknij.

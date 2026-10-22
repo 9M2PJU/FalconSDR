@@ -54,6 +54,10 @@ AUDIO_RATE = 12500
 CHUNK_SECONDS = 0.03
 MAX_VFO_CHANNELS = 20_000
 
+# Channels closer than this to an active WFM slot are its own sidebands
+# (a broadcast station is ~200 kHz wide; same-area stations sit >=200 kHz apart).
+_WFM_GUARD_HZ = 200_000
+
 # Reflection/splatter detection (see ScannerEngine._detect_reflections) - a
 # receiver-generated weaker copy of a much stronger simultaneously-active
 # channel (intermod/image/phase-noise splatter, not a real transmission).
@@ -804,7 +808,7 @@ class ScannerEngine(threading.Thread):
         self._logged_checkpoints.clear()
         try:
             CONFIG_DIR.mkdir(parents=True, exist_ok=True)
-            _STARTUP_CHECKPOINT_PATH.write_text("")  # fresh trail for this attempt - see _checkpoint()
+            _STARTUP_CHECKPOINT_PATH.write_text("", encoding="utf-8")  # fresh trail for this attempt - see _checkpoint()
         except OSError:
             pass
         _checkpoint("run() start")
@@ -1567,9 +1571,17 @@ class ScannerEngine(threading.Thread):
                 # the whole blacklist for every one of window.freqs, every
                 # tick, with no short-circuit (list comprehensions can't).
                 not_blacklisted = ~self._blacklist_mask(window.freqs)
+                # A broadcast FM station fills ~±100 kHz, so the channels
+                # next to an active WFM slot only see its sidebands - never
+                # a second station (a constant-envelope FM sideband also
+                # slips past _detect_reflections, which needs level swings).
+                wfm_active = [
+                    s.freq_hz for s in self._slots.values() if s.modulation == Modulation.WFM
+                ]
                 candidate_freqs = [
                     f for f, ok in zip(window.freqs, not_blacklisted)
                     if ok and f not in self._slots
+                    and not any(abs(f - w) < _WFM_GUARD_HZ for w in wfm_active)
                 ]
                 raw_powers: dict[int, float] = {}
                 best_freq = best_level = None
@@ -2025,7 +2037,7 @@ class ScannerEngine(threading.Thread):
         if self.config.recording.enabled:
             recorder.start_session()
             recorder.begin_transmission(freq_hz)
-        self.signals.recording_changed.emit(True, self._active_recording_path())
+        self._emit_recording_changed()
         self._emit_freqs()
 
     def _close_slot(self, freq_hz: int, reason: str = "linger") -> None:
@@ -2081,7 +2093,7 @@ class ScannerEngine(threading.Thread):
             self._register_recency_boost(slot.window)
         if self._primary_freq == freq_hz:
             self._reassign_primary()
-        self.signals.recording_changed.emit(bool(self._slots), self._active_recording_path())
+        self._emit_recording_changed()
         self._emit_freqs()
 
     def _finish_recording(self, path: Path) -> None:
@@ -2129,6 +2141,12 @@ class ScannerEngine(threading.Thread):
         freq_hz = max(self._slots, key=lambda f: self._channel_weight_map.get(f, 0.0))
         self._primary_freq = freq_hz
         self._primary_weight = self._channel_weight_map.get(freq_hz, 0.0)
+
+    def _emit_recording_changed(self) -> None:
+        # An open slot is only a recording when a file is being written -
+        # with auto-recording off it is just being listened to.
+        path = self._active_recording_path()
+        self.signals.recording_changed.emit(bool(path), path)
 
     def _active_recording_path(self) -> str:
         """Path shown by the single REC indicator in the GUI - the primary

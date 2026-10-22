@@ -24,7 +24,7 @@ class FavoritesStore:
     def _load(self) -> None:
         if self.favorites_file.exists():
             try:
-                self._keys = set(json.loads(self.favorites_file.read_text()))
+                self._keys = set(json.loads(self.favorites_file.read_text(encoding="utf-8")))
             except (json.JSONDecodeError, OSError):
                 logger.warning("Failed to load the favorites list, starting fresh")
                 self._keys = set()

@@ -25,7 +25,7 @@ class TranscriptionCache:
     def _load(self) -> None:
         if self.cache_file.exists():
             try:
-                self._data = json.loads(self.cache_file.read_text())
+                self._data = json.loads(self.cache_file.read_text(encoding="utf-8"))
             except (json.JSONDecodeError, OSError):
                 logger.warning("Failed to load the transcription cache, starting fresh")
                 self._data = {}

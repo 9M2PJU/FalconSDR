@@ -36,7 +36,7 @@ headless receiver you listen to from any phone or PC on your network.
   headset.
 
 **Recording**
-- One file per transmission (WAV, or MP3 with ffmpeg), named by time and
+- One file per transmission (WAV or MP3), named by time and
   frequency, with a configurable hold time to keep call and reply together.
 - Squelch, spectral noise reduction, a cap on simultaneous recordings.
 - Manual continuous recording and raw IQ capture (SigMF) when you need them.
@@ -48,6 +48,10 @@ headless receiver you listen to from any phone or PC on your network.
 - Every recording gets a quality score (signal-to-noise), a waveform and
   click-to-seek playback with auto-advance.
 - Favorites, bulk delete/transcribe, keyboard shortcuts.
+- Flight replay for aviation recordings (118-138 MHz and military UHF
+  225-400 MHz): one click opens FlightRadar24 or ADS-B Exchange replaying
+  the traffic around you at the moment of the recording - to see who was
+  talking. Set your approximate location once in Settings → Location.
 - Statistics: busiest frequencies, activity by hour, weekday and day.
 - Optional speech-to-text with [Whisper](https://github.com/SYSTRAN/faster-whisper)
   (installed from the app). It can run on a different, faster computer than
@@ -87,7 +91,28 @@ once after installing - the package adds a udev rule for USB access and stops
 the DVB-T TV driver from taking the dongle.
 
 This package is self-contained (RTL-SDR only, no Python needed). For SoapySDR
-devices or in-app transcription, run from source instead.
+devices, run from source instead.
+
+### Windows - installer or portable ZIP
+
+Download from [Releases](../../releases) either
+`FalconSDR-<version>-windows-x64-setup.exe` (installs for your user, no
+administrator rights needed) or `FalconSDR-<version>-windows-x64-portable.zip`
+(unzip anywhere and run `falconsdr.exe`). Both are self-contained - no Python
+needed; MP3 recording works out of the box and transcription installs from
+Settings like in any other install. The program is not code-signed yet: if SmartScreen says "Windows
+protected your PC", choose **More info → Run anyway**.
+
+**RTL-SDR driver:** Windows needs the WinUSB driver on the dongle, installed
+once with [Zadig](https://zadig.akeo.ie/). If SDR++, SDR# or another SDR
+program already works with your dongle, it's already done. Otherwise: plug in
+the dongle → run Zadig → *Options → List All Devices* → pick
+**"Bulk-In, Interface (Interface 0)"** (or "RTL2838UHIDIR"; not Interface 1)
+→ target driver **WinUSB** → *Replace Driver* → replug the dongle. The same
+steps are in the app (Listen → SDR device).
+
+FalconSDR runs in the background with its interface in the browser; quit it
+in Settings → Advanced. "Start with the system" is there too (off by default).
 
 ### From source (Linux, Windows, macOS)
 
@@ -110,7 +135,9 @@ The interface opens at `http://127.0.0.1:8765`.
 - **Windows:** install the WinUSB driver for the dongle once with
   [Zadig](https://zadig.akeo.ie/) (Options → List All Devices → "Bulk-In,
   Interface (Interface 0)" → WinUSB).
-- **MP3 recordings** need `ffmpeg` on the PATH; without it recordings stay WAV.
+- **MP3 recordings** use the ffmpeg that comes with the `imageio-ffmpeg`
+  package (or a system `ffmpeg` on PATH); on platforms without a wheel
+  (32-bit ARM) install ffmpeg from the system, otherwise recordings stay WAV.
 
 ### Headless receiver
 
@@ -202,4 +229,9 @@ are responsible for how you use this program.
 ## License
 
 GPL-3.0-or-later (see [LICENSE](LICENSE)) - required by `pyrtlsdr` and the
-bundled `librtlsdr`.
+bundled `librtlsdr`. The Windows/Linux packages list every bundled component
+and its license in `THIRD-PARTY-LICENSES.txt` (ffmpeg in them is a GPLv3
+build). Transcription software and Whisper models are not bundled: they are
+downloaded on the user's own request from their publishers (faster-whisper,
+CTranslate2 and the default models `Systran/faster-whisper-large-v3` and
+`jacktol/whisper-medium.en-fine-tuned-for-ATC-faster-whisper` are MIT-licensed).

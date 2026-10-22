@@ -282,14 +282,14 @@ class SoapyBackend(SdrBackend):
         skips the cooldown wait instead of a crash risk being reduced."""
         try:
             CONFIG_DIR.mkdir(parents=True, exist_ok=True)
-            LAST_CLOSE_FILE.write_text(str(time.time()))
+            LAST_CLOSE_FILE.write_text(str(time.time()), encoding="utf-8")
         except OSError:
             pass
 
     @staticmethod
     def _wait_for_reopen_cooldown() -> None:
         try:
-            last_close = float(LAST_CLOSE_FILE.read_text().strip())
+            last_close = float(LAST_CLOSE_FILE.read_text(encoding="utf-8").strip())
         except (OSError, ValueError):
             return  # brak pliku (pierwsze uruchomienie po restarcie itp.) - nic do czekania
         remaining = _REOPEN_COOLDOWN_S - (time.time() - last_close)

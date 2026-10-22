@@ -12,6 +12,7 @@ from __future__ import annotations
 import ctypes
 import logging
 import os
+import sys
 import threading
 import time
 from datetime import datetime, timezone
@@ -47,6 +48,13 @@ def _preload_cuda_libs() -> None:
     except ImportError:
         return
     base = Path(next(iter(nvidia.__path__)))
+    if sys.platform == "win32":
+        # The Windows wheels keep their DLLs in <pkg>/bin; ctranslate2 finds
+        # them once those folders are on the DLL search path.
+        for bindir in base.glob("*/bin"):
+            os.add_dll_directory(str(bindir))
+            os.environ["PATH"] = str(bindir) + os.pathsep + os.environ.get("PATH", "")
+        return
     for sub in ("cublas/lib", "cudnn/lib", "cuda_nvrtc/lib"):
         libdir = base / sub
         if not libdir.exists():
@@ -234,6 +242,15 @@ def _maybe_retry_gpu_locked() -> None:
     _active_config = None
 
 
+def unload_models() -> None:
+    """Drops the loaded models (and their open files) - before deleting them."""
+    global _generic_model, _english_atc_model, _active_config
+    with _lock:
+        _generic_model = _english_atc_model = _active_config = None
+    import gc
+    gc.collect()
+
+
 def _get_models(config: TranscriptionConfig):
     """Lazily loads both models (shared across subsequent calls from the worker thread)."""
     global _generic_model, _english_atc_model, _active_config
@@ -280,6 +297,13 @@ def _classify_status(segments, lang_probability: float, duration_after_vad: floa
     return "ok"
 
 
+class ModelUnavailable(RuntimeError):
+    """The Whisper models can't be loaded right now (still downloading, a
+    cache being rebuilt, a broken install) - not a problem of the recording,
+    so the caller keeps it queued and retries later instead of storing an
+    "error" result for every file in the queue."""
+
+
 def transcribe_recording(
     rec: Recording, config: TranscriptionConfig, _recovery_step: int = 0,
     forced_language: Optional[str] = None,
@@ -306,7 +330,10 @@ def transcribe_recording(
     try:
         from faster_whisper.audio import decode_audio
 
-        generic_model, english_atc_model = _get_models(config)
+        try:
+            generic_model, english_atc_model = _get_models(config)
+        except Exception as exc:  # _load_model already tried GPU -> CPU
+            raise ModelUnavailable(str(exc)) from exc
         audio = decode_audio(str(rec.path))
 
         if forced_language:
@@ -335,6 +362,8 @@ def transcribe_recording(
             text=text, language=lang, language_probability=prob,
             status=status, engine=engine_id, transcribed_at=now,
         )
+    except ModelUnavailable:
+        raise
     except Exception as exc:
         global _gpu_compute_type, _generic_model, _english_atc_model, _active_config
         if not _force_cpu and _is_cuda_error(exc):

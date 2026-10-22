@@ -27,7 +27,7 @@ def _migrate_from_smartscanatc() -> None:
     shutil.copytree(old, CONFIG_DIR)
     path = CONFIG_DIR / "config.json"
     try:
-        raw = json.loads(path.read_text())
+        raw = json.loads(path.read_text(encoding="utf-8"))
         raw.setdefault("recording", {}).setdefault("output_dir", str(Path.home() / "SmartScanATC" / "recordings"))
         atomic_write_text(path, json.dumps(raw, indent=2))
     except (OSError, ValueError):
@@ -47,6 +47,13 @@ def atomic_write_text(path: Path, text: str) -> None:
 
 
 _migrate_from_smartscanatc()
+
+
+def _default_candidate_languages() -> list[str]:
+    """English (aviation's language) plus the user's own system language."""
+    from .i18n import system_language_code
+    own = system_language_code()
+    return ["en"] + ([own] if own and own != "en" else [])
 
 
 def _from_dict(cls, raw: dict):
@@ -223,7 +230,7 @@ class TranscriptionConfig:
     # transcription_engine._resolve_language) - in this kind of listening,
     # only English and Polish realistically matter, so radio noise doesn't
     # get to confuse detection with exotic languages.
-    candidate_languages: list[str] = field(default_factory=lambda: ["en", "pl"])
+    candidate_languages: list[str] = field(default_factory=lambda: _default_candidate_languages())
     min_duration_sec: float = 0.6  # shorter recordings (e.g. just a squelch crackle) are skipped
 
 
@@ -331,7 +338,7 @@ class AppConfig:
             cfg.save()
             return cfg
         try:
-            raw = json.loads(CONFIG_PATH.read_text())
+            raw = json.loads(CONFIG_PATH.read_text(encoding="utf-8"))
         except (json.JSONDecodeError, OSError):
             return AppConfig()
         if "bands" in raw:
@@ -339,9 +346,9 @@ class AppConfig:
         else:
             # Migrate pre-band-list configs (single "vfo_range" + "extra_vfo_ranges").
             legacy_primary = raw.get("vfo_range")
-            bands = [_from_dict(VfoRangeConfig, legacy_primary)] if legacy_primary else [VfoRangeConfig()]
+            bands = [_from_dict(VfoRangeConfig, legacy_primary)] if legacy_primary else AppConfig().bands
             bands += [_from_dict(VfoRangeConfig, r) for r in raw.get("extra_vfo_ranges", [])]
-        return AppConfig(
+        cfg = AppConfig(
             device=_from_dict(DeviceConfig, raw.get("device", {})),
             bands=bands,
             timing=_from_dict(TimingConfig, raw.get("timing", {})),
@@ -364,6 +371,8 @@ class AppConfig:
             access_token=raw.get("access_token", ""),
             workers=dict(raw.get("workers", {})),
         )
+        cfg.recording.output_dir = cfg.recording.output_dir.strip() or DEFAULT_RECORDINGS_DIR
+        return cfg
 
     def save(self) -> None:
         atomic_write_text(CONFIG_PATH, json.dumps(asdict(self), indent=2, ensure_ascii=False))

@@ -105,7 +105,7 @@ class Library:
 
     def _load_mirrored(self) -> set[str]:
         try:
-            return set(json.loads(MIRRORED_FILE.read_text()))
+            return set(json.loads(MIRRORED_FILE.read_text(encoding="utf-8")))
         except (OSError, ValueError):
             return set()
 
@@ -141,6 +141,10 @@ class Library:
         rec.key = f"{path}|{st.st_size}|{int(st.st_mtime)}"
         rec.quality = self.quality.get(rec.key)
         rec.transcript = self.transcripts.get(rec.key)
+        if rec.transcript is not None and rec.transcript.status == "error":
+            # Errors (a model still downloading, a broken install) are only
+            # held back for the session that hit them (_failed) - retry after a restart.
+            rec.transcript = None
         rec.is_favorite = self.favorites.is_favorite(rec.key)
         return rec
 

@@ -22,9 +22,11 @@ pyrtlsdrlib
 # With no SDR library at all, the app still starts; debug mode (Settings →
 # Advanced) adds a simulated receiver for testing.
 #
-# Optional - MP3 recording output (Settings → Recording → MP3) needs a system
-# `ffmpeg` on PATH; without it the app keeps writing WAV:
-#   Linux: sudo apt install ffmpeg   Windows: winget install ffmpeg   macOS: brew install ffmpeg
+# MP3 recording output (Settings → Recording → MP3): imageio-ffmpeg ships a
+# ready ffmpeg binary (wheels for Windows/macOS/Linux, x86_64 and ARM64); a
+# system `ffmpeg` on PATH is used first when present. Elsewhere (e.g. 32-bit
+# Raspberry Pi OS) install ffmpeg from the system, or recordings stay WAV.
+imageio-ffmpeg; platform_machine == "AMD64" or platform_machine == "x86_64" or platform_machine == "arm64" or platform_machine == "aarch64"
 #
 # Optional - transcription (faster-whisper + Whisper models, several GB) is
 # deliberately NOT a requirement: install it from the web UI (Settings →

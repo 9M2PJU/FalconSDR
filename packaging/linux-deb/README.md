@@ -35,14 +35,13 @@ matching neither a hardware problem nor a debug-mode one.
   single bundle the way a normal pip package does. Someone with that
   hardware needs the regular `pip install -r requirements.txt` + system
   `python3-soapysdr` install instead (see the main README).
-- **No in-app transcription install.** The "Install" button in Settings →
-  Transcription & computers needs a real, writable Python/pip to install into — a frozen
-  build doesn't have one. It now fails with a clear message instead of
-  doing something confusing; see `main.py`'s and
-  `transcription_install.py`'s own `sys.frozen` guards.
-- **MP3 output** still works, but only if the user separately has a system
-  `ffmpeg` on `PATH` — this build can't bundle a system binary invoked via
-  `subprocess`, only Python-importable dependencies.
+- **In-app transcription install** uses the pip bundled in the app
+  (`falconsdr --pip`, installing wheels into
+  `~/.local/share/FalconSDR/addons/cp3XX`) - the same mechanism verified on
+  the Windows build (`packaging/windows/README.md`); not yet verified in a
+  .deb build.
+- **MP3 output** uses the ffmpeg bundled from the `imageio-ffmpeg` package
+  (amd64/arm64), or a system `ffmpeg` on `PATH` if present.
 
 None of this is a defect in the .deb itself — it's the honest tradeoff of
 "self-contained enough that RTL-SDR needs nothing extra" vs.

@@ -96,12 +96,16 @@ mkdir -p "$BUILD"
     --add-data "$REPO_ROOT/falconsdr/presets/band_presets.json:falconsdr/presets" \
     --add-data "$REPO_ROOT/falconsdr/web/static:falconsdr/web/static" \
     --collect-data tzdata \
-    --collect-data pyrtlsdrlib \
+    --collect-data pyrtlsdrlib     --collect-data imageio_ffmpeg     --collect-all pip \
     --distpath "$BUILD/dist" \
     --workpath "$BUILD/work" \
     --specpath "$BUILD" \
     main.py
 )
+
+# Fails the build if PyInstaller silently dropped something (tzdata,
+# librtlsdr...) - falconsdr/selftest.py; packaging/windows/build.ps1 does the same.
+"$BUILD/dist/$PKG/$PKG" --self-test
 
 echo "-- 3/5: assembling the .deb tree --"
 DEBROOT="$BUILD/deb"
@@ -129,6 +133,8 @@ cp "$REPO_ROOT/falconsdr/web/static/icon.svg" \
 cp "$SCRIPT_DIR/README.md" "$DEBROOT/usr/share/doc/$PKG/packaging-README.md"
 # GPL: the license text must ship with the binary package.
 cp "$SCRIPT_DIR/../../LICENSE" "$DEBROOT/usr/share/doc/$PKG/copyright"
+# ...and those of everything bundled (packaging/collect_licenses.py).
+"$VENV/bin/python" "$SCRIPT_DIR/../collect_licenses.py" "$DEBROOT/usr/share/doc/$PKG/THIRD-PARTY-LICENSES.txt"
 
 # Real user-reported gap: a fresh Ubuntu install has no udev rule granting a
 # plain user access to an RTL-SDR dongle's USB device node (the `rtl-sdr`

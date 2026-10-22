@@ -1436,7 +1436,7 @@ msgid "Gain"
 msgstr "Wzmocnienie"
 
 msgid "Squelch below trigger"
-msgstr "Blokada szumów poniżej progu"
+msgstr "Blokada szumów (squelch) poniżej progu"
 
 msgid "Noise reduction strength"
 msgstr "Siła redukcji szumów"
@@ -1451,7 +1451,7 @@ msgid "Trigger level"
 msgstr "Próg wyzwalania"
 
 msgid "Squelch"
-msgstr "Blokada szumów"
+msgstr "Blokada szumów (squelch)"
 
 msgid "Mutes the noise tail after a transmission ends"
 msgstr "Wycisza szum po zakończeniu transmisji"
@@ -1963,8 +1963,8 @@ msgstr "Każdy w sieci znów będzie mógł korzystać z odbiornika."
 msgid "Log out"
 msgstr "Wyloguj"
 
-msgid "Used for the FlightRadar24 / ADSBExchange replay buttons next to each recording. Approximate is fine."
-msgstr "Do przycisków odtworzenia lotów FlightRadar24 / ADSBExchange przy nagraniach. Wystarczy przybliżona."
+msgid "Used for the FlightRadar24 / ADSBExchange flight replay buttons next to aviation recordings (118-138 MHz and military UHF 225-400 MHz). Approximate is fine."
+msgstr "Do przycisków odtwarzania lotów FlightRadar24 / ADSBExchange przy nagraniach lotniczych (118-138 MHz i wojskowe UHF 225-400 MHz). Wystarczy przybliżona."
 
 msgid "Latitude"
 msgstr "Szerokość geograficzna"
@@ -2304,3 +2304,75 @@ msgstr "Komputer nie nadąża za odbiornikiem - utracono {n} paczek danych radio
 
 msgid "Delete {n} selected channels?"
 msgstr "Usunąć {n} zaznaczonych kanałów?"
+
+msgid "Browse…"
+msgstr "Przeglądaj…"
+
+msgid "No subfolders"
+msgstr "Brak podfolderów"
+
+msgid "Choose this folder"
+msgstr "Wybierz ten folder"
+
+msgid "Start with the system"
+msgstr "Uruchamiaj razem z systemem"
+
+msgid "Starts FalconSDR in the background when you log in to this computer, without opening the browser."
+msgstr "Uruchamia FalconSDR w tle po zalogowaniu się na tym komputerze, bez otwierania przeglądarki."
+
+msgid "RTL-SDR driver for Windows"
+msgstr "Sterownik RTL-SDR dla Windows"
+
+msgid "Windows only talks to an RTL-SDR dongle through the WinUSB driver, installed once with the free Zadig tool. If SDR++, SDR# or another SDR program already works with this dongle, the driver is already there."
+msgstr "Windows obsługuje odbiornik RTL-SDR tylko przez sterownik WinUSB, który instaluje się raz darmowym programem Zadig. Jeśli SDR++, SDR# lub inny program SDR już działa z tym odbiornikiem, sterownik jest już zainstalowany."
+
+msgid "Plug in the dongle (skip the driver Windows offers to install)."
+msgstr "Podłącz odbiornik (sterownika proponowanego przez Windows nie instaluj)."
+
+msgid "Download Zadig from "
+msgstr "Pobierz Zadig ze strony "
+
+msgid " and run it (allow the administrator prompt)."
+msgstr " i uruchom go (zezwól na uprawnienia administratora)."
+
+msgid "Menu Options → List All Devices."
+msgstr "Menu Options → List All Devices."
+
+msgid "Pick “Bulk-In, Interface (Interface 0)” or “RTL2838UHIDIR” from the list - not Interface 1, and not your keyboard, mouse or headset."
+msgstr "Wybierz z listy „Bulk-In, Interface (Interface 0)” lub „RTL2838UHIDIR” - nie Interface 1 i nie klawiaturę, mysz czy słuchawki."
+
+msgid "Make sure the target driver on the right is WinUSB, then click Replace Driver (or Install Driver) and wait."
+msgstr "Upewnij się, że po prawej stronie wybrany jest sterownik WinUSB, kliknij Replace Driver (lub Install Driver) i poczekaj."
+
+msgid "Unplug the dongle, plug it back in and press Start here."
+msgstr "Odłącz odbiornik, podłącz go ponownie i naciśnij tutaj Start."
+
+msgid "The driver is tied to the USB port - plugging the dongle into a different port may need the same steps again."
+msgstr "Sterownik jest przypisany do portu USB - po podłączeniu odbiornika do innego portu może być potrzebne powtórzenie tych kroków."
+
+msgid "Is the dongle connected? On Windows it needs the WinUSB driver."
+msgstr "Czy odbiornik jest podłączony? W Windows potrzebuje sterownika WinUSB."
+
+msgid "How to install it"
+msgstr "Jak go zainstalować"
+
+msgid "Dongle not detected? Driver (Zadig) instructions"
+msgstr "Odbiornik niewykryty? Instrukcja sterownika (Zadig)"
+
+msgid "uninstalling transcription…"
+msgstr "odinstalowywanie transkrypcji…"
+
+msgid "Uninstall"
+msgstr "Odinstaluj"
+
+msgid "Uninstall transcription"
+msgstr "Odinstaluj transkrypcję"
+
+msgid "Removes the transcription software from {name}. Recordings and the transcripts made so far stay."
+msgstr "Usuwa oprogramowanie do transkrypcji z komputera {name}. Nagrania i dotychczasowe transkrypcje zostają."
+
+msgid "Also delete the downloaded Whisper models (several GB)"
+msgstr "Usuń też pobrane modele Whisper (kilka GB)"
+
+msgid "Other programs using the same models would download them again."
+msgstr "Inne programy korzystające z tych samych modeli pobiorą je ponownie."

@@ -17,6 +17,9 @@ function rangeSince(range) {
   return { '24h': now - 86400, '7d': now - 7 * 86400, '30d': now - 30 * 86400 }[range];
 }
 
+// Flight replays only make sense for aircraft voice: civil airband and NATO military UHF.
+const isAviation = (khz) => (khz >= 118000 && khz <= 138000) || (khz >= 225000 && khz <= 400000);
+
 function freqLabel(item) {
   return item.manual ? t('Manual recording') : `${fmtChannel(item.freq_khz * 1000)} MHz`;
 }
@@ -340,10 +343,10 @@ export function recordingsView(root) {
         timeText,
         h('span.spacer'),
         it.manual ? null : act(icon('plus'), t('Save frequency'), () => saveFrequency(it), t('Add this frequency to the Memory List')),
-        act(h('img', { src: 'img/fr24.svg', alt: '', style: { width: '18px', height: '18px', background: '#1f2937', borderRadius: '4px', padding: '2px' } }), 'FR24',
+        ...(isAviation(it.freq_khz) ? [act(h('img', { src: 'img/fr24.svg', alt: '', style: { width: '18px', height: '18px', background: '#1f2937', borderRadius: '4px', padding: '2px' } }), 'FR24',
           () => openMap(`https://www.flightradar24.com/${ymd}/${hm}/20x/${loc.home_lat},${loc.home_lon}/9`), t('Flight replay at this moment')),
-        act(h('img', { src: 'img/adsbexchange.png', alt: '', style: { width: '16px', height: '16px' } }), 'ADSBx',
-          () => openMap(`https://globe.adsbexchange.com/?replay=${ymd}-${hm}&lat=${loc.home_lat}&lon=${loc.home_lon}&zoom=8.8`), t('Flight replay at this moment')),
+          act(h('img', { src: 'img/adsbexchange.png', alt: '', style: { width: '16px', height: '16px' } }), 'ADSBx',
+          () => openMap(`https://globe.adsbexchange.com/?replay=${ymd}-${hm}&lat=${loc.home_lat}&lon=${loc.home_lon}&zoom=8.8`), t('Flight replay at this moment'))] : []),
         h('a.btn.ghost', { href: `/api/recording?id=${encodeURIComponent(it.id)}&download=1`, title: t('Download'), 'aria-label': t('Download') }, icon('download')),
         h('button.icon.ghost.danger', { title: t('Delete'), 'aria-label': t('Delete'), onclick: () => remove([it.id]) }, icon('trash'))),
       h('div.col', { style: { gap: '8px' } },

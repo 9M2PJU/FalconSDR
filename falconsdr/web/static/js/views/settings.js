@@ -2,7 +2,7 @@
 // server connection, access password, location, scheduling, band presets,
 // appearance/language and advanced options.
 import {
-  api, confirmDialog, errorToast, fmtAgo, fmtBytes, fmtDate, fmtMHz, formDialog, h, icon, lang, mount, select, t, toast, toggle,
+  api, confirmDialog, errorToast, fmtAgo, fmtBytes, fmtDate, fmtMHz, formDialog, h, icon, lang, modal, mount, qs, select, t, toast, toggle,
 } from '../core.js';
 import { S, cfg, confirmRecording, loadSettings, on, patchConfig } from '../state.js';
 
@@ -55,7 +55,32 @@ export function settingsView(root, hash) {
       setting(t('File format'), S.settings.capabilities.ffmpeg ? t('MP3 takes about 10× less space.') : t('MP3 needs ffmpeg installed on this machine.'),
         select([['wav', t('WAV (uncompressed)')], ['mp3', t('MP3 (compressed)')]], r.output_format, (v) => patchConfig({ recording: { output_format: v } }), { disabled: !S.settings.capabilities.ffmpeg && r.output_format !== 'mp3' })),
       setting(t('Recordings folder'), t('On the machine that scans. Existing recordings are not moved.'),
-        h('input', { value: r.output_dir, style: { width: 'min(420px, 100%)' }, onchange: (e) => patchConfig({ recording: { output_dir: e.target.value.trim() } }) })));
+        h('div.row', { style: { gap: '8px', flexWrap: 'wrap' } },
+          h('input', { value: r.output_dir, style: { width: 'min(420px, 100%)' }, onchange: (e) => patchConfig({ recording: { output_dir: e.target.value.trim() } }) }),
+          h('button', { onclick: async () => {
+            const dir = await pickFolder(r.output_dir);
+            if (dir) { patchConfig({ recording: { output_dir: dir } }); renderRecording(); }
+          } }, icon('folder'), t('Browse…')))));
+  }
+
+  // The folder lives on the scanning machine, so its own file system is browsed via the API.
+  async function pickFolder(start) {
+    let cur = null;
+    const where = h('div.mono.small.ellipsis'), list = h('div.dirs');
+    const open = async (path) => {
+      try { cur = await api.get('/api/dirs' + qs({ path })); } catch (e) { errorToast(e); return; }
+      where.textContent = cur.path;
+      const go = (label, path, ic = 'folder') => h('button.ghost', { type: 'button', onclick: () => open(path) }, icon(ic), label);
+      mount(list,
+        cur.roots.length > 1 ? h('div.row', { style: { gap: '4px', flexWrap: 'wrap' } }, cur.roots.map((d) => go(d, d, 'disk'))) : null,
+        cur.parent ? go('..', cur.parent, 'chevron') : null,
+        cur.dirs.map((d) => go(d.name, d.path)),
+        cur.dirs.length ? null : h('div.faint.small', t('No subfolders')));
+    };
+    await open(start);
+    if (!cur) return null;
+    return (await modal(t('Recordings folder'), h('div.col', { style: { gap: '10px' } }, where, list),
+      [[t('Cancel'), false, 'ghost'], [t('Choose this folder'), true, 'primary']])) ? cur.path : null;
   }
 
   // ---------------------------------------------------------- storage
@@ -145,7 +170,16 @@ export function settingsView(root, hash) {
     const s = w.settings;
     const update = (patch) => api.post('/api/workers/update', { name: w.name, settings: patch }).then(loadWorkers).catch(errorToast);
     const command = (c) => api.post('/api/workers/command', { name: w.name, command: c }).then(() => toast(t('Sent - the computer picks it up within a few seconds'))).catch(errorToast);
-    const status = { idle: t('idle'), transcribing: t('transcribing'), copying: t('copying recordings'), uploading: t('uploading recordings'), installing: t('installing transcription…') }[info.status] || info.status;
+    const status = { idle: t('idle'), transcribing: t('transcribing'), copying: t('copying recordings'), uploading: t('uploading recordings'), installing: t('installing transcription…'), uninstalling: t('uninstalling transcription…') }[info.status] || info.status;
+    const uninstall = async () => {
+      const models = h('input', { type: 'checkbox', checked: true });
+      const ok = await modal(t('Uninstall transcription'), h('div.col', { style: { gap: '10px' } },
+        h('p', t('Removes the transcription software from {name}. Recordings and the transcripts made so far stay.', { name: w.name })),
+        h('label.row', { style: { gap: '8px', alignItems: 'flex-start' } }, models,
+          h('span', t('Also delete the downloaded Whisper models (several GB)'), h('br'), h('small.muted', t('Other programs using the same models would download them again.'))))),
+      [[t('Cancel'), false, 'ghost'], [t('Uninstall'), true, 'danger solid']]);
+      if (ok) command(models.checked ? 'uninstall_with_models' : 'uninstall');
+    };
     const mirrorDir = h('input', { value: s.mirror_dir, placeholder: info.mirror_root || t('its own recordings folder'), style: { width: 'min(360px, 100%)' }, onchange: (e) => update({ mirror_dir: e.target.value }) });
     return h('div.worker',
       h('div.row.wrap',
@@ -162,6 +196,7 @@ export function settingsView(root, hash) {
         h('div.row.wrap',
           info.installed === false && w.online ? h('button', { onclick: () => command('install') }, icon('download'), t('Install')) : null,
           info.installed === false && w.online && info.gpu ? h('button', { onclick: () => command('install_gpu') }, t('Install with GPU support')) : null,
+          info.installed === true && w.online && info.status === 'idle' ? h('button.ghost.danger', { onclick: () => uninstall() }, icon('trash'), t('Uninstall')) : null,
           toggle('', s.transcribe, (v) => update({ transcribe: v })))),
       info.embedded ? null : setting(t('Keep a copy of every recording'), t('Copied to this folder on that computer (verified by size).'),
         toggle('', s.mirror, (v) => update({ mirror: v }))),
@@ -234,7 +269,7 @@ export function settingsView(root, hash) {
     const loc = cfg().location;
     const coord = (key, value) => h('input', { type: 'number', step: '0.0001', value: value ?? '', placeholder: '–', style: { width: '120px' }, onchange: (e) => patchConfig({ location: { [key]: e.target.value === '' ? null : +e.target.value } }) });
     mount(body('location'),
-      h('p.muted', { style: { margin: 0 } }, t('Used for the FlightRadar24 / ADSBExchange replay buttons next to each recording. Approximate is fine.')),
+      h('p.muted', { style: { margin: 0 } }, t('Used for the FlightRadar24 / ADSBExchange flight replay buttons next to aviation recordings (118-138 MHz and military UHF 225-400 MHz). Approximate is fine.')),
       h('div.row.wrap',
         h('label.field', t('Latitude'), coord('home_lat', loc.home_lat)),
         h('label.field', t('Longitude'), coord('home_lon', loc.home_lon)),
@@ -339,6 +374,13 @@ export function settingsView(root, hash) {
             renderAll();
           },
         }, t('Reset…'))),
+      S.settings.mode === 'local' && S.settings.capabilities.autostart !== null ? setting(t('Start with the system'), t('Starts FalconSDR in the background when you log in to this computer, without opening the browser.'),
+        toggle('', S.settings.capabilities.autostart, async (v, e) => {
+          try {
+            S.settings.capabilities.autostart = (await api.post('/api/autostart', { enabled: v })).enabled;
+          } catch (err) { errorToast(err); }
+          e.target.checked = S.settings.capabilities.autostart;
+        })) : null,
       S.settings.mode === 'local' ? setting(t('Quit FalconSDR'), t('Stops the scanner and closes the program running in the background. Start it again from the menu or with the same command.'),
         h('button', {
           onclick: async () => {

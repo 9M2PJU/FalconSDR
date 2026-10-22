@@ -1,6 +1,6 @@
 // "Listen": the live scanner - what's on air now, controls, spectrum, quick
 // settings, the scanned bands and the activity feed.
-import { api, carrierHz, confirmDialog, errorToast, fmtChannel, fmtMHz, formDialog, h, icon, mount, select, seg, slider, t, toast, toggle } from '../core.js';
+import { api, carrierHz, confirmDialog, errorToast, fmtChannel, fmtMHz, formDialog, h, icon, modal, mount, select, seg, slider, t, toast, toggle } from '../core.js';
 import { liveAudio } from '../live-audio.js';
 import { S, cfg, confirmRecording, on, patchConfig, setFastPolling } from '../state.js';
 
@@ -8,6 +8,22 @@ const MODULATIONS = ['AM', 'NFM', 'WFM', 'SSB'];
 const OVERRIDES = ['trigger_level_dbfs', 'tuning_time_ms', 'linger_time_ms', 'gain_mode', 'gain_db', 'noise_reduction_enabled', 'noise_reduction_strength', 'squelch_enabled', 'squelch_offset_db'];
 const hasOverrides = (b) => OVERRIDES.some((k) => b[k] !== null && b[k] !== undefined);
 const clearOverrides = (b) => OVERRIDES.forEach((k) => { b[k] = null; });
+
+// Windows needs the WinUSB driver on the dongle (SDR++, SDR# and friends need the
+// same one, so most users already have it) - without it the device never opens.
+const isWindows = () => S.settings.capabilities.platform === 'win32';
+export function driverHelp() {
+  return modal(t('RTL-SDR driver for Windows'), h('div.col', { style: { gap: '10px' } },
+    h('p', t('Windows only talks to an RTL-SDR dongle through the WinUSB driver, installed once with the free Zadig tool. If SDR++, SDR# or another SDR program already works with this dongle, the driver is already there.')),
+    h('ol', { style: { margin: 0, paddingLeft: '20px', display: 'flex', flexDirection: 'column', gap: '6px' } },
+      h('li', t('Plug in the dongle (skip the driver Windows offers to install).')),
+      h('li', t('Download Zadig from '), h('a', { href: 'https://zadig.akeo.ie/', target: '_blank', rel: 'noopener' }, 'zadig.akeo.ie'), t(' and run it (allow the administrator prompt).')),
+      h('li', t('Menu Options → List All Devices.')),
+      h('li', t('Pick “Bulk-In, Interface (Interface 0)” or “RTL2838UHIDIR” from the list - not Interface 1, and not your keyboard, mouse or headset.')),
+      h('li', t('Make sure the target driver on the right is WinUSB, then click Replace Driver (or Install Driver) and wait.')),
+      h('li', t('Unplug the dongle, plug it back in and press Start here.'))),
+    h('p.small', t('The driver is tied to the USB port - plugging the dongle into a different port may need the same steps again.'))));
+}
 
 export function stateLabel(state) {
   return {
@@ -35,6 +51,9 @@ export function listenView(root) {
   const freqEl = h('div.freq', '—');
   const nameEl = h('div.freq-name');
   const others = h('div.others');
+  const driverHint = h('div.row.wrap.hidden', { style: { gap: '8px', color: '#ff9f0a' } },
+    t('Is the dongle connected? On Windows it needs the WinUSB driver.'),
+    h('button.small', { onclick: () => driverHelp() }, t('How to install it')));
   const meterFill = h('div.fill');
   const meterMark = h('div.mark');
   const levelText = h('span.mono');
@@ -55,6 +74,7 @@ export function listenView(root) {
   const hero = h('section.card.hero',
     h('div.row', stateChip, h('span.spacer'), cycleText),
     h('div', freqEl, nameEl),
+    driverHint,
     others,
     h('div.col', { style: { gap: '4px' } },
       h('div.meter', meterFill, meterMark),
@@ -116,6 +136,7 @@ export function listenView(root) {
     const live = S.live;
     if (!live) return;
     stateChip.className = 'chip state ' + stateClass(live);
+    driverHint.classList.toggle('hidden', !(live.state === 'RECONNECTING' && isWindows()));
     mount(stateChip, h('span.dot'), live.stopping ? t('Stopping…') : stateLabel(live.state));
     const [primary, ...rest] = live.frequencies || [];
     const active = live.state === 'SIGNAL_DETECTED' || live.state === 'LINGER';
@@ -207,7 +228,8 @@ export function listenView(root) {
       h('div.fields',
         h('label.field', t('Device'), sel),
         h('label.field', t('Capture width (MHz)'), bw)),
-      h('span.faint.small.lockhint', t('Stop the scanner to change the device or capture width.')));
+      h('span.faint.small.lockhint', t('Stop the scanner to change the device or capture width.')),
+      isWindows() ? h('button.ghost.small', { onclick: () => driverHelp() }, t('Dongle not detected? Driver (Zadig) instructions')) : null);
     lockDevice(S.live && S.live.running);
   }
   function lockDevice(running) {

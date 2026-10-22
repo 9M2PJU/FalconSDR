@@ -11,6 +11,7 @@ from __future__ import annotations
 
 import datetime as dt
 import queue
+import sys
 import threading
 import time
 from collections import deque
@@ -20,9 +21,9 @@ from typing import Any, Optional
 
 import numpy as np
 
-from . import i18n, military_presets, storage
+from . import autostart, i18n, military_presets, storage
 from .audio_transcode import ffmpeg_available
-from .config import AppConfig, VfoRangeConfig, _from_dict
+from .config import DEFAULT_RECORDINGS_DIR, AppConfig, VfoRangeConfig, _from_dict
 from .models import BlacklistEntry, Channel, Modulation, snap_airband_hz
 from .playback.index import Library
 from .playback.transcription_availability import is_transcription_installed
@@ -296,6 +297,8 @@ class Controller:
             "capabilities": {
                 "ffmpeg": ffmpeg_available(),
                 "transcription_installed": is_transcription_installed(),
+                "platform": sys.platform,
+                "autostart": autostart.is_enabled() if autostart.supported() else None,
             },
         }
 
@@ -318,6 +321,8 @@ class Controller:
         for locked in ("access_token", "workers"):
             patch.pop(locked, None)
         merge_patch(self.config, patch)
+        # An emptied folder field would otherwise mean "the current directory".
+        self.config.recording.output_dir = self.config.recording.output_dir.strip() or DEFAULT_RECORDINGS_DIR
         self.config.save()
         if self.config.language != old_language:
             i18n.set_language(self.config.language)
@@ -400,7 +405,7 @@ class Controller:
         self.config.save()
 
     def send_worker_command(self, name: str, command: str) -> None:
-        if command not in ("install", "install_gpu", "upload_local", "detach"):
+        if command not in ("install", "install_gpu", "uninstall", "uninstall_with_models", "upload_local", "detach"):
             raise ValueError("Unknown worker command")
         with self._lock:
             self.worker_commands.setdefault(name, []).append(command)

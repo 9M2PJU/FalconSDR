@@ -9,6 +9,7 @@
   python main.py --local    ignore a saved server connection, scan locally
   --start                   start scanning right away
   --no-browser              don't open the browser
+  --self-test               check this install/build has everything it needs, then exit
 """
 import os
 import sys
@@ -24,6 +25,18 @@ else:
     VENV_DIR = VENV_PYTHON = None
 if VENV_PYTHON is not None and VENV_PYTHON.exists() and Path(sys.prefix).resolve() != VENV_DIR.resolve():
     os.execv(str(VENV_PYTHON), [str(VENV_PYTHON), str(Path(__file__).resolve()), *sys.argv[1:]])
+
+# Packaged build only: `falconsdr --pip ...` runs the pip bundled inside it
+# (the in-app transcription installer - transcription_install.py).
+if getattr(sys, "frozen", False) and sys.argv[1:2] == ["--pip"]:
+    import pip._vendor.distlib as _distlib
+    from pip._vendor.distlib import resources as _resources
+    from pip._internal.cli.main import main as _pip_main
+    # distlib finds its script-launcher templates (t64.exe...) through the
+    # module's loader, which it doesn't know for PyInstaller's; the files sit
+    # next to the module on disk (--collect-all pip), so a plain file finder works.
+    _resources.register_finder(_distlib.__loader__, _resources.ResourceFinder)
+    sys.exit(_pip_main(sys.argv[2:]))
 
 import argparse  # noqa: E402
 import faulthandler  # noqa: E402
@@ -64,10 +77,22 @@ def main() -> int:
     parser.add_argument("--port", type=int, default=DEFAULT_PORT)
     parser.add_argument("--start", action="store_true", help="start scanning immediately")
     parser.add_argument("--no-browser", action="store_true")
+    parser.add_argument("--self-test", action="store_true", help="check this install has everything it needs, then exit")
     args = parser.parse_args()
 
     CONFIG_DIR.mkdir(parents=True, exist_ok=True)
-    faulthandler.enable(file=(CONFIG_DIR / "crash.log").open("a", buffering=1), all_threads=True)
+    if sys.stdout is None or sys.stderr is None:
+        # Windowed build (no console): keep the log where support can find it.
+        log = (CONFIG_DIR / "falconsdr.log").open("w", encoding="utf-8", buffering=1)
+        sys.stdout = sys.stdout or log
+        sys.stderr = sys.stderr or log
+    if getattr(sys, "frozen", False):
+        from falconsdr.playback.transcription_install import enable_addons
+        enable_addons()
+    if args.self_test:
+        from falconsdr import selftest
+        return selftest.run()
+    faulthandler.enable(file=(CONFIG_DIR / "crash.log").open("a", encoding="utf-8", buffering=1), all_threads=True)
     logging.basicConfig(level=logging.INFO, format="%(asctime)s %(levelname)s %(name)s: %(message)s")
 
     from falconsdr import i18n

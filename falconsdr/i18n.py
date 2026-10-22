@@ -34,6 +34,7 @@ from __future__ import annotations
 
 import os
 import re
+import sys
 from pathlib import Path
 
 LOCALE_DIR = Path(__file__).resolve().parent / "locale"
@@ -139,17 +140,30 @@ def resolve_system_language() -> str:
     AppConfig.language is AUTO for server-side text (engine log lines); the
     web UI itself follows the browser's language instead (see
     web/server.py's catalog endpoint)."""
+    code = system_language_code()
+    return code if code in available_languages() else "en"
+
+
+def system_language_code() -> str:
+    """The OS's language as a two-letter ISO code, translated by this app or
+    not ("" if unknown). Windows reports locale names like "Polish_Poland"
+    rather than "pl_PL", so it is asked for its UI language id directly."""
     import locale
     candidates = [os.environ.get(k, "") for k in ("LC_ALL", "LC_MESSAGES", "LANG")]
+    if sys.platform == "win32":
+        try:
+            import ctypes
+            candidates.append(locale.windows_locale.get(ctypes.windll.kernel32.GetUserDefaultUILanguage(), ""))
+        except (AttributeError, OSError):
+            pass
     try:
         candidates.append(locale.getlocale()[0] or "")
     except ValueError:
         pass
     for code in candidates:
-        code = code[:2].lower()
-        if code and code in available_languages():
-            return code
-    return "en"
+        if re.match(r"^[A-Za-z]{2}([_.-]|$)", code):
+            return code[:2].lower()
+    return ""
 
 
 def catalog_for(lang: str) -> dict[str, str]:

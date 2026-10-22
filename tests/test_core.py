@@ -20,6 +20,7 @@ from urllib.request import Request, urlopen
 # home - set before importing falconsdr.
 _HOME = tempfile.mkdtemp(prefix="falconsdr-test-")
 os.environ["HOME"] = _HOME
+os.environ["USERPROFILE"] = _HOME  # Path.home() on Windows
 
 from falconsdr import config as config_mod  # noqa: E402
 from falconsdr.config import AppConfig  # noqa: E402
@@ -60,6 +61,52 @@ class ConfigTest(unittest.TestCase):
         cfg.save()
         self.assertEqual(AppConfig.load().trigger_level_dbfs, -42.0)
         self.assertFalse(list(config_mod.CONFIG_DIR.glob("*.tmp")))
+
+    def test_empty_recordings_folder_means_default(self) -> None:
+        config_mod.CONFIG_PATH.parent.mkdir(parents=True, exist_ok=True)
+        config_mod.CONFIG_PATH.write_text(json.dumps({"recording": {"output_dir": "  "}}))
+        self.assertEqual(AppConfig.load().recording.output_dir, config_mod.DEFAULT_RECORDINGS_DIR)
+
+    def test_non_ascii_files_load_on_any_locale(self) -> None:
+        # Windows' default text encoding is cp1250/cp1252 - every reader must say utf-8.
+        from falconsdr.playback.transcription_cache import TranscriptionCache
+        cache = Path(tempfile.mkdtemp(dir=_HOME)) / "t.json"
+        cache.write_text(json.dumps({"k": {"text": "Wieża Okęcie, dzień dobry ‘’"}}, ensure_ascii=False), encoding="utf-8")
+        self.assertIn("Okęcie", TranscriptionCache(cache)._data["k"]["text"])
+        config_mod.CONFIG_PATH.parent.mkdir(parents=True, exist_ok=True)
+        config_mod.CONFIG_PATH.write_text(json.dumps({"bands": [{"label": "Łączność ‘FM’"}]}, ensure_ascii=False), encoding="utf-8")
+        self.assertEqual(AppConfig.load().bands[0].label, "Łączność ‘FM’")
+
+    def test_transcription_languages_follow_the_system(self) -> None:
+        from unittest import mock
+        from falconsdr.config import TranscriptionConfig
+        for env, want in (("de_DE.UTF-8", ["en", "de"]), ("en_GB.UTF-8", ["en"]), ("Polish_Poland", None)):
+            with mock.patch.dict(os.environ, {"LC_ALL": env}):
+                langs = TranscriptionConfig().candidate_languages
+                if want:
+                    self.assertEqual(langs, want)
+                else:  # a Windows-style name is never read as "po"
+                    self.assertNotIn("po", langs)
+
+    def test_list_dirs(self) -> None:
+        from falconsdr.web.server import list_dirs
+        root = Path(tempfile.mkdtemp(dir=_HOME))
+        (root / "b").mkdir()
+        (root / "A").mkdir()
+        (root / ".hidden").mkdir()
+        (root / "file.txt").write_text("x")
+        out = list_dirs(str(root / "not" / "yet"))  # opens at the nearest existing parent
+        self.assertEqual(Path(out["path"]), root.resolve())
+        self.assertEqual([d["name"] for d in out["dirs"]], ["A", "b"])
+        self.assertEqual(Path(out["dirs"][0]["path"]), root.resolve() / "A")
+
+
+class AutostartTest(unittest.TestCase):
+    def test_login_item_never_opens_the_browser_and_quotes_paths(self) -> None:
+        from falconsdr import autostart
+        self.assertEqual(autostart.command()[-1], "--no-browser")
+        self.assertEqual(autostart._desktop_exec(["/opt/falcon sdr/x", "--no-browser"]), '"/opt/falcon sdr/x" --no-browser')
+        self.assertEqual(autostart._desktop_exec(['/a"b$c']), r'"/a\"b\$c"')
 
 
 class LibraryTest(_LibCase):
@@ -105,6 +152,52 @@ class LibraryTest(_LibCase):
         self.assertFalse(self.lib.submit_result(rel, "stale-key", result))
         self.assertTrue(self.lib.submit_result(rel, job["key"], result))
         self.assertEqual(self.lib.get(rel).transcript.text, "hi")
+
+    def test_failed_transcription_waits_for_the_next_session_only(self) -> None:
+        rel = "2026-01-01/" + NAME.format(khz=121500)
+        _wav(self.root, rel)
+        self.lib.rescan()
+        job = self.lib.claim_job("pc")
+        error = {"text": "", "language": "", "language_probability": 0.0, "status": "error",
+                 "engine": "", "transcribed_at": "now"}
+        self.assertTrue(self.lib.submit_result(rel, job["key"], error))
+        self.assertIsNone(self.lib.claim_job("pc"))  # not retried in this session
+        fresh = Library(self.cfg, lambda: self.open, lambda: {})  # program restarted
+        fresh.rescan()
+        self.assertEqual(fresh.claim_job("pc")["id"], rel)
+
+    def test_packaged_uninstall_waits_for_a_restart_only_while_in_use(self) -> None:
+        import sys
+        from unittest import mock
+        from falconsdr.playback import transcription_install as ti
+        lines: list[str] = []
+        with mock.patch.object(sys, "frozen", True, create=True):
+            ti.enable_addons()
+            (ti.ADDONS_DIR / "faster_whisper").mkdir(exist_ok=True)
+            with mock.patch.object(ti, "_loaded", return_value=True):  # Windows: files locked
+                self.assertEqual(ti.uninstall_transcription([], lines.append), (True, True, ""))
+            self.assertTrue((ti.ADDONS_DIR / "faster_whisper").exists())
+            ti.enable_addons()  # next start
+            self.assertFalse((ti.ADDONS_DIR / "faster_whisper").exists())
+            self.assertFalse(ti._REMOVE_MARKER.exists())
+            (ti.ADDONS_DIR / "faster_whisper").mkdir()
+            with mock.patch.object(ti, "_loaded", return_value=False):
+                self.assertEqual(ti.uninstall_transcription([], lines.append), (True, False, ""))
+            self.assertFalse((ti.ADDONS_DIR / "faster_whisper").exists())
+            self.assertTrue(ti.ADDONS_DIR.is_dir())  # still there for a later install
+
+    def test_model_load_failure_keeps_the_recording_queued(self) -> None:
+        import sys
+        import types
+        from unittest import mock
+        from falconsdr.playback import transcription_engine as te
+        from falconsdr.playback.models import Recording
+        fake = types.ModuleType("faster_whisper.audio")
+        fake.decode_audio = lambda path: None
+        rec = Recording(path=self.root / "x.wav", dt_local=None, dt_utc=None, freq_khz=0)
+        with mock.patch.dict(sys.modules, {"faster_whisper": types.ModuleType("faster_whisper"), "faster_whisper.audio": fake}),                 mock.patch.object(te, "_get_models", side_effect=RuntimeError("Unable to open file 'model.bin'")):
+            with self.assertRaises(te.ModelUnavailable):
+                te.transcribe_recording(rec, AppConfig().transcription)
 
     def test_import_matches_by_size_and_never_overwrites(self) -> None:
         rel = "2026-01-01/" + NAME.format(khz=121500)

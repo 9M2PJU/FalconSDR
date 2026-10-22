@@ -1,0 +1,30 @@
+﻿FalconSDR - RTL-SDR dongle driver (Windows)
+===========================================
+
+Windows only talks to an RTL-SDR dongle through the WinUSB driver. It is
+installed once, with the free Zadig tool.
+
+If SDR++, SDR#, SDR Console or another SDR program already works with your
+dongle, the driver is already installed - nothing to do.
+
+Installing the driver (about 2 minutes):
+
+  1. Plug the dongle into USB. If Windows offers its own driver
+     (e.g. "TV tuner"), don't install it.
+  2. Download Zadig: https://zadig.akeo.ie/  and run it
+     (allow the administrator prompt).
+  3. In the menu choose Options -> List All Devices.
+  4. Pick "Bulk-In, Interface (Interface 0)" or "RTL2838UHIDIR" from the list.
+     Do NOT pick "Interface 1", or your keyboard, mouse or headset.
+  5. The driver to the right of the arrow must be "WinUSB". Click
+     "Replace Driver" (or "Install Driver") and wait until it finishes.
+  6. Unplug the dongle, plug it back in and press Start in FalconSDR.
+
+Note: plugging the dongle into a different USB port may need these steps
+again.
+
+The same instructions are in the app: "Listen" page -> "SDR device" card ->
+"Dongle not detected? Driver (Zadig) instructions".
+
+The FalconSDR interface runs in your browser: http://127.0.0.1:8765
+The program runs in the background - quit it in Settings -> Advanced -> Quit.
