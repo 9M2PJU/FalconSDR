@@ -1,8 +1,0 @@
-[Desktop Entry]
-Type=Application
-Name=SmartScanATC
-Comment=Wideband SDR ATC/radio scanner
-Exec=/usr/bin/smartscanatc
-Icon=smartscanatc
-Terminal=false
-Categories=HamRadio;AudioVideo;

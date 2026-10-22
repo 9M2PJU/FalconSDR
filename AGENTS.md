@@ -1,13 +1,13 @@
-# AGENTS.md — SmartScanATC
+# AGENTS.md — FalconSDR
 
 Guidance for AI coding agents working in this repository.
 
 ## What this is
 
-SmartScanATC scans a radio band (default: airband ATC 118–136 MHz) via
+FalconSDR scans a radio band (default: airband ATC 118–136 MHz) via
 SoapySDR (Linux) or a native librtlsdr backend (Windows/macOS — gotcha 16)
 and records audio **only** for transmissions the scanner actually stops on —
-never the retuning noise. `smartscan/scanner_engine.py`'s state machine is
+never the retuning noise. `falconsdr/scanner_engine.py`'s state machine is
 the authoritative spec.
 
 The UI is a **web app** served by the program itself (Python standard
@@ -16,7 +16,7 @@ program, three modes (`main.py`):
 
 - **local** (default) — this computer scans; UI on `http://127.0.0.1:8765`,
   opened in the browser automatically. A second launch just reopens it.
-- **server** (`--server`, systemd `smartscanatc-receiver.service`) — same,
+- **server** (`--server`, systemd `falconsdr-receiver.service`) — same,
   reachable from the whole network (phones too). `sdr-mode` (the owner's
   mode switcher on the receiver) starts/stops exactly this unit — keep the
   unit name and its clean SIGTERM shutdown (gotcha 41).
@@ -44,7 +44,7 @@ permissive. A new dependency must be GPLv3-compatible.
 
 **i18n**: Python strings go through `tr()`, browser strings through `t()`
 (`static/js/core.js`) — both use the English text as the key into the same
-`.po` files under `smartscan/locale/` (hand-rolled reader, no `gettext`/`.mo`;
+`.po` files under `falconsdr/locale/` (hand-rolled reader, no `gettext`/`.mo`;
 `GET /api/i18n` hands the browser its catalog — "auto" language = the
 browser's). Every new UI string needs a `pl.po` entry. **Never build a
 module-level constant from `tr()`/`t()` calls** — they'd freeze before the
@@ -55,44 +55,44 @@ catalog loads; wrap them in a function called at point of use
 
 - `main.py` — CLI/modes, single-instance check, clean shutdown on
   SIGTERM/SIGINT, mode switches (gotcha 41).
-- `smartscan/web/server.py` — `ThreadingHTTPServer` + JSON API + live-audio
+- `falconsdr/web/server.py` — `ThreadingHTTPServer` + JSON API + live-audio
   stream + recording files (HTTP Range) + worker protocol; auth/CSRF in
   `_route` (gotcha 38). `web/static/` — `index.html`, `app.css`,
   `js/core.js` (DOM/i18n/dialogs), `js/state.js` (settings, live polling,
   legal notices), `js/live-audio.js` (gotcha 40), `js/views/*.js` (Listen,
   Recordings, Channels, Statistics, Settings).
-- `smartscan/controller.py` — `Controller`: owns `AppConfig`, Memory List,
+- `falconsdr/controller.py` — `Controller`: owns `AppConfig`, Memory List,
   blacklist, the one `ScannerEngine`, its live snapshot, audio fan-out and
   the `Library`; config edits arrive as JSON patches (`merge_patch`).
-- `smartscan/playback/index.py` — `Library`: in-memory index of closed
+- `falconsdr/playback/index.py` — `Library`: in-memory index of closed
   recordings + quality/transcript/favorite/mirrored state, queries, facets,
   stats, retention, and the server side of the worker protocol (gotcha 37).
-- `smartscan/worker.py` — `Worker`: transcription jobs (leased), mirroring,
+- `falconsdr/worker.py` — `Worker`: transcription jobs (leased), mirroring,
   one-shot upload/import of a client's own library, install command.
-- `smartscan/models.py` — `ScannerState`, `Channel`, `BlacklistEntry`.
-- `smartscan/config.py` — `AppConfig`, persisted (atomically) to
-  `~/.config/SmartScanATC/config.json`; unknown keys ignored on load.
+- `falconsdr/models.py` — `ScannerState`, `Channel`, `BlacklistEntry`.
+- `falconsdr/config.py` — `AppConfig`, persisted (atomically) to
+  `~/.config/FalconSDR/config.json`; unknown keys ignored on load.
   `device.sample_rate_hz` is the wideband **capture bandwidth**;
   `memory_channel_bandwidth_hz` is the per-channel power-window width for
   Memory List channels (a band uses its own `step_hz` instead).
-- `smartscan/storage.py` — CSV read/write for `channels.csv`/`blacklist.csv`.
-- `smartscan/channelizer.py` — `plan_windows()` groups channel frequencies
+- `falconsdr/storage.py` — CSV read/write for `channels.csv`/`blacklist.csv`.
+- `falconsdr/channelizer.py` — `plan_windows()` groups channel frequencies
   into the fewest capture windows; `channel_powers_dbfs()`/
   `channel_powers_from_spectrum()` do one FFT per block and sum power per
   channel's bins; `spectrum_snapshot()` feeds the UI spectrum;
   `extend_boundary_window()` probes just past a *swept band's* edge (gotcha
   31/32 — never a single point).
-- `smartscan/dsp.py` — `Demodulator` (AM/NFM/WFM/SSB → mono audio, gotcha
+- `falconsdr/dsp.py` — `Demodulator` (AM/NFM/WFM/SSB → mono audio, gotcha
   7/25) and `NoiseReducer` (spectral-gate, minimum-statistics noise floor).
-- `smartscan/sdr_backend.py` — `SoapyBackend`, `RtlSdrBackend` (gotcha 16),
+- `falconsdr/sdr_backend.py` — `SoapyBackend`, `RtlSdrBackend` (gotcha 16),
   `SimulatedBackend`, `AcquisitionThread` (gotcha 11 — this is what
   `ScannerEngine._backend` actually is). `open_real_backend()`/
   `create_backend()` pick/fall back (gotcha 8/9/10).
-- `smartscan/agc.py` — `SoftwareAgc`, software-driven RF gain control
+- `falconsdr/agc.py` — `SoftwareAgc`, software-driven RF gain control
   (gotcha 27).
-- `smartscan/recorder.py` — WAV writer only (gotcha 14: mp3 is a post-close
+- `falconsdr/recorder.py` — WAV writer only (gotcha 14: mp3 is a post-close
   transcode, not a `Recorder` concern). `single_file` flag: gotcha 13/23.
-- `smartscan/scanner_engine.py` — `ScannerEngine(threading.Thread)`:
+- `falconsdr/scanner_engine.py` — `ScannerEngine(threading.Thread)`:
   `CALCULATE_NEXT_FREQ → TUNING → SCANNING → SIGNAL_DETECTED ⇄ LINGER`.
   Retunes to a whole capture window, not a single channel; `SCANNING` picks
   the strongest non-blacklisted candidate per tick, `_service_active_slots()`
@@ -266,7 +266,7 @@ catalog loads; wrap them in a function called at point of use
     the triggering toggle/button and have zero side effects.
 
 21. **Band presets (`military_presets.py`) are JSON, not a hardcoded list**:
-    bundled `smartscan/presets/band_presets.json` + user's
+    bundled `falconsdr/presets/band_presets.json` + user's
     `CONFIG_DIR/band_presets.json` (edits/additions/hidden-builtin-ids),
     merged live via `get_all_presets()` — **never cache this** (same class
     of bug as the i18n module-constant trap). Editing a built-in shadows it
@@ -312,11 +312,10 @@ catalog loads; wrap them in a function called at point of use
    machine running the scanner — it streams to the browser (gotcha 40).
 
 27. **Three gain modes (`DeviceConfig.gain_mode`): `"manual"`, `"auto"` =
-    the tuner's own hardware AGC (passed straight to `backend.set_gain`,
-    the default), `"sw_auto"` = `SoftwareAgc` (`smartscan/agc.py`).**
+    the tuner's own hardware AGC (passed straight to `backend.set_gain`),
+    `"sw_auto"` = `SoftwareAgc` (`falconsdr/agc.py`, the default).**
     Hardware AGC can overdrive the ADC (measured +0.7/+1 dBFS peaks, extra
-    spurious neighbour detections), so `"sw_auto"` exists as an explicit
-    opt-in: `_maybe_apply_gain()`/`_maybe_run_software_agc()` send explicit
+    spurious neighbour detections), so `"sw_auto"` is the default: `_maybe_apply_gain()`/`_maybe_run_software_agc()` send explicit
     `"manual"` values computed from each tick's IQ peak (target ≈ −6 dBFS,
     ±3 dB dead zone, ≥1s between steps) and never touch the hardware AGC.
     Each step pre-scales every slot's output AGC
@@ -393,7 +392,7 @@ catalog loads; wrap them in a function called at point of use
     silent file (stays all-zero).
 35. **`packaging/linux-deb/build.sh`** builds a self-contained PyInstaller
     `--onedir` bundle wrapped in a .deb (RTL-SDR only - no SoapySDR - plus
-    `smartscan/web/static` as data; see its own header comment and
+    `falconsdr/web/static` as data; see its own header comment and
     README.md for the full rationale/known limitations). Several real,
     clean-container-verified gotchas any other frozen build (Windows .exe,
     AppImage) will also hit - the first two are the same underlying
@@ -468,7 +467,7 @@ catalog loads; wrap them in a function called at point of use
     explicit choice — it's a home-LAN tool). When set (`/api/access`), every
     `/api/` call except session/login/i18n needs the HttpOnly cookie or
     `Authorization: Bearer`. Independently, every POST/PUT must carry
-    `X-SmartScan: 1` (a non-simple header → CORS preflight this server never
+    `X-FalconSDR: 1` (a non-simple header → CORS preflight this server never
     answers → other websites can't trigger actions), and local mode with no
     password refuses non-loopback `Host` headers (DNS rebinding). Keep both
     when adding endpoints; `api()` in `core.js` and `worker.Api` add the
@@ -511,7 +510,7 @@ Unit tests: `python -m unittest tests/test_core.py` (sets its own scratch
 `"debug_mode": true, "device": {"driver": "simulated"}` and a scratch
 `recording.output_dir` — otherwise
 config edits during a manual test run land in the real
-`~/.config/SmartScanATC/config.json`. When constructing `Controller`/
+`~/.config/FalconSDR/config.json`. When constructing `Controller`/
 `ScannerEngine` directly in a script, set config overrides *before*
 construction. UI changes: check every page in a headless Chrome (DevTools
 protocol: console errors + screenshots, desktop and ~390 px wide). Verified

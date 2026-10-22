@@ -1,24 +1,24 @@
 #!/bin/sh
-# Installs or updates the SmartScanATC receiver from this checkout (run as root
+# Installs or updates the FalconSDR receiver from this checkout (run as root
 # on the receiver):  sudo packaging/remote-server/install.sh
-# Safe to re-run: code is synced to /opt/smartscanatc, settings and recordings
+# Safe to re-run: code is synced to /opt/falconsdr, settings and recordings
 # are kept, and a running service is restarted.
 set -eu
 SRC=$(cd "$(dirname "$0")/../.." && pwd)
-DEST=/opt/smartscanatc
-HOME_DIR=/var/lib/smartscanatc
-UNIT=smartscanatc-receiver.service
+DEST=/opt/falconsdr
+HOME_DIR=/var/lib/falconsdr
+UNIT=falconsdr-receiver.service
 
 [ "$(id -u)" -eq 0 ] || { echo "Run as root (sudo)." >&2; exit 1; }
 
 getent group plugdev >/dev/null || groupadd --system plugdev
-if ! id smartscan >/dev/null 2>&1; then
-    useradd --system --home-dir "$HOME_DIR" --no-create-home --shell /usr/sbin/nologin --groups plugdev smartscan
+if ! id falconsdr >/dev/null 2>&1; then
+    useradd --system --home-dir "$HOME_DIR" --no-create-home --shell /usr/sbin/nologin --groups plugdev falconsdr
 fi
 mkdir -p "$HOME_DIR"
 
 # Older installs ran as root - carry their settings and library data over once.
-for sub in .config/SmartScanATC .local/share/atc_browser; do
+for sub in .config/FalconSDR .local/share/atc_browser; do
     if [ -d "/root/$sub" ] && [ ! -e "$HOME_DIR/$sub" ]; then
         mkdir -p "$HOME_DIR/$(dirname "$sub")"
         cp -a "/root/$sub" "$HOME_DIR/$sub"
@@ -37,11 +37,11 @@ install -m 644 "$SRC/packaging/linux-deb/blacklist-rtl-dvb.conf" /etc/modprobe.d
 command -v udevadm >/dev/null && timeout 5 udevadm control --reload-rules >/dev/null 2>&1 || true
 
 # The service user owns its data and its venv (so "Install transcription" in the UI can pip into it).
-chown -R smartscan:smartscan "$HOME_DIR" "$DEST/.venv"
-CONFIG="$HOME_DIR/.config/SmartScanATC/config.json"
+chown -R falconsdr:falconsdr "$HOME_DIR" "$DEST/.venv"
+CONFIG="$HOME_DIR/.config/FalconSDR/config.json"
 if [ -f "$CONFIG" ]; then
     REC_DIR=$("$DEST/.venv/bin/python" -c "import json,sys; print(json.load(open(sys.argv[1])).get('recording', {}).get('output_dir', ''))" "$CONFIG")
-    if [ -n "$REC_DIR" ]; then mkdir -p "$REC_DIR" && chown -R smartscan:smartscan "$REC_DIR"; fi
+    if [ -n "$REC_DIR" ]; then mkdir -p "$REC_DIR" && chown -R falconsdr:falconsdr "$REC_DIR"; fi
 fi
 
 install -m 644 "$SRC/packaging/remote-server/$UNIT" /etc/systemd/system/

@@ -1,6 +1,6 @@
 # Headless receiver (server mode)
 
-The receiver runs SmartScanATC as a service and serves its web UI on port
+The receiver runs FalconSDR as a service and serves its web UI on port
 8765 to every device on the network: open `http://<receiver-ip>:8765/` in any
 browser (PC, phone). There is no password by default; set one in
 Settings → Access if other people share your network.
@@ -12,24 +12,24 @@ this repository:
 
 ```sh
 sudo packaging/remote-server/install.sh
-sudo systemctl enable --now smartscanatc-receiver.service
+sudo systemctl enable --now falconsdr-receiver.service
 ```
 
-The script copies the app to `/opt/smartscanatc`, creates its own Python
-venv there, adds the unprivileged `smartscan` user (settings in
-`/var/lib/smartscanatc/.config/SmartScanATC`, recordings by default in
-`/var/lib/smartscanatc/SmartScanATC/recordings`), installs the RTL-SDR udev
+The script copies the app to `/opt/falconsdr`, creates its own Python
+venv there, adds the unprivileged `falconsdr` user (settings in
+`/var/lib/falconsdr/.config/FalconSDR`, recordings by default in
+`/var/lib/falconsdr/FalconSDR/recordings`), installs the RTL-SDR udev
 rule and DVB-T driver blacklist, and the systemd unit. Re-run it after
 `git pull` to update; settings and recordings stay. An older install that ran
 as root has its settings moved over automatically the first time.
 
-`smartscanatc-receiver.service` starts scanning right away (`--start`) and
+`falconsdr-receiver.service` starts scanning right away (`--start`) and
 closes open recordings cleanly when stopped - so a mode switcher that stops
 and starts the unit (like `sdr-mode`) keeps working unchanged.
 
 ## Transcription and copies on your PC
 
-A small receiver usually can't run Whisper. Start SmartScanATC on your PC,
+A small receiver usually can't run Whisper. Start FalconSDR on your PC,
 open Settings → Connect to a server, and enter the receiver's address. The PC
 then appears under Settings → Transcription & computers on the receiver,
 where you switch on transcription (uses its GPU) and/or keeping a copy of
@@ -53,4 +53,4 @@ lxc config device add INSTANCE rtlsdr usb vendorid=0bda productid=2838
 ```
 
 The service reconnects by itself once the device appears. Check with
-`rtl_test -t` and `systemctl status smartscanatc-receiver`.
+`rtl_test -t` and `systemctl status falconsdr-receiver`.

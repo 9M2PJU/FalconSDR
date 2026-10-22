@@ -17,13 +17,13 @@ from urllib.error import HTTPError
 from urllib.request import Request, urlopen
 
 # Every path the app derives from ~ (config, caches) must land in a scratch
-# home - set before importing smartscan.
-_HOME = tempfile.mkdtemp(prefix="smartscan-test-")
+# home - set before importing falconsdr.
+_HOME = tempfile.mkdtemp(prefix="falconsdr-test-")
 os.environ["HOME"] = _HOME
 
-from smartscan import config as config_mod  # noqa: E402
-from smartscan.config import AppConfig  # noqa: E402
-from smartscan.playback.index import Library  # noqa: E402
+from falconsdr import config as config_mod  # noqa: E402
+from falconsdr.config import AppConfig  # noqa: E402
+from falconsdr.playback.index import Library  # noqa: E402
 
 NAME = "2026-01-01_10-00-00_{khz}.wav"
 
@@ -120,8 +120,8 @@ class LibraryTest(_LibCase):
 
 class GridTest(unittest.TestCase):
     def test_airband_raster_is_exact_and_windows_stay_on_it(self) -> None:
-        from smartscan.config import VfoRangeConfig
-        from smartscan.scanner_engine import _band_grid, _wide_anchor_windows
+        from falconsdr.config import VfoRangeConfig
+        from falconsdr.scanner_engine import _band_grid, _wide_anchor_windows
         band = VfoRangeConfig(start_hz=121_000_000, stop_hz=136_800_000, step_hz=8333)
         grid = set(_band_grid(band)[0])
         for carrier in (131_400_000, 126_800_000, 126_808_333, 126_816_667):
@@ -132,7 +132,7 @@ class GridTest(unittest.TestCase):
 
 class AirbandChannelTest(unittest.TestCase):
     def test_carrier_to_published_channel_name(self) -> None:
-        from smartscan.models import airband_channel
+        from falconsdr.models import airband_channel
         self.assertEqual(airband_channel(126_800_000, ch833=True), "126.805")
         self.assertEqual(airband_channel(130_875_000), "130.875")  # 25 kHz-grid carrier: 25 kHz name by default
         self.assertEqual(airband_channel(126_808_333), "126.810")
@@ -141,14 +141,14 @@ class AirbandChannelTest(unittest.TestCase):
         self.assertEqual(airband_channel(148_750_000), "")         # not airband
 
     def test_near_duplicate_airband_frequencies_snap_to_one_channel(self) -> None:
-        from smartscan.models import snap_airband_hz
+        from falconsdr.models import snap_airband_hz
         self.assertEqual(snap_airband_hz(130_874_000), 130_875_000)
         self.assertEqual(snap_airband_hz(135_966_000), 135_966_667)
         self.assertEqual(snap_airband_hz(121_501_000), 121_501_000)  # guard untouched
         self.assertEqual(snap_airband_hz(149_162_000), 149_162_000)  # not airband
 
     def test_ch833_round_trips_through_csv_row(self) -> None:
-        from smartscan.models import Channel
+        from falconsdr.models import Channel
         self.assertTrue(Channel.from_row(Channel(126_800_000, ch833=True).to_row()).ch833)
         self.assertFalse(Channel.from_row(["130875000", "x", "AM", "1", "", "0.0"]).ch833)  # old 6-column file
 
@@ -156,8 +156,8 @@ class AirbandChannelTest(unittest.TestCase):
 class SquelchTest(unittest.TestCase):
     def test_band_squelch_overrides_global_and_never_exceeds_trigger(self) -> None:
         from types import SimpleNamespace
-        from smartscan.config import VfoRangeConfig
-        from smartscan.scanner_engine import ScannerEngine
+        from falconsdr.config import VfoRangeConfig
+        from falconsdr.scanner_engine import ScannerEngine
         cfg = AppConfig()
         cfg.squelch_enabled, cfg.squelch_offset_db = False, -6.0
         band = VfoRangeConfig(squelch_enabled=True, squelch_offset_db=4.0)  # positive offset must clamp to 0
@@ -173,7 +173,7 @@ class SquelchTest(unittest.TestCase):
 
 class WorkerMirrorTest(unittest.TestCase):
     def test_reports_only_size_verified_copies(self) -> None:
-        from smartscan.worker import Worker
+        from falconsdr.worker import Worker
 
         class FakeApi:
             base = "http://x"
@@ -199,7 +199,7 @@ class WorkerMirrorTest(unittest.TestCase):
 
 class HttpTest(unittest.TestCase):
     def _serve(self, mode: str, token: str):
-        from smartscan.web.server import App, make_handler
+        from falconsdr.web.server import App, make_handler
         from http.server import ThreadingHTTPServer
 
         class Ctl:  # only what the tested routes touch
@@ -235,7 +235,7 @@ class HttpTest(unittest.TestCase):
     def test_csrf_and_dns_rebinding_are_refused(self) -> None:
         url = self._serve("local", "")
         self.assertEqual(self._status(url + "/api/scanner/stop", "POST"), 403)
-        self.assertEqual(self._status(url + "/api/scanner/stop", "POST", {"X-SmartScan": "1"}), 200)
+        self.assertEqual(self._status(url + "/api/scanner/stop", "POST", {"X-FalconSDR": "1"}), 200)
         self.assertEqual(self._status(url + "/api/live", headers={"Host": "evil.example:80"}), 403)
 
 

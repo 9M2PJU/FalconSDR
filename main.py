@@ -1,4 +1,4 @@
-"""SmartScanATC entry point - starts the web UI (and opens it in the browser).
+"""FalconSDR entry point - starts the web UI (and opens it in the browser).
 
   python main.py            this computer scans: UI on http://127.0.0.1:8765
                             (or, if connected to a server, works as its helper:
@@ -19,7 +19,7 @@ sys.path.insert(0, str(Path(__file__).resolve().parent))
 # Transcription may live in this repo's own .venv (PEP 668 fallback - see
 # transcription_install.py): re-exec into it before importing anything heavy.
 if not getattr(sys, "frozen", False):
-    from smartscan.venv_paths import VENV_DIR, VENV_PYTHON
+    from falconsdr.venv_paths import VENV_DIR, VENV_PYTHON
 else:
     VENV_DIR = VENV_PYTHON = None
 if VENV_PYTHON is not None and VENV_PYTHON.exists() and Path(sys.prefix).resolve() != VENV_DIR.resolve():
@@ -35,7 +35,7 @@ import webbrowser  # noqa: E402
 from urllib.parse import quote  # noqa: E402
 from urllib.request import urlopen  # noqa: E402
 
-from smartscan.config import CONFIG_DIR, AppConfig  # noqa: E402
+from falconsdr.config import CONFIG_DIR, AppConfig  # noqa: E402
 
 DEFAULT_PORT = 8765
 
@@ -57,7 +57,7 @@ def _already_running(port: int) -> bool:
 
 
 def main() -> int:
-    parser = argparse.ArgumentParser(description="SmartScanATC")
+    parser = argparse.ArgumentParser(description="FalconSDR")
     parser.add_argument("--server", action="store_true", help="headless receiver reachable over the network")
     parser.add_argument("--local", action="store_true", help="scan locally even if connected to a server")
     parser.add_argument("--host", default=None)
@@ -70,9 +70,9 @@ def main() -> int:
     faulthandler.enable(file=(CONFIG_DIR / "crash.log").open("a", buffering=1), all_threads=True)
     logging.basicConfig(level=logging.INFO, format="%(asctime)s %(levelname)s %(name)s: %(message)s")
 
-    from smartscan import i18n
-    from smartscan.web.server import App, serve
-    from smartscan.worker import Worker
+    from falconsdr import i18n
+    from falconsdr.web.server import App, serve
+    from falconsdr.worker import Worker
 
     config = AppConfig.load()
     i18n.set_language(config.language)
@@ -87,7 +87,7 @@ def main() -> int:
 
     token = config.access_token  # optional - empty = no login needed
     if args.server:
-        print(f"SmartScanATC server: http://{socket.gethostname()}:{args.port}/", flush=True)
+        print(f"FalconSDR server: http://{socket.gethostname()}:{args.port}/", flush=True)
 
     stop = threading.Event()
     restart = threading.Event()
@@ -99,7 +99,7 @@ def main() -> int:
     controller = worker = None
     if client_mode:
         rr = config.remote_receiver
-        worker = Worker(rr.url, rr.token, name=os.environ.get("SMARTSCAN_WORKER_NAME", ""),
+        worker = Worker(rr.url, rr.token, name=os.environ.get("FALCONSDR_WORKER_NAME", ""),
                         local_root=Path(config.recording.output_dir),
                         on_detach=lambda: (setattr(rr, "enabled", False), config.save(), stop.set()))
         worker.start()
@@ -107,7 +107,7 @@ def main() -> int:
         browser_url = f"{rr.url}/#token={quote(rr.token, safe='')}"
         print(i18n.tr("Working for the server {url} - press Ctrl+C to stop.").format(url=rr.url), flush=True)
     else:
-        from smartscan.controller import Controller
+        from falconsdr.controller import Controller
         controller = Controller(config)
         # Indexing a large library takes a while - never hold up the UI or the scanner for it.
         threading.Thread(target=controller.start_background, daemon=True, name="library-start").start()
@@ -115,7 +115,7 @@ def main() -> int:
                   on_quit=stop.set)
         browser_url = f"http://127.0.0.1:{args.port}/"
         # This computer's own transcription helper - talks to its own API.
-        worker = Worker(f"http://127.0.0.1:{args.port}", token, name=os.environ.get("SMARTSCAN_WORKER_NAME", ""),
+        worker = Worker(f"http://127.0.0.1:{args.port}", token, name=os.environ.get("FALCONSDR_WORKER_NAME", ""),
                         embedded=True)
         worker.start()
         if args.start:

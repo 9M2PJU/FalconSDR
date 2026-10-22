@@ -20,7 +20,7 @@ from pathlib import Path
 
 import numpy as np
 
-from smartscan.dsp import NoiseReducer
+from falconsdr.dsp import NoiseReducer
 
 
 def load_wav(path: Path) -> tuple[np.ndarray, int]:
@@ -51,7 +51,7 @@ def rms_dbfs(x: np.ndarray) -> float:
 
 def main() -> int:
     ap = argparse.ArgumentParser(description=__doc__)
-    ap.add_argument("files", nargs="+", help="nagrania .wav (mono 16-bit, jak z SmartScanATC)")
+    ap.add_argument("files", nargs="+", help="nagrania .wav (mono 16-bit, jak z FalconSDR)")
     ap.add_argument("--strength", type=float, default=0.6, help="sila redukcji 0..1 (domyslnie 0.6, jak w GUI)")
     ap.add_argument("--outdir", default=None, help="katalog na pliki wyjsciowe (domyslnie obok oryginalu)")
     args = ap.parse_args()

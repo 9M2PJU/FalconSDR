@@ -1,14 +1,14 @@
-# SmartScanATC — self-contained .deb (test build)
+# FalconSDR — self-contained .deb (test build)
 
 ## What this is
 
 A "fat" Debian package: [PyInstaller](https://pyinstaller.org/) freezes the
 app together with its own Python interpreter and every pip-installable
 dependency (numpy, scipy, pyrtlsdrlib) plus the web UI's static files into
-one self-contained folder at `/opt/smartscanatc`. A user installs it with
-`sudo apt install ./smartscanatc_*.deb` and gets a working scanner with
+one self-contained folder at `/opt/falconsdr`. A user installs it with
+`sudo apt install ./falconsdr_*.deb` and gets a working scanner with
 **zero** extra `pip install`/system-package steps for RTL-SDR. Starting it
-(menu or `smartscanatc`) runs the app in the background and opens its UI in
+(menu or `falconsdr`) runs the app in the background and opens its UI in
 the default browser (http://127.0.0.1:8765); live audio plays in the
 browser, so no audio library is bundled at all.
 
@@ -59,7 +59,7 @@ cd packaging/linux-deb
 Builds in a **throwaway venv** (`packaging/linux-deb/build-venv/`, gitignored)
 — never the project's own `.venv` — specifically so nothing from your dev
 setup can leak into the frozen bundle by accident. Output:
-`packaging/linux-deb/out/smartscanatc_<date>_<arch>.deb`.
+`packaging/linux-deb/out/falconsdr_<date>_<arch>.deb`.
 
 ## Testing in a VirtualBox VM
 
@@ -87,25 +87,25 @@ The whole point of a "fat" package is that it works on a machine that has
 running it from this same terminal is *not* a real test of that — your
 shell may still have the project's `.venv` activated, `PYTHONPATH` pointing
 at it, or you might launch it while `cd`'d into the repo (where Python would
-happily import the *source* `smartscan/` package instead of the installed
+happily import the *source* `falconsdr/` package instead of the installed
 one, silently passing a test that would fail for anyone else). Concretely:
 
 1. **Install it:**
    ```
-   sudo apt install ./packaging/linux-deb/out/smartscanatc_*.deb
+   sudo apt install ./packaging/linux-deb/out/falconsdr_*.deb
    ```
 
 2. **Make a throwaway test user** — a real second account on this same
    machine that has never touched this project, so there's no dev-venv,
    `PYTHONPATH`, or repo checkout it could accidentally fall back on:
    ```
-   sudo useradd -m -s /bin/bash smartscan-test
-   sudo passwd smartscan-test          # set a temporary password
+   sudo useradd -m -s /bin/bash falconsdr-test
+   sudo passwd falconsdr-test          # set a temporary password
    ```
    Switch to it with a full login shell (not plain `su`, which can still
    inherit some of your environment):
    ```
-   sudo machinectl shell smartscan-test@   # or: su - smartscan-test
+   sudo machinectl shell falconsdr-test@   # or: su - falconsdr-test
    ```
    This account still runs on your real hardware (RTL-SDR, sound card), so
    real scanning/audio testing still works — it just guarantees nothing
@@ -114,11 +114,11 @@ one, silently passing a test that would fail for anyone else). Concretely:
 3. **From that account**, confirm you're actually running the installed
    copy, not the dev one, before doing anything else:
    ```
-   which smartscanatc        # must print /usr/bin/smartscanatc
+   which falconsdr        # must print /usr/bin/falconsdr
    cd /                      # anywhere outside the repo - rules out
-                              # accidentally importing source smartscan/
+                              # accidentally importing source falconsdr/
                               # via a cwd-relative sys.path
-   smartscanatc
+   falconsdr
    ```
    Launch it from the applications menu too (GNOME/KDE app grid) if you
    want to check the `.desktop`/icon integration, not just the CLI path.
@@ -135,13 +135,13 @@ one, silently passing a test that would fail for anyone else). Concretely:
 
 5. **Uninstall when done testing:**
    ```
-   sudo apt remove smartscanatc
-   sudo userdel -r smartscan-test
+   sudo apt remove falconsdr
+   sudo userdel -r falconsdr-test
    ```
 
 If you'd rather not create a second user account, the next-best (weaker)
 check is at least: `deactivate` any active venv, `unset PYTHONPATH`, `cd /`,
-and run `smartscanatc` — this catches the single most common false-positive
+and run `falconsdr` — this catches the single most common false-positive
 (accidentally still running against the dev `.venv`/source tree) but won't
 catch "some system package your dev machine happens to already have
 installed that a fresh Ubuntu install wouldn't."

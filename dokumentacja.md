@@ -1,4 +1,4 @@
-# SmartScanATC — dokumentacja funkcjonalna
+# FalconSDR — dokumentacja funkcjonalna
 
 Ten dokument opisuje **co program robi i jak dokładnie się zachowuje** — z takim
 poziomem szczegółu (formuły, stałe, progi, kolejność operacji, przypadki
@@ -313,7 +313,7 @@ uszkodzone/niekompletne wiersze (pomija z ostrzeżeniem zamiast się wywalić).
 |---|---|
 | Włączone | tak |
 | Tryb | `"split"` (osobny plik na transmisję) lub `"single"` (jeden ciągły plik sesji) |
-| Katalog docelowy | `~/SmartScanATC/recordings` |
+| Katalog docelowy | `~/FalconSDR/recordings` |
 | Wstawiaj znacznik dźwiękowy między transmisjami (tylko tryb single) | tak |
 
 ### 3.6 Próg wyzwalania i squelch
@@ -375,7 +375,7 @@ linków playbacku FlightRadar24/ADSBExchange (§17.5).
 ### 3.13 Pliki na dysku
 
 - Konfiguracja: `config.json` w katalogu konfiguracyjnym (np.
-  `~/.config/SmartScanATC/`).
+  `~/.config/FalconSDR/`).
 - `channels.csv`, `blacklist.csv` w tym samym katalogu.
 - Nagrania: `<output_dir>/<RRRR-MM-DD>/<znacznik_czasu>_<kHz>.wav` w trybie
   split (patrz §11.3); pojedynczy plik sesji w trybie single.

@@ -1,0 +1,8 @@
+[Desktop Entry]
+Type=Application
+Name=FalconSDR
+Comment=Wideband SDR ATC/radio scanner
+Exec=/usr/bin/falconsdr
+Icon=falconsdr
+Terminal=false
+Categories=HamRadio;AudioVideo;

@@ -1,0 +1,19 @@
+[Unit]
+Description=FalconSDR receiver (web UI on port 8765)
+After=network-online.target
+Wants=network-online.target
+
+[Service]
+Type=simple
+# Not root: the dongle only needs the plugdev group (60-rtl-sdr.rules).
+User=falconsdr
+SupplementaryGroups=plugdev
+WorkingDirectory=/opt/falconsdr
+ExecStart=/opt/falconsdr/.venv/bin/python /opt/falconsdr/main.py --server --start
+# SIGTERM closes every open recording cleanly (sdr-mode switches stop this unit).
+TimeoutStopSec=15
+Restart=always
+RestartSec=3
+
+[Install]
+WantedBy=multi-user.target

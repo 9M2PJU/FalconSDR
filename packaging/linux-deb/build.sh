@@ -1,8 +1,8 @@
 #!/usr/bin/env bash
-# Builds a self-contained ("fat") .deb for SmartScanATC: a PyInstaller
+# Builds a self-contained ("fat") .deb for FalconSDR: a PyInstaller
 # --onedir bundle (its own Python + numpy/scipy/pyrtlsdrlib + the web UI's
 # static files, all frozen in) wrapped in a Debian package, so an end user
-# needs nothing beyond `sudo apt install ./smartscanatc_*.deb` - no pip, no
+# needs nothing beyond `sudo apt install ./falconsdr_*.deb` - no pip, no
 # venv. The UI itself runs in the browser the app opens.
 #
 # Deliberately built in a *throwaway* venv (packaging/linux-deb/build-venv,
@@ -28,9 +28,9 @@ BUILD="$SCRIPT_DIR/build"
 VENV="$SCRIPT_DIR/build-venv"
 ARCH="$(dpkg --print-architecture)"
 VERSION="$(date +%Y.%m.%d)"
-PKG=smartscanatc
+PKG=falconsdr
 
-echo "== SmartScanATC .deb build =="
+echo "== FalconSDR .deb build =="
 echo "repo root: $REPO_ROOT"
 echo "version:   $VERSION"
 echo "arch:      $ARCH"
@@ -92,9 +92,9 @@ mkdir -p "$BUILD"
     --name "$PKG" \
     --onedir \
     --noconfirm \
-    --add-data "$REPO_ROOT/smartscan/locale/pl.po:smartscan/locale" \
-    --add-data "$REPO_ROOT/smartscan/presets/band_presets.json:smartscan/presets" \
-    --add-data "$REPO_ROOT/smartscan/web/static:smartscan/web/static" \
+    --add-data "$REPO_ROOT/falconsdr/locale/pl.po:falconsdr/locale" \
+    --add-data "$REPO_ROOT/falconsdr/presets/band_presets.json:falconsdr/presets" \
+    --add-data "$REPO_ROOT/falconsdr/web/static:falconsdr/web/static" \
     --collect-data tzdata \
     --collect-data pyrtlsdrlib \
     --distpath "$BUILD/dist" \
@@ -123,9 +123,9 @@ exec /opt/$PKG/$PKG "\$@"
 WRAPPER
 chmod 755 "$DEBROOT/usr/bin/$PKG"
 
-cp "$SCRIPT_DIR/smartscanatc.desktop" "$DEBROOT/usr/share/applications/"
-cp "$REPO_ROOT/smartscan/web/static/icon.svg" \
-   "$DEBROOT/usr/share/icons/hicolor/scalable/apps/smartscanatc.svg"
+cp "$SCRIPT_DIR/falconsdr.desktop" "$DEBROOT/usr/share/applications/"
+cp "$REPO_ROOT/falconsdr/web/static/icon.svg" \
+   "$DEBROOT/usr/share/icons/hicolor/scalable/apps/falconsdr.svg"
 cp "$SCRIPT_DIR/README.md" "$DEBROOT/usr/share/doc/$PKG/packaging-README.md"
 # GPL: the license text must ship with the binary package.
 cp "$SCRIPT_DIR/../../LICENSE" "$DEBROOT/usr/share/doc/$PKG/copyright"
@@ -153,6 +153,8 @@ Priority: optional
 Architecture: $ARCH
 Installed-Size: $INSTALLED_SIZE_KB
 Recommends: ffmpeg
+Conflicts: smartscanatc
+Replaces: smartscanatc
 Maintainer: rafafunt <rafafunt@gmail.com>
 Description: Wideband SDR ATC/radio scanner (self-contained build)
  Scans a radio band via RTL-SDR and records audio only for transmissions

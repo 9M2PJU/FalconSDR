@@ -33,4 +33,4 @@ pyrtlsdrlib
 # falling back to a `--system-site-packages` .venv only on PEP 668
 # ("externally-managed-environment") systems, which main.py then re-execs
 # into automatically. GPU (NVIDIA/CUDA) support adds nvidia-cublas-cu12 and
-# nvidia-cudnn-cu12. See smartscan/playback/transcription_install.py.
+# nvidia-cudnn-cu12. See falconsdr/playback/transcription_install.py.
