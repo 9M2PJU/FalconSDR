@@ -22,6 +22,7 @@ is cheap enough that even a handful running at once is a non-issue.
 from __future__ import annotations
 
 import datetime as dt
+import math
 import os
 import threading
 import time
@@ -214,14 +215,24 @@ class _WeightedScheduler:
         return best
 
 
+def _raster(band_lo: int, start: float, end: float, step_hz: int) -> list[int]:
+    """The band's channel raster (band_lo + k * step) inside [start, end].
+    Always anchored at the band's own start, never at a window edge (that
+    once put channels at arbitrary offsets - e.g. 131.3996 instead of
+    131.400), and step 8333/8334 means the airband's 8.33 kHz raster,
+    i.e. exactly 25000/3 Hz (an integer 8333 drifted 416 Hz by 131.4 MHz)."""
+    step = 25000 / 3 if step_hz in (8333, 8334) else float(max(1, step_hz))
+    k0 = max(0, math.ceil((start - band_lo) / step - 1e-9))
+    k1 = math.floor((end - band_lo) / step + 1e-9)
+    return [int(round(band_lo + k * step)) for k in range(k0, k1 + 1)]
+
+
 def _band_grid(vr: VfoRangeConfig) -> tuple[list[int], Modulation]:
     """The full list of channel frequencies a band/range sweeps at its own
     step, plus the single modulation it demodulates all of them with."""
-    step = max(1, vr.step_hz)
     lo, hi = min(vr.start_hz, vr.stop_hz), max(vr.start_hz, vr.stop_hz)
-    n = max(1, (hi - lo) // step + 1)
     band_mod = Modulation(vr.modulation) if vr.modulation in Modulation._value2member_map_ else Modulation.AM
-    return [lo + i * step for i in range(n)], band_mod
+    return _raster(lo, lo, hi, vr.step_hz) or [lo], band_mod
 
 
 def _overlapping_band(freqs: list[int], bands: list[VfoRangeConfig]) -> VfoRangeConfig | None:
@@ -249,7 +260,6 @@ def _wide_anchor_windows(freqs: list[int], band: VfoRangeConfig, sample_rate: fl
     same span. Returns a single window if both edges end up identical (band
     narrower than one capture)."""
     capture_bw = sample_rate * USABLE_FRACTION
-    step = max(1, band.step_hz)
     lo_band, hi_band = min(band.start_hz, band.stop_hz), max(band.start_hz, band.stop_hz)
     anchor_lo, anchor_hi = min(freqs), max(freqs)
 
@@ -262,8 +272,7 @@ def _wide_anchor_windows(freqs: list[int], band: VfoRangeConfig, sample_rate: fl
             win_end = min(hi_band, anchor_hi + capture_bw * 0.1)
             win_start = max(lo_band, win_end - capture_bw)
             win_end = min(hi_band, win_start + capture_bw)
-        n = max(1, int((win_end - win_start) // step) + 1)
-        grid = [int(win_start + i * step) for i in range(n)]
+        grid = _raster(lo_band, win_start, win_end, band.step_hz)
         for f in freqs:
             if f not in grid:
                 grid.append(f)

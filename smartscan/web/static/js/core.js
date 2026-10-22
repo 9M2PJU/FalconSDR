@@ -253,6 +253,17 @@ export const prefs = {
 export function fmtMHz(hz, digits = 4) { return (hz / 1e6).toFixed(digits); }
 export function fmtKhz(khz) { return (khz / 1000).toFixed(3); }
 
+// Airband (118-137 MHz) 8.33 kHz channel name - what AIP/charts publish - for
+// a carrier frequency: carrier 126.8000 is channel "126.805", 126.8083 is
+// "126.810", 126.8167 is "126.815". '' outside the airband or off the raster.
+export function airbandChannel(hz) {
+  if (hz < 118e6 || hz > 137e6) return '';
+  const block = Math.floor(hz / 25000) * 25000;
+  const k = Math.round((hz - block) / (25000 / 3));
+  if (k > 2 || Math.abs(hz - block - k * 25000 / 3) > 400) return '';
+  return ((block + [5000, 10000, 15000][k]) / 1e6).toFixed(3);
+}
+
 export function fmtDuration(sec) {
   if (sec === null || sec === undefined) return '–';
   sec = Math.round(sec);

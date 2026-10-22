@@ -2,7 +2,7 @@
 // search transcripts, play with a seekable waveform, edit transcripts, and
 // favorite/transcribe/delete one or many.
 import {
-  LANGUAGE_NAMES, api, confirmDialog, debounce, errorToast, fmtBytes, fmtDate, fmtDateShort, fmtDuration, fmtKhz, fmtTime,
+  LANGUAGE_NAMES, airbandChannel, api, confirmDialog, debounce, errorToast, fmtBytes, fmtDate, fmtDateShort, fmtDuration, fmtKhz, fmtTime,
   formDialog, h, icon, modal, mount, prefs, qs, qualityBadge, select, seg, t, toast, toggle,
 } from '../core.js';
 import { S, cfg, on, patchConfig, saveChannels } from '../state.js';
@@ -325,7 +325,8 @@ export function recordingsView(root) {
     mount(player,
       h('div.row.wrap',
         h('div.grow',
-          h('div', h('b.mono', { style: { fontSize: '16px' } }, freqLabel(it)), it.name ? h('span.muted', ` · ${it.name}`) : null),
+          h('div', h('b.mono', { style: { fontSize: '16px' } }, freqLabel(it)), it.name ? h('span.muted', ` · ${it.name}`) : null,
+            airbandChannel(it.freq_khz * 1000) ? h('span.muted', ` · ${t('8.33 channel {c}', { c: airbandChannel(it.freq_khz * 1000) })}`) : null),
           h('div.small.muted', `${fmtDate(it.time)} ${fmtTime(it.time)}${prefs.utc ? ' UTC' : ''}`, ' · ', fmtDuration(it.duration),
             it.snr !== null ? ` · SNR ${it.snr} dB` : '')),
         qualityBadge(it.quality),

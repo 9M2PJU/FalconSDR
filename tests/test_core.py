@@ -118,6 +118,18 @@ class LibraryTest(_LibCase):
         self.assertEqual((rec.transcript.text, rec.is_favorite), ("a", True))
 
 
+class GridTest(unittest.TestCase):
+    def test_airband_raster_is_exact_and_windows_stay_on_it(self) -> None:
+        from smartscan.config import VfoRangeConfig
+        from smartscan.scanner_engine import _band_grid, _wide_anchor_windows
+        band = VfoRangeConfig(start_hz=121_000_000, stop_hz=136_800_000, step_hz=8333)
+        grid = set(_band_grid(band)[0])
+        for carrier in (131_400_000, 126_800_000, 126_808_333, 126_816_667):
+            self.assertIn(carrier, grid)  # integer 8333 steps drifted to 131.399584
+        for window in _wide_anchor_windows([131_400_000], band, 2.4e6):
+            self.assertTrue(set(window.freqs) <= grid)
+
+
 class SquelchTest(unittest.TestCase):
     def test_band_squelch_overrides_global_and_never_exceeds_trigger(self) -> None:
         from types import SimpleNamespace

@@ -2292,3 +2292,6 @@ msgstr "Trwa nagrywanie"
 
 msgid "appears in the list when the transmission ends"
 msgstr "pojawi się na liście po zakończeniu transmisji"
+
+msgid "8.33 channel {c}"
+msgstr "nazwa w siatce 8,33: {c}"

@@ -1,6 +1,6 @@
 // "Listen": the live scanner - what's on air now, controls, spectrum, quick
 // settings, the scanned bands and the activity feed.
-import { api, confirmDialog, errorToast, fmtMHz, formDialog, h, icon, mount, select, seg, slider, t, toast, toggle } from '../core.js';
+import { airbandChannel, api, confirmDialog, errorToast, fmtMHz, formDialog, h, icon, mount, select, seg, slider, t, toast, toggle } from '../core.js';
 import { liveAudio } from '../live-audio.js';
 import { S, cfg, confirmRecording, on, patchConfig, setFastPolling } from '../state.js';
 
@@ -121,12 +121,11 @@ export function listenView(root) {
     const active = live.state === 'SIGNAL_DETECTED' || live.state === 'LINGER';
     if (primary) {
       mount(freqEl, fmtMHz(primary[0], 4), h('small', 'MHz'));
-      nameEl.textContent = primary[1] || '';
-      freqEl.style.color = active ? 'var(--signal)' : '';
+      const ch = airbandChannel(primary[0]);
+      nameEl.textContent = [primary[1], ch && t('8.33 channel {c}', { c: ch })].filter(Boolean).join(' · ');
     } else {
       mount(freqEl, '—');
       nameEl.textContent = live.running ? '' : t('Press Start to begin scanning');
-      freqEl.style.color = '';
     }
     mount(others, active ? rest.map(([f, n]) => h('span.chip', h('b.mono', fmtMHz(f, 3)), n ? ` ${n}` : '')) : []);
     const pct = (v) => Math.max(0, Math.min(100, (v + 100)));
