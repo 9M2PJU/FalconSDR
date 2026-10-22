@@ -389,7 +389,7 @@ export function settingsView(root, hash) {
             document.body.replaceChildren(h('div.center-page', h('div.card.login', h('h2', 'FalconSDR'), h('p.muted', t('Closed. You can close this tab.')))));
           },
         }, icon('logout'), t('Quit'))) : null,
-      h('p.faint.small', { style: { margin: 0 } }, `FalconSDR · ${S.settings.mode} · ${lang}`));
+      h('p.faint.small', { style: { margin: 0 } }, `FalconSDR ${S.settings.version} · ${S.settings.mode} · ${lang}`));
   }
 
   function renderAll() {

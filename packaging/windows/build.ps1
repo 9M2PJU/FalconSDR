@@ -22,7 +22,7 @@ $RepoRoot = (Resolve-Path "$ScriptDir\..\..").Path
 $Build = "$ScriptDir\build"
 $Venv = "$ScriptDir\build-venv"
 $Out = "$ScriptDir\out"
-$Version = Get-Date -Format "yyyy.MM.dd"
+$Version = (Select-String -Path "$RepoRoot\falconsdr\__init__.py" -Pattern '^__version__ = "(.+)"').Matches[0].Groups[1].Value
 $Dist = "$Build\dist\falconsdr"
 
 function Step($text) { Write-Host "-- $text --" -ForegroundColor Cyan }

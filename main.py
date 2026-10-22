@@ -54,6 +54,7 @@ import webbrowser  # noqa: E402
 from urllib.parse import quote  # noqa: E402
 from urllib.request import urlopen  # noqa: E402
 
+from falconsdr import __version__  # noqa: E402
 from falconsdr.config import CONFIG_DIR, AppConfig  # noqa: E402
 
 DEFAULT_PORT = 8765
@@ -83,6 +84,7 @@ def main() -> int:
     parser.add_argument("--port", type=int, default=DEFAULT_PORT)
     parser.add_argument("--start", action="store_true", help="start scanning immediately")
     parser.add_argument("--no-browser", action="store_true")
+    parser.add_argument("--version", action="version", version=f"FalconSDR {__version__}")
     parser.add_argument("--self-test", action="store_true", help="check this install has everything it needs, then exit")
     args = parser.parse_args()
 

@@ -21,7 +21,7 @@ from typing import Any, Optional
 
 import numpy as np
 
-from . import autostart, i18n, military_presets, storage
+from . import __version__, autostart, i18n, military_presets, storage
 from .audio_transcode import ffmpeg_available
 from .config import DEFAULT_RECORDINGS_DIR, AppConfig, VfoRangeConfig, _from_dict
 from .models import BlacklistEntry, Channel, Modulation, snap_airband_hz
@@ -285,6 +285,7 @@ class Controller:
 
     def settings(self) -> dict:
         return {
+            "version": __version__,
             "config": asdict(self.config),
             "channels": [channel_dict(c) for c in self.channels],
             "blacklist": [asdict(b) for b in self.blacklist],

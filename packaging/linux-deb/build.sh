@@ -27,7 +27,7 @@ REPO_ROOT="$(cd "$SCRIPT_DIR/../.." && pwd)"
 BUILD="$SCRIPT_DIR/build"
 VENV="$SCRIPT_DIR/build-venv"
 ARCH="$(dpkg --print-architecture)"
-VERSION="$(date +%Y.%m.%d)"
+VERSION="$(sed -n 's/^__version__ = "\(.*\)"/\1/p' "$REPO_ROOT/falconsdr/__init__.py")"
 PKG=falconsdr
 
 echo "== FalconSDR .deb build =="
