@@ -105,8 +105,8 @@ def delete_models(model_ids: list[str], on_line: Callable[[str], None]) -> None:
     try:
         from faster_whisper.utils import _MODELS
         from huggingface_hub import scan_cache_dir
-    except ImportError:
-        on_line("models: no Hugging Face cache support installed - nothing to delete")
+    except ImportError as exc:
+        on_line(f"models: no Hugging Face cache support installed - nothing to delete ({exc})")
         return
     from .transcription_engine import unload_models
     unload_models()  # loaded models keep their files open

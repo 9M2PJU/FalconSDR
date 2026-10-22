@@ -50,10 +50,17 @@ already degrades gracefully when these are missing (see AGENTS.md).
 
 ## Building it
 
+For a package other people will install, build it in Docker:
+
 ```
-cd packaging/linux-deb
-./build.sh
+packaging/linux-deb/build-in-docker.sh
 ```
+
+That runs `build.sh` inside Debian 11 (glibc 2.31), so the package works on
+Ubuntu 20.04 and newer. A PyInstaller bundle only runs where glibc is the same
+or newer than on the build machine: built straight on a current desktop
+(`./build.sh`) it starts on older systems but some bundled modules fail with
+"GLIBC_2.xx not found". `./build.sh` alone is fine for your own machine.
 
 Builds in a **throwaway venv** (`packaging/linux-deb/build-venv/`, gitignored)
 — never the project's own `.venv` — specifically so nothing from your dev

@@ -446,6 +446,19 @@ catalog loads; wrap them in a function called at point of use
       (not just fail) with no running udev daemon (confirmed hanging the
       whole `apt install` in a bare Docker container) - a postinst must
       never be able to block an install.
+    - **Build the published .deb in an old distro**
+      (`packaging/linux-deb/build-in-docker.sh`, Debian 11): a bundle built
+      on a new glibc half-works on older systems - the app starts, then a
+      lazily imported module (`termios`, hit by deleting Whisper models)
+      fails with "GLIBC_2.42 not found".
+    - **A system program started from the frozen Linux app must not inherit
+      its `LD_LIBRARY_PATH`** (PyInstaller points it at the bundle) - a
+      system ffmpeg loaded the bundle's libraries and failed every MP3.
+      `audio_transcode.system_env()` restores the user's value; use it for
+      any new subprocess of a system binary.
+    - **`multiprocessing.freeze_support()` runs first in `main.py` when
+      frozen** - Whisper's libraries start multiprocessing's resource
+      tracker, which re-runs the app's own executable with `-c ...`.
 
 36. **Engine signals are plain synchronous callbacks** (`scanner_engine.Signal`,
     no Qt): handlers run on whichever engine thread emits (main loop, slot

@@ -17,7 +17,7 @@ from pathlib import Path
 
 import numpy as np
 
-from falconsdr.audio_transcode import NO_WINDOW, ffmpeg_exe
+from falconsdr.audio_transcode import NO_WINDOW, ffmpeg_exe, system_env
 from falconsdr.playback.models import QualityMetrics
 
 WINDOW_SEC = 0.05          # window for computing the RMS envelope
@@ -47,7 +47,7 @@ def _mp3_to_wav_bytes(path: Path) -> bytes:
         raise RuntimeError("ffmpeg not found")
     proc = subprocess.run(
         [ffmpeg, "-v", "error", "-i", str(path), "-f", "wav", "-"],
-        stdout=subprocess.PIPE, stderr=subprocess.PIPE, check=True, creationflags=NO_WINDOW,
+        stdout=subprocess.PIPE, stderr=subprocess.PIPE, check=True, creationflags=NO_WINDOW, env=system_env(),
     )
     return proc.stdout
 

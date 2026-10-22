@@ -26,6 +26,12 @@ else:
 if VENV_PYTHON is not None and VENV_PYTHON.exists() and Path(sys.prefix).resolve() != VENV_DIR.resolve():
     os.execv(str(VENV_PYTHON), [str(VENV_PYTHON), str(Path(__file__).resolve()), *sys.argv[1:]])
 
+# Packaged build: helper processes multiprocessing starts (Whisper's libraries
+# use its resource tracker) re-run this executable - let them run, not the app.
+if getattr(sys, "frozen", False):
+    import multiprocessing
+    multiprocessing.freeze_support()
+
 # Packaged build only: `falconsdr --pip ...` runs the pip bundled inside it
 # (the in-app transcription installer - transcription_install.py).
 if getattr(sys, "frozen", False) and sys.argv[1:2] == ["--pip"]:

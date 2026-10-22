@@ -29,6 +29,7 @@ from urllib.error import HTTPError, URLError
 from urllib.parse import quote
 from urllib.request import Request, urlopen
 
+from .audio_transcode import system_env
 from .config import CONFIG_DIR, TranscriptionConfig, _from_dict, atomic_write_text
 from .playback.models import QualityMetrics, Recording
 from .playback.organizer import iter_all_recordings, parse_filename
@@ -393,7 +394,7 @@ def _gpu_name() -> str:
             try:
                 out = subprocess.run(["nvidia-smi", "--query-gpu=name", "--format=csv,noheader"],
                                      capture_output=True, text=True, errors="replace", timeout=5,
-                                     creationflags=getattr(subprocess, "CREATE_NO_WINDOW", 0))
+                                     creationflags=getattr(subprocess, "CREATE_NO_WINDOW", 0), env=system_env())
                 _GPU_CACHE = out.stdout.strip().splitlines()[0] if out.returncode == 0 and out.stdout.strip() else ""
             except (OSError, subprocess.TimeoutExpired):
                 pass
