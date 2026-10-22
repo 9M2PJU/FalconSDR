@@ -18,7 +18,7 @@ fi
 mkdir -p "$HOME_DIR"
 
 # Older installs ran as root - carry their settings and library data over once.
-for sub in .config/FalconSDR .local/share/atc_browser; do
+for sub in .config/FalconSDR .local/share/FalconSDR; do
     if [ -d "/root/$sub" ] && [ ! -e "$HOME_DIR/$sub" ]; then
         mkdir -p "$HOME_DIR/$(dirname "$sub")"
         cp -a "/root/$sub" "$HOME_DIR/$sub"

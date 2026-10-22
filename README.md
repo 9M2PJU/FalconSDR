@@ -10,6 +10,9 @@ services, military UHF…) and get a searchable library of conversations.
 It runs in your web browser: on the computer the SDR is plugged into, or as a
 headless receiver you listen to from any phone or PC on your network.
 
+> Listening to and recording some radio services is restricted or illegal in
+> many countries - see [Legal](#legal).
+
 ## Features
 
 **Scanning**
@@ -65,11 +68,7 @@ headless receiver you listen to from any phone or PC on your network.
 | RTL-SDR (incl. RTL-SDR Blog V3/V4) | built in on Linux, Windows and macOS |
 | HackRF, Airspy, SDRplay, LimeSDR, USRP, … | through [SoapySDR](https://github.com/pothosware/SoapySDR) with the matching module installed |
 
-Developed and tested with an **RTL-SDR Blog V4** on Linux. Nothing in the
-program is tied to it: the capture bandwidth is a setting (0.25-61.44 MHz),
-not a fixed 2.4 MHz, so a receiver with a wider band covers more channels per
-step. The practical limit is your CPU - every extra MHz is more data to
-process in real time.
+Developed and tested with an **RTL-SDR Blog V4** on Linux.
 
 Any antenna works; one cut or tuned for the band you scan works much better.
 
@@ -174,7 +173,7 @@ main.py --no-browser    don't open the browser
 |---|---|
 | Settings, channels, blacklist | `~/.config/FalconSDR/` |
 | Recordings (default, changeable) | `~/FalconSDR/recordings/`, one folder per day |
-| Quality scores, transcripts, favorites | `~/.local/share/atc_browser/` |
+| Quality scores, transcripts, favorites | `~/.local/share/FalconSDR/` |
 
 (`~` is your home folder, also on Windows.)
 
@@ -193,9 +192,12 @@ main.py --no-browser    don't open the browser
 
 ## Legal
 
-Listening to or recording radio traffic is restricted in many countries (for
-example aviation, police and other non-public services). You are responsible
-for following the law where you use this program.
+The laws on radio monitoring differ a lot between countries. In some places
+you may listen to most bands but not record or share what you hear; in
+others even listening to non-public services (aviation, police, emergency
+services, military) is forbidden. Check what applies where you live before
+you scan, and especially before you record or publish anything - you alone
+are responsible for how you use this program.
 
 ## License
 
