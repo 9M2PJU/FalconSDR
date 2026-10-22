@@ -2250,3 +2250,21 @@ msgstr "Folder na tamtym komputerze"
 
 msgid "Automatic transcription is off above - this computer only gets recordings you queue by hand."
 msgstr "Automatyczna transkrypcja jest wyłączona (przełącznik wyżej) - ten komputer dostaje tylko nagrania zlecone ręcznie."
+
+msgid "{n} of {total} bands use their own settings instead of the Receiver panel."
+msgstr "Pasma z własnymi ustawieniami zamiast panelu Odbiornik: {n} z {total}."
+
+msgid "Use the general settings everywhere"
+msgstr "Ustawienia ogólne wszędzie"
+
+msgid "Remove the own settings (trigger, times, gain, noise reduction) of all {n} bands? From then on every band follows the Receiver panel."
+msgstr "Usunąć własne ustawienia (próg, czasy, wzmocnienie, redukcja szumów) wszystkich pasm ({n})? Od tej chwili każde pasmo korzysta z panelu Odbiornik."
+
+msgid "Use general settings"
+msgstr "Użyj ustawień ogólnych"
+
+msgid "Use general settings in all bands"
+msgstr "Ustawienia ogólne we wszystkich pasmach"
+
+msgid "Restore general settings"
+msgstr "Przywróć ustawienia ogólne"

@@ -5,6 +5,9 @@ import { liveAudio } from '../live-audio.js';
 import { S, cfg, confirmRecording, on, patchConfig, setFastPolling } from '../state.js';
 
 const MODULATIONS = ['AM', 'NFM', 'WFM', 'SSB'];
+const OVERRIDES = ['trigger_level_dbfs', 'tuning_time_ms', 'linger_time_ms', 'gain_mode', 'gain_db', 'noise_reduction_enabled', 'noise_reduction_strength'];
+const hasOverrides = (b) => OVERRIDES.some((k) => b[k] !== null && b[k] !== undefined);
+const clearOverrides = (b) => OVERRIDES.forEach((k) => { b[k] = null; });
 
 export function stateLabel(state) {
   return {
@@ -227,7 +230,18 @@ export function listenView(root) {
       renderBands();
     });
     const enabledChannels = S.settings.channels.filter((ch) => ch.enabled).length;
+    const custom = c.bands.filter(hasOverrides).length;
     return [
+      custom ? h('div.row.wrap.small.muted',
+        t('{n} of {total} bands use their own settings instead of the Receiver panel.', { n: custom, total: c.bands.length }),
+        h('button.ghost.small', {
+          onclick: async () => {
+            if (!(await confirmDialog(t('Use the general settings everywhere'), t('Remove the own settings (trigger, times, gain, noise reduction) of all {n} bands? From then on every band follows the Receiver panel.', { n: custom }), t('Use general settings')))) return;
+            c.bands.forEach(clearOverrides);
+            patchConfig({ bands: c.bands });
+            renderBands();
+          },
+        }, icon('refresh'), t('Use general settings in all bands'))) : null,
       c.bands.length ? c.bands.map((b, i) => bandRow(b, i)) : h('div.empty', t('Nothing to scan yet - add a band preset or a frequency below.')),
       h('div.row.wrap', presetSel,
         h('button', { onclick: addCustom }, icon('plus'), t('Custom range')),
@@ -277,7 +291,7 @@ export function listenView(root) {
     const save = () => patchConfig({ bands: cfg().bands });
     const single = b.start_hz === b.stop_hz;
     const solo = S.live && S.live.solo_band === i;
-    const custom = ['trigger_level_dbfs', 'tuning_time_ms', 'linger_time_ms', 'gain_mode', 'gain_db', 'noise_reduction_enabled', 'noise_reduction_strength'].some((k) => b[k] !== null && b[k] !== undefined);
+    const custom = hasOverrides(b);
     const row = h('div.band', { class: (b.enabled ? '' : 'disabled') + (solo ? ' solo' : '') },
       h('div.band-main',
         h('label.switch', h('input', { type: 'checkbox', checked: b.enabled, title: t('Scan this band'), onchange: (e) => { b.enabled = e.target.checked; save(); row.classList.toggle('disabled', !b.enabled); } })),
@@ -327,7 +341,10 @@ export function listenView(root) {
       ov('gain_db', t('Gain'), () => rangeInput('gain_db', 0, 50, 0.1, (v) => `${(+v).toFixed(1)} dB`), `${c.device.gain_db} dB`),
       ov('noise_reduction_enabled', t('Noise reduction'), () => toggle(t('On'), b.noise_reduction_enabled, (v) => { b.noise_reduction_enabled = v; save(); }), c.noise_reduction.enabled ? t('On') : t('Off')),
       ov('noise_reduction_strength', t('Noise reduction strength'), () => rangeInput('noise_reduction_strength', 0, 100, 1, (v) => `${v}%`, 100), `${Math.round(c.noise_reduction.strength * 100)}%`));
-    return h('div.col', fields, h('h3', t('Own settings for this band')), overrides);
+    return h('div.col', fields,
+      h('div.row.wrap', h('h3', t('Own settings for this band')), h('span.spacer'),
+        hasOverrides(b) ? h('button.ghost.small', { onclick: () => { clearOverrides(b); save(); renderBands(); } }, icon('refresh'), t('Restore general settings')) : null),
+      overrides);
   }
 
   // ---------------------------------------------------------- wiring
