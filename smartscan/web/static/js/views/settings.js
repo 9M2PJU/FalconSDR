@@ -156,7 +156,9 @@ export function settingsView(root, hash) {
         h('span.spacer'),
         !w.online && !info.embedded ? h('button.ghost.small', { onclick: () => api.post('/api/workers/forget', { name: w.name }).then(loadWorkers) }, t('Forget')) : null),
       info.last_seen && !w.online ? h('span.faint.small', t('Last seen {ago}', { ago: fmtAgo(new Date(info.last_seen * 1000).toISOString()) })) : null,
-      setting(t('Transcribe here'), info.installed === false ? t('Whisper isn\'t installed on this computer yet.') : (s.transcribe && pending ? t('{n} recordings waiting', { n: pending.toLocaleString() }) : ''),
+      setting(t('Transcribe here'), info.installed === false ? t('Whisper isn\'t installed on this computer yet.')
+        : s.transcribe && !cfg().transcription.enabled ? h('span', { style: { color: 'var(--warn)' } }, t('Automatic transcription is off above - this computer only gets recordings you queue by hand.'))
+          : (s.transcribe && pending ? t('{n} recordings waiting', { n: pending.toLocaleString() }) : ''),
         h('div.row.wrap',
           info.installed === false && w.online ? h('button', { onclick: () => command('install') }, icon('download'), t('Install')) : null,
           info.installed === false && w.online && info.gpu ? h('button', { onclick: () => command('install_gpu') }, t('Install with GPU support')) : null,

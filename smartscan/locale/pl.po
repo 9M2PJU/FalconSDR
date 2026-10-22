@@ -2247,3 +2247,6 @@ msgstr "Zamknięto. Możesz zamknąć tę kartę."
 
 msgid "Folder on that computer"
 msgstr "Folder na tamtym komputerze"
+
+msgid "Automatic transcription is off above - this computer only gets recordings you queue by hand."
+msgstr "Automatyczna transkrypcja jest wyłączona (przełącznik wyżej) - ten komputer dostaje tylko nagrania zlecone ręcznie."
