@@ -15,7 +15,7 @@ const SECTIONS = [
   ['location', () => t('Location')],
   ['scheduling', () => t('Scheduling')],
   ['presets', () => t('Band presets')],
-  ['appearance', () => t('Appearance & language')],
+  ['appearance', () => t('Language & listening')],
   ['advanced', () => t('Advanced')],
 ];
 
@@ -34,7 +34,7 @@ export function settingsView(root, hash) {
   const visible = SECTIONS.filter(([k]) => k !== 'connect' || S.settings.mode === 'local');
   const nav = h('nav', visible.map(([k, label]) => h('a', { href: `#/settings/${k}`, onclick: (e) => { e.preventDefault(); cards[k].scrollIntoView({ behavior: 'smooth', block: 'start' }); } }, label())));
   const content = h('div.col', { style: { gap: '16px' } });
-  mount(root, h('div.page', h('div.settings', nav, content)));
+  mount(root, h('div.page', h('div.page-head', h('h1', t('Settings'))), h('div.settings', nav, content)));
   for (const [k, label] of visible) {
     cards[k] = h('section.card', { id: `s-${k}` }, h('div.card-head', h('h2', label())), h('div.col'));
     content.append(cards[k]);
@@ -314,12 +314,7 @@ export function settingsView(root, hash) {
 
   // ---------------------------------------------------------- appearance
   function renderAppearance() {
-    const theme = localStorage.getItem('theme') || 'auto';
     mount(body('appearance'),
-      setting(t('Theme'), t('Stored in this browser.'), select([['auto', t('Like the system')], ['dark', t('Dark')], ['light', t('Light')]], theme, (v) => {
-        localStorage.setItem('theme', v);
-        if (v === 'auto') delete document.documentElement.dataset.theme; else document.documentElement.dataset.theme = v;
-      })),
       setting(t('Language'), t('“Automatic” follows each browser\'s language.'),
         select([['auto', t('Automatic')], ...S.settings.languages.map((l) => [l.code, l.name])], cfg().language, (v) => {
           patchConfig({ language: v });

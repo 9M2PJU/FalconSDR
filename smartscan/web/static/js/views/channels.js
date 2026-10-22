@@ -10,7 +10,7 @@ export function channelsView(root) {
   const offs = [];
   const body = h('div.col');
   const page = h('div.page',
-    h('div.row.wrap', h('h1', { style: { fontSize: '20px' } }, t('Channels')), h('span.spacer'),
+    h('div.page-head', h('h1', t('Channels')),
       seg([['memory', t('Memory List')], ['blacklist', t('Blacklist')]], tab, (v) => { tab = v; render(); })),
     body);
   mount(root, page);

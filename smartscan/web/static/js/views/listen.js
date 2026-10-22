@@ -65,7 +65,7 @@ export function listenView(root) {
   // ---------------------------------------------------------- spectrum
   const canvas = h('canvas', { height: 260 });
   const axis = h('div.spectrum-axis');
-  const spectrumCard = h('section.card',
+  const spectrumCard = h('section.card.spectrum-card',
     h('div.card-head', h('h2', t('Spectrum')), h('span.faint.small', t('Yellow line: trigger level'))),
     h('div.spectrum-wrap', canvas), axis);
   const spectrum = spectrumPainter(canvas, axis);
@@ -81,7 +81,7 @@ export function listenView(root) {
   const feed = h('div.feed');
   const feedCard = h('section.card', h('div.card-head', h('h2', t('Activity'))), feed);
 
-  mount(page, h('div.grid.listen',
+  mount(page, h('div.page-head', h('h1', t('Listen'))), h('div.grid.listen',
     h('div.col', { style: { gap: '16px' } }, hero, spectrumCard, bandsCard),
     h('div.col', { style: { gap: '16px' } }, quick, device, feedCard)));
 
@@ -320,27 +320,42 @@ export function listenView(root) {
       single ? null : num(t('Step (kHz)'), b.step_hz / 1000, (v) => { b.step_hz = Math.round(v * 1000); }),
       h('label.field', t('Modulation'), select(MODULATIONS.map((m) => [m, m]), b.modulation, (v) => { b.modulation = v; save(); })),
       num(t('Priority weight'), b.weight, (v) => { b.weight = v; }, { min: 0, max: 20, step: 0.5, title: t('0 = normal. Higher = visited more often than other weighted bands (1 vs 2 = twice as often).') }));
-    // Per-band overrides: unticked = follow the global setting.
+    // Per-band overrides: unticked = follow the global setting. Values that
+    // only make sense together (on/off + strength, mode + gain) share one tile.
     const c = cfg();
-    const ov = (key, label, makeInput, globalValue) => {
-      const own = b[key] !== null && b[key] !== undefined;
-      const holder = h('div');
-      const draw = () => mount(holder, b[key] !== null && b[key] !== undefined ? makeInput() : h('span.faint.small', t('Global: {v}', { v: globalValue })));
+    const defaults = {
+      trigger_level_dbfs: c.trigger_level_dbfs, tuning_time_ms: c.timing.tuning_time_ms, linger_time_ms: c.timing.linger_time_ms,
+      gain_mode: c.device.gain_mode, gain_db: c.device.gain_db,
+      noise_reduction_enabled: c.noise_reduction.enabled, noise_reduction_strength: c.noise_reduction.strength,
+    };
+    const ov = (keys, label, makeInput, globalValue) => {
+      const own = () => keys.some((k) => b[k] !== null && b[k] !== undefined);
+      const holder = h('div.col', { style: { gap: '8px' } });
+      const draw = () => mount(holder, own() ? makeInput(draw) : h('span.faint.small', t('Global: {v}', { v: globalValue })));
       draw();
       return h('div.override',
-        h('label.switch', h('input', { type: 'checkbox', checked: own, onchange: (e) => { b[key] = e.target.checked ? (key === 'gain_mode' ? c.device.gain_mode : key === 'noise_reduction_enabled' ? c.noise_reduction.enabled : defaults[key]) : null; save(); draw(); } }), h('span.label', label)),
+        h('label.switch', h('input', {
+          type: 'checkbox', checked: own(), title: t('Own value for this band'),
+          onchange: (e) => { keys.forEach((k) => { b[k] = e.target.checked ? defaults[k] : null; }); save(); draw(); },
+        }), h('span.label', label)),
         holder);
     };
-    const defaults = { trigger_level_dbfs: c.trigger_level_dbfs, tuning_time_ms: c.timing.tuning_time_ms, linger_time_ms: c.timing.linger_time_ms, gain_db: c.device.gain_db, noise_reduction_strength: c.noise_reduction.strength };
-    const rangeInput = (key, min, max, step, fmt, scale = 1) => slider({ name: '', min, max, step, value: b[key] * scale, format: fmt, oninput: (v) => { b[key] = v / scale; save(); } });
+    const rangeInput = (key, min, max, step, fmt, scale = 1) => slider({ name: '', min, max, step, value: (b[key] ?? defaults[key]) * scale, format: fmt, oninput: (v) => { b[key] = v / scale; save(); } });
+    const gainModes = [['manual', t('Manual')], ['auto', t('Auto (hardware)')], ['sw_auto', t('Auto (software)')]];
     const overrides = h('div.overrides',
-      ov('trigger_level_dbfs', t('Trigger level'), () => rangeInput('trigger_level_dbfs', -90, 0, 1, (v) => `${v} dBFS`), `${c.trigger_level_dbfs} dBFS`),
-      ov('tuning_time_ms', t('Tuning time'), () => rangeInput('tuning_time_ms', 0, 1000, 10, (v) => `${v} ms`), `${c.timing.tuning_time_ms} ms`),
-      ov('linger_time_ms', t('Hold after a transmission'), () => rangeInput('linger_time_ms', 0, 30000, 100, (v) => `${(v / 1000).toFixed(1)} s`), `${(c.timing.linger_time_ms / 1000).toFixed(1)} s`),
-      ov('gain_mode', t('Gain mode'), () => select([['manual', t('Manual')], ['auto', t('Auto (hardware)')], ['sw_auto', t('Auto (software)')]], b.gain_mode, (v) => { b.gain_mode = v; save(); }), c.device.gain_mode),
-      ov('gain_db', t('Gain'), () => rangeInput('gain_db', 0, 50, 0.1, (v) => `${(+v).toFixed(1)} dB`), `${c.device.gain_db} dB`),
-      ov('noise_reduction_enabled', t('Noise reduction'), () => toggle(t('On'), b.noise_reduction_enabled, (v) => { b.noise_reduction_enabled = v; save(); }), c.noise_reduction.enabled ? t('On') : t('Off')),
-      ov('noise_reduction_strength', t('Noise reduction strength'), () => rangeInput('noise_reduction_strength', 0, 100, 1, (v) => `${v}%`, 100), `${Math.round(c.noise_reduction.strength * 100)}%`));
+      ov(['trigger_level_dbfs'], t('Trigger level'), () => rangeInput('trigger_level_dbfs', -90, 0, 1, (v) => `${v} dBFS`), `${c.trigger_level_dbfs} dBFS`),
+      ov(['tuning_time_ms'], t('Tuning time'), () => rangeInput('tuning_time_ms', 0, 1000, 10, (v) => `${v} ms`), `${c.timing.tuning_time_ms} ms`),
+      ov(['linger_time_ms'], t('Hold after a transmission'), () => rangeInput('linger_time_ms', 0, 30000, 100, (v) => `${(v / 1000).toFixed(1)} s`), `${(c.timing.linger_time_ms / 1000).toFixed(1)} s`),
+      ov(['gain_mode', 'gain_db'], t('Gain'), (redraw) => [
+        select(gainModes, b.gain_mode ?? defaults.gain_mode, (v) => { b.gain_mode = v; save(); redraw(); }),
+        (b.gain_mode ?? defaults.gain_mode) === 'auto' ? null : rangeInput('gain_db', 0, 50, 0.1, (v) => `${(+v).toFixed(1)} dB`),
+      ], `${gainModes.find(([k]) => k === c.device.gain_mode)?.[1] ?? c.device.gain_mode}, ${c.device.gain_db} dB`),
+      ov(['noise_reduction_enabled', 'noise_reduction_strength'], t('Noise reduction'), (redraw) => {
+        const on = b.noise_reduction_enabled ?? defaults.noise_reduction_enabled;
+        const strength = rangeInput('noise_reduction_strength', 0, 100, 1, (v) => `${v}%`, 100);
+        strength.input.disabled = !on;
+        return [toggle(t('On'), on, (v) => { b.noise_reduction_enabled = v; save(); redraw(); }), strength];
+      }, c.noise_reduction.enabled ? `${t('On')}, ${Math.round(c.noise_reduction.strength * 100)}%` : t('Off')));
     return h('div.col', fields,
       h('div.row.wrap', h('h3', t('Own settings for this band')), h('span.spacer'),
         hasOverrides(b) ? h('button.ghost.small', { onclick: () => { clearOverrides(b); save(); renderBands(); } }, icon('refresh'), t('Restore general settings')) : null),

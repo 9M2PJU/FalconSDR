@@ -78,6 +78,8 @@ export function h(tag, attrs, ...children) {
     else el.setAttribute(k, v === true ? '' : v);
   }
   append(el, children);
+  // Icon-only buttons: their tooltip doubles as the screen-reader label.
+  if ((name === 'button' || name === 'a') && attrs.title && !attrs['aria-label'] && !el.textContent.trim()) el.setAttribute('aria-label', attrs.title);
   return el;
 }
 

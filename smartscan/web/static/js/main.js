@@ -17,14 +17,7 @@ const ROUTES = {
   settings: { label: () => t('Settings'), icon: 'settings', view: settingsView },
 };
 
-function applyTheme() {
-  const theme = localStorage.getItem('theme');
-  if (theme && theme !== 'auto') document.documentElement.dataset.theme = theme;
-  else delete document.documentElement.dataset.theme;
-}
-
 async function boot() {
-  applyTheme();
   try {
     await loadLanguage();
   } catch {

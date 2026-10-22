@@ -5,7 +5,7 @@ export function statsView(root) {
   const body = h('div.col', { style: { gap: '16px' } }, h('div.empty', t('Loading…')));
   let utc = prefs.utc;
   mount(root, h('div.page',
-    h('div.row.wrap', h('h1', { style: { fontSize: '20px' } }, t('Statistics')), h('span.spacer'),
+    h('div.page-head', h('h1', t('Statistics')),
       toggle(t('UTC'), utc, (v) => { utc = prefs.utc = v; load(); })),
     body));
 

@@ -33,7 +33,7 @@ export function recordingsView(root) {
   const offs = [];
   const preset = sessionStorage.getItem('openFreq');  // from Statistics
   if (preset) { F.sel = [preset]; F.mode = 'frequencies'; sessionStorage.removeItem('openFreq'); }
-  let items = [], total = 0, loading = false, current = null, selected = new Set(), facets = null;
+  let items = [], total = 0, loading = false, current = null, selected = new Set(), facets = null, anchor = null, lastRes = null;
   const audio = new Audio();
   audio.preload = 'metadata';
 
@@ -58,7 +58,7 @@ export function recordingsView(root) {
   const player = h('div.player.hidden');
   const main = h('section.card', toolbar, statusLine, bulk, list, more, player);
 
-  mount(root, h('div.page', h('div.library', aside, main)));
+  mount(root, h('div.page', h('div.page-head', h('h1', t('Recordings'))), h('div.library', aside, main)));
 
   const io = new IntersectionObserver((entries) => { if (entries.some((e) => e.isIntersecting) && items.length < total) load(); });
   io.observe(more);
@@ -87,16 +87,22 @@ export function recordingsView(root) {
       res.items.forEach((it) => list.append(row(it)));
       if (!items.length) list.replaceChildren(h('div.empty', icon('library'), h('div', F.q || F.sel.length ? t('Nothing matches these filters.') : t('No recordings yet. They appear here as soon as a transmission ends.'))));
       more.classList.toggle('hidden', items.length >= total);
-      mount(statusLine,
+      lastRes = res;
+      renderStatus();
+      renderBulk();
+    } catch (e) { errorToast(e); }
+    loading = false;
+  }
+
+  function renderStatus() {
+    const res = lastRes;
+    mount(statusLine,
         h('span', t('{n} recordings', { n: total.toLocaleString() })), '·', h('span', fmtBytes(res.total_bytes)),
         res.pending ? h('span.chip.accent', t('{n} waiting for transcription', { n: res.pending.toLocaleString() })) : null,
         h('span.spacer'),
         toggle(t('Auto-transcribe'), cfg().transcription.enabled, (v) => patchConfig({ transcription: { enabled: v } })),
         toggle(t('UTC'), prefs.utc, (v) => { prefs.utc = v; reload(); }),
         toggle(t('Auto-play next'), F.autoNext, (v) => { F.autoNext = v; localStorage.setItem('autonext', v ? '1' : '0'); }));
-      renderBulk();
-    } catch (e) { errorToast(e); }
-    loading = false;
   }
 
   async function loadFacets() {
@@ -144,8 +150,8 @@ export function recordingsView(root) {
   function row(it) {
     const tr = it.transcript;
     const text = tr && tr.text ? tr.text : transcriptStatus(tr, it.queued);
-    const el = h('div.rec', { class: current && current.id === it.id ? 'active' : '', onclick: () => open(it) },
-      h('input.chk', { type: 'checkbox', checked: selected.has(it.id), onclick: (e) => { e.stopPropagation(); e.target.checked ? selected.add(it.id) : selected.delete(it.id); renderBulk(); } }),
+    const el = h('div.rec', { class: (current && current.id === it.id ? 'active ' : '') + (selected.has(it.id) ? 'selected' : ''), onclick: (e) => pick(it, e) },
+      h('input.chk', { type: 'checkbox', checked: selected.has(it.id), 'aria-label': t('Select'), onclick: (e) => { e.stopPropagation(); pick(it, e, true); } }),
       h('div.when', h('b', fmtTime(it.time)), fmtDateShort(it.time)),
       h('div.what', h('b', freqLabel(it)), it.name ? h('span.name', it.name) : null, h('p', { class: tr && tr.text ? '' : 'none' }, text)),
       h('span.dur', fmtDuration(it.duration)),
@@ -153,6 +159,31 @@ export function recordingsView(root) {
       h('button.star', { class: it.favorite ? 'on' : '', title: t('Favorite'), onclick: (e) => { e.stopPropagation(); setFavorite([it.id], !it.favorite); } }, icon('star')));
     el.dataset.id = it.id;
     return el;
+  }
+
+  // Finder-style selection: click opens, Ctrl/Cmd+click toggles, Shift+click selects a range.
+  function pick(it, e, fromCheckbox = false) {
+    if (e.shiftKey && anchor) {
+      const a = items.findIndex((x) => x.id === anchor), b = items.findIndex((x) => x.id === it.id);
+      items.slice(Math.min(a, b), Math.max(a, b) + 1).forEach((x) => selected.add(x.id));
+    } else if (e.ctrlKey || e.metaKey || fromCheckbox) {
+      selected.has(it.id) ? selected.delete(it.id) : selected.add(it.id);
+      anchor = it.id;
+    } else {
+      selected.clear();
+      anchor = it.id;
+      open(it);
+    }
+    syncSelection();
+  }
+
+  function syncSelection() {
+    list.querySelectorAll('.rec').forEach((r) => {
+      const on = selected.has(r.dataset.id);
+      r.classList.toggle('selected', on);
+      r.querySelector('input').checked = on;
+    });
+    renderBulk();
   }
 
   function refreshRow(it) {
@@ -170,14 +201,13 @@ export function recordingsView(root) {
       h('button', { onclick: () => setFavorite([...selected], true) }, icon('star'), t('Favorite')),
       h('button', { onclick: () => transcribe([...selected]) }, icon('text'), t('Transcribe')),
       h('button.danger', { onclick: () => remove([...selected]) }, icon('trash'), t('Delete')),
-      h('button.ghost', { onclick: () => { selected.clear(); list.querySelectorAll('.rec input').forEach((c) => { c.checked = false; }); renderBulk(); } }, t('Clear'))));
+      h('button.ghost', { onclick: () => { selected.clear(); syncSelection(); } }, t('Clear'))));
   }
 
   async function selectAll() {
     const ids = await api.get('/api/library/ids' + qs(params()));
     ids.forEach((id) => selected.add(id));
-    list.querySelectorAll('.rec input').forEach((c) => { c.checked = true; });
-    renderBulk();
+    syncSelection();
   }
 
   // ---------------------------------------------------------- actions
@@ -216,7 +246,7 @@ export function recordingsView(root) {
   let peaks = [];
   const wave = h('canvas');
   const waveBox = h('div.wave', { onclick: (e) => { const r = waveBox.getBoundingClientRect(); if (audio.duration) audio.currentTime = ((e.clientX - r.left) / r.width) * audio.duration; } }, wave);
-  const playBtn = h('button.primary.icon', { onclick: () => (audio.paused ? audio.play() : audio.pause()) });
+  const playBtn = h('button.primary.icon', { title: t('Play or pause (Space)'), onclick: () => (audio.paused ? audio.play() : audio.pause()) });
   const timeText = h('span.mono.small.muted');
 
   function open(it, autoplay = true) {
@@ -297,28 +327,35 @@ export function recordingsView(root) {
         h('button.icon.ghost', { title: t('Close'), onclick: closePlayer }, icon('x'))),
       waveBox,
       h('div.row.wrap',
-        h('button.icon', { title: t('Previous'), onclick: () => step(-1) }, icon('prev')),
+        h('button.icon', { title: t('Previous'), 'aria-label': t('Previous'), onclick: () => step(-1) }, icon('prev')),
         playBtn,
-        h('button.icon', { title: t('Next'), onclick: () => step(1) }, icon('next')),
+        h('button.icon', { title: t('Next'), 'aria-label': t('Next'), onclick: () => step(1) }, icon('next')),
         timeText,
         h('span.spacer'),
-        it.manual ? null : h('button.ghost', { onclick: () => saveFrequency(it), title: t('Add this frequency to the Memory List') }, icon('plus'), t('Save frequency')),
-        h('button.ghost', { onclick: () => openMap(`https://www.flightradar24.com/${ymd}/${hm}/20x/${loc.home_lat},${loc.home_lon}/9`), title: t('Flight replay at this moment') }, h('img', { src: 'img/fr24.svg', alt: '', style: { width: '18px', height: '18px', background: '#1f2937', borderRadius: '4px', padding: '2px' } }), 'FR24'),
-        h('button.ghost', { onclick: () => openMap(`https://globe.adsbexchange.com/?replay=${ymd}-${hm}&lat=${loc.home_lat}&lon=${loc.home_lon}&zoom=8.8`), title: t('Flight replay at this moment') }, h('img', { src: 'img/adsbexchange.png', alt: '', style: { width: '16px', height: '16px' } }), 'ADSBx'),
-        h('a.btn.ghost', { href: `/api/recording?id=${encodeURIComponent(it.id)}&download=1`, title: t('Download') }, icon('download')),
-        h('button.icon.ghost.danger', { title: t('Delete'), onclick: () => remove([it.id]) }, icon('trash'))),
+        it.manual ? null : act(icon('plus'), t('Save frequency'), () => saveFrequency(it), t('Add this frequency to the Memory List')),
+        act(h('img', { src: 'img/fr24.svg', alt: '', style: { width: '18px', height: '18px', background: '#1f2937', borderRadius: '4px', padding: '2px' } }), 'FR24',
+          () => openMap(`https://www.flightradar24.com/${ymd}/${hm}/20x/${loc.home_lat},${loc.home_lon}/9`), t('Flight replay at this moment')),
+        act(h('img', { src: 'img/adsbexchange.png', alt: '', style: { width: '16px', height: '16px' } }), 'ADSBx',
+          () => openMap(`https://globe.adsbexchange.com/?replay=${ymd}-${hm}&lat=${loc.home_lat}&lon=${loc.home_lon}&zoom=8.8`), t('Flight replay at this moment')),
+        h('a.btn.ghost', { href: `/api/recording?id=${encodeURIComponent(it.id)}&download=1`, title: t('Download'), 'aria-label': t('Download') }, icon('download')),
+        h('button.icon.ghost.danger', { title: t('Delete'), 'aria-label': t('Delete'), onclick: () => remove([it.id]) }, icon('trash'))),
       h('div.col', { style: { gap: '8px' } },
-        h('div.row', h('h3', t('Transcript')),
+        h('div.row.wrap', h('h3', t('Transcript')),
           tr && tr.language && ['ok', 'low_confidence'].includes(tr.status) ? h('span.chip', LANGUAGE_NAMES[tr.language] || tr.language) : null,
           tr && tr.status === 'low_confidence' ? h('span.chip.warn', t('low confidence')) : null,
           tr && tr.engine === 'manual' ? h('span.chip', t('edited')) : null,
           h('span.spacer'),
-          h('button.ghost.small', { onclick: () => editTranscript(it) }, icon('edit'), t('Edit')),
+          act(icon('edit'), t('Edit'), () => editTranscript(it)),
           langSel,
-          h('button.ghost.small', { onclick: () => transcribe([it.id], langSel.value) }, icon('refresh'), tr ? t('Re-transcribe') : t('Transcribe'))),
+          act(icon('refresh'), tr ? t('Re-transcribe') : t('Transcribe'), () => transcribe([it.id], langSel.value))),
         textBox));
     updatePlayButton();
     requestAnimationFrame(drawWave);
+  }
+
+  // Icon + label; on phones only the icon shows (the label stays for screen readers and the tooltip).
+  function act(iconEl, label, onclick, title) {
+    return h('button.ghost', { onclick, title: title || label, 'aria-label': label }, iconEl, h('span.lbl', label));
   }
 
   function updatePlayButton() { mount(playBtn, icon(audio.paused ? 'play' : 'pause')); }
@@ -363,23 +400,39 @@ export function recordingsView(root) {
   audio.addEventListener('ended', () => { updatePlayButton(); if (F.autoNext) step(1); });
 
   const onKey = (e) => {
-    if (!current || ['INPUT', 'TEXTAREA', 'SELECT'].includes(document.activeElement.tagName)) return;
+    if (['INPUT', 'TEXTAREA', 'SELECT'].includes(document.activeElement.tagName) || document.querySelector('.modal-back')) return;
+    if (e.key === 'Delete' || e.key === 'Backspace') {
+      const ids = selected.size ? [...selected] : current ? [current.id] : [];
+      if (ids.length) { e.preventDefault(); remove(ids); }
+      return;
+    }
+    if (e.key === 'Escape' && selected.size) { selected.clear(); syncSelection(); return; }
+    if (e.key === 'a' && (e.ctrlKey || e.metaKey)) { e.preventDefault(); selectAll(); return; }
+    if (!current) return;
     if (e.key === ' ') { e.preventDefault(); audio.paused ? audio.play() : audio.pause(); }
     else if (e.key === 'ArrowDown' || e.key === 'j') { e.preventDefault(); step(1); }
     else if (e.key === 'ArrowUp' || e.key === 'k') { e.preventDefault(); step(-1); }
   };
   document.addEventListener('keydown', onKey);
 
-  // New recordings: refresh the first page when the user is browsing the newest ones.
-  let knownTotal = null;
+  // New recordings slide in at the top while the newest ones are shown -
+  // no reload, so scroll position, selection and the player stay put.
   const freshTimer = setInterval(async () => {
-    if (F.sort !== 'new' || items.length > PAGE || selected.size) return;
+    if (F.sort !== 'new' || loading || !lastRes || document.hidden) return;
     try {
-      const res = await api.get('/api/library' + qs(params({ limit: 1 })));
-      if (knownTotal !== null && res.total !== knownTotal && (!current || audio.paused)) { reload(); loadFacets(); }
-      knownTotal = res.total;
+      const res = await api.get('/api/library' + qs(params({ sort: 'new', limit: 40 })));
+      const known = new Set(items.map((x) => x.id));
+      const fresh = res.items.filter((x) => !known.has(x.id) && (!items.length || x.time > items[0].time));
+      if (!fresh.length) return;
+      if (!items.length) list.replaceChildren();
+      items.unshift(...fresh);
+      total = res.total;
+      lastRes = { ...lastRes, total_bytes: res.total_bytes, pending: res.pending };
+      [...fresh].reverse().forEach((x) => { const r = row(x); r.classList.add('fresh'); list.prepend(r); });
+      renderStatus();
+      loadFacets();
     } catch { /* offline */ }
-  }, 15000);
+  }, 4000);
 
   offs.push(on('settings', () => current && renderPlayer()));
   reload();

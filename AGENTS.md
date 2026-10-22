@@ -484,6 +484,19 @@ catalog loads; wrap them in a function called at point of use
     mode switch, and an `os.execv()` straight from a request handler would
     leave truncated recordings.
 
+42. **UI design follows the `apple-design` skill's HIG rules** (owner's
+    choice): appearance follows the system light/dark setting only — no
+    in-app theme switch (`dark-mode.md`: "Avoid offering an app-specific
+    appearance setting"); colors are the semantic tokens in `app.css`
+    (contrast figures in its header — recompute when changing one); touch
+    targets ≥44 px under `@media (pointer: coarse)`, kept **last** in the
+    file or component rules override it; icon-only buttons get their
+    `title` as `aria-label` (`core.js` `h()`). The amber COM-style
+    frequency display + spectrum ("instruments", always dark) is the one
+    signature element — keep the rest quiet. **Never give `.topbar` a
+    `backdrop-filter` on phones**: it becomes the containing block of the
+    `position: fixed` tab bar inside it, which then renders at the top.
+
 ## Testing without touching the user's real config/recordings
 
 Unit tests: `python -m unittest tests/test_core.py` (sets its own scratch

@@ -2268,3 +2268,15 @@ msgstr "Ustawienia ogólne we wszystkich pasmach"
 
 msgid "Restore general settings"
 msgstr "Przywróć ustawienia ogólne"
+
+msgid "Own value for this band"
+msgstr "Własna wartość dla tego pasma"
+
+msgid "Select"
+msgstr "Zaznacz"
+
+msgid "Language & listening"
+msgstr "Język i odsłuch"
+
+msgid "Play or pause (Space)"
+msgstr "Odtwórz / wstrzymaj (spacja)"
