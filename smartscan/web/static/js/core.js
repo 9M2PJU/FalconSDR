@@ -291,7 +291,7 @@ export function carrierHz(mhz) {
   const block = Math.floor(hz / 25000) * 25000, off = hz - block;
   if ([5000, 10000, 15000].includes(off)) return Math.round(block + (off / 5000 - 1) * 25000 / 3);
   const snapped = Math.round(block + Math.round(off / (25000 / 3)) * 25000 / 3);
-  return Math.abs(snapped - hz) <= 500 ? snapped : hz;
+  return Math.abs(snapped - hz) <= 1500 ? snapped : hz;  // 134.474 is 134.475, not a second channel
 }
 
 export function fmtDuration(sec) {

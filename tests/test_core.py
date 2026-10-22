@@ -140,6 +140,13 @@ class AirbandChannelTest(unittest.TestCase):
         self.assertEqual(airband_channel(121_500_000), "")         # guard stays 25 kHz
         self.assertEqual(airband_channel(148_750_000), "")         # not airband
 
+    def test_near_duplicate_airband_frequencies_snap_to_one_channel(self) -> None:
+        from smartscan.models import snap_airband_hz
+        self.assertEqual(snap_airband_hz(130_874_000), 130_875_000)
+        self.assertEqual(snap_airband_hz(135_966_000), 135_966_667)
+        self.assertEqual(snap_airband_hz(121_501_000), 121_501_000)  # guard untouched
+        self.assertEqual(snap_airband_hz(149_162_000), 149_162_000)  # not airband
+
     def test_ch833_round_trips_through_csv_row(self) -> None:
         from smartscan.models import Channel
         self.assertTrue(Channel.from_row(Channel(126_800_000, ch833=True).to_row()).ch833)

@@ -113,6 +113,17 @@ class BlacklistEntry:
 _GUARD_HZ = 121_500_000
 
 
+def snap_airband_hz(hz: float) -> int:
+    """An airband frequency within 1.5 kHz of the 8.33 raster -> that exact
+    carrier, so 130.874/130.875 or 134.474 are one channel, not two. Points are
+    8.33 kHz apart, so this never merges two real channels. Mirrors carrierHz()."""
+    if not 118e6 <= hz <= 137e6 or abs(hz - _GUARD_HZ) < 1500:
+        return int(round(hz))
+    block = (int(hz) // 25000) * 25000
+    snapped = block + round((hz - block) / (25000 / 3)) * 25000 / 3
+    return int(round(snapped)) if abs(snapped - hz) <= 1500 else int(round(hz))
+
+
 def airband_channel(hz: float, ch833: bool = False) -> str:
     """EU airband voice is 8.33 kHz-channelled: pilots dial a channel *name*
     (carrier 126.8000 = "126.805", 126.8083 = "126.810", 126.8167 =

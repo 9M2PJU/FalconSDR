@@ -23,7 +23,7 @@ from typing import Callable, Iterable, Optional
 
 from smartscan.config import AppConfig, atomic_write_text
 from smartscan.military_presets import get_all_presets
-from smartscan.models import airband_channel
+from smartscan.models import airband_channel, snap_airband_hz
 from smartscan.playback import stats
 from smartscan.playback.audio_analysis import analyze_wav, compute_waveform_peaks
 from smartscan.playback.config import APP_DATA_DIR, UTC_TZ
@@ -136,7 +136,7 @@ class Library:
             return None
         rec = Recording(
             path=path, dt_local=parsed.dt_local, dt_utc=parsed.dt_local.astimezone(UTC_TZ),
-            freq_khz=parsed.freq_khz, size=st.st_size,
+            freq_khz=round(snap_airband_hz(parsed.freq_khz * 1000) / 1000), size=st.st_size,
         )
         rec.key = f"{path}|{st.st_size}|{int(st.st_mtime)}"
         rec.quality = self.quality.get(rec.key)

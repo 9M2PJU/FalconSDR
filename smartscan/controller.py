@@ -23,7 +23,7 @@ import numpy as np
 from . import i18n, military_presets, storage
 from .audio_transcode import ffmpeg_available
 from .config import AppConfig, VfoRangeConfig, _from_dict
-from .models import BlacklistEntry, Channel, Modulation
+from .models import BlacklistEntry, Channel, Modulation, snap_airband_hz
 from .playback.index import Library
 from .playback.transcription_availability import is_transcription_installed
 from .scanner_engine import AUDIO_RATE, ScannerEngine
@@ -69,7 +69,7 @@ def merge_patch(obj: Any, patch: dict) -> None:
 def channel_from_dict(d: dict) -> Channel:
     mod = str(d.get("modulation", "AM"))
     return Channel(
-        freq_hz=int(d["freq_hz"]), name=str(d.get("name", "")),
+        freq_hz=snap_airband_hz(int(d["freq_hz"])), name=str(d.get("name", "")),
         modulation=Modulation(mod) if mod in Modulation._value2member_map_ else Modulation.AM,
         enabled=bool(d.get("enabled", True)), folder=str(d.get("folder", "")), weight=float(d.get("weight", 0.0)),
         ch833=bool(d.get("ch833", False)),
