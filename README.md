@@ -2,64 +2,202 @@
 
 <img src="packaging/icons/falconsdr.png" width="96" align="right" alt="">
 
-A wideband scanner for an RTL-SDR (or any SoapySDR receiver) that records
-**only the transmissions it actually stops on** - aircraft band ATC out of the
-box, but any band works (fire brigade, military UHF, repeaters…).
+A wideband radio scanner for SDR receivers that **records only the
+transmissions it actually stops on** - no hours of empty noise, no retuning
+clicks. Point it at any band (aviation, marine, PMR, ham repeaters, public
+services, military UHF…) and get a searchable library of conversations.
 
-- Scans up to ~2.4 MHz at once, so several conversations on different
-  frequencies are recorded at the same time.
-- Live listening, a spectrum and a frequency display in the browser - on the
-  computer itself or, in server mode, from any phone or PC on your network.
-- A recordings library with quality scores, search, favorites, statistics and
-  (optional) Whisper transcription that can run on another, faster computer.
-- Memory List of named channels, per-band settings, a blacklist.
-- EU airband 8.33 kHz channels are shown the way they are published
-  (126.805, not 126.800).
+It runs in your web browser: on the computer the SDR is plugged into, or as a
+headless receiver you listen to from any phone or PC on your network.
 
-## Install
+## Features
 
-**Ubuntu/Debian (.deb, nothing else needed):**
-`sudo apt install ./falconsdr_<version>_amd64.deb`, then start *FalconSDR*
-from the menu. Build it yourself with `packaging/linux-deb/build.sh`.
-Unplug and replug the dongle once after installing (the package adds a udev
-rule and keeps the DVB-T TV driver from grabbing it).
+**Scanning**
+- Wideband: the whole capture bandwidth of your SDR is analysed at once, so
+  several simultaneous conversations on different frequencies are caught and
+  recorded in parallel, not one after another.
+- Any number of bands (start, stop, step, modulation) plus a Memory List of
+  named single channels in folders. Ready-made presets for common bands.
+- Priority weights for bands and channels, and a short "recency boost" that
+  revisits a frequency right after it was active, to catch the reply.
+- Per-band overrides: trigger level, gain, hold time, squelch, noise
+  reduction.
+- Blacklist for carriers and interference, one click from the live view.
+- AM, NFM, WFM and SSB demodulation; software or hardware gain control.
 
-**From source (Linux/Windows/macOS):**
+**Listening**
+- Live audio in the browser, with a frequency display, signal level and a
+  live spectrum.
+- Skip, skip + blacklist, solo a single band, listen to a single frequency.
+- Works on phones, with play/pause/next controls on the lock screen and
+  headset.
+
+**Recording**
+- One file per transmission (WAV, or MP3 with ffmpeg), named by time and
+  frequency, with a configurable hold time to keep call and reply together.
+- Squelch, spectral noise reduction, a cap on simultaneous recordings.
+- Manual continuous recording and raw IQ capture (SigMF) when you need them.
+- Automatic cleanup by age or disk space, keeping favorites.
+
+**Recordings library**
+- Browse by frequency, band or language; search by frequency, channel name,
+  date or transcript text; filter by time and quality.
+- Every recording gets a quality score (signal-to-noise), a waveform and
+  click-to-seek playback with auto-advance.
+- Favorites, bulk delete/transcribe, keyboard shortcuts.
+- Statistics: busiest frequencies, activity by hour, weekday and day.
+- Optional speech-to-text with [Whisper](https://github.com/SYSTRAN/faster-whisper)
+  (installed from the app). It can run on a different, faster computer than
+  the one scanning.
+
+**Server and multiple computers**
+- `--server` mode for a small always-on receiver (Raspberry Pi-class Linux
+  box, mini PC, container).
+- Other computers connect to it to transcribe recordings with their GPU
+  and/or keep a verified local copy of the library.
+- Optional access password; English and Polish interface (more languages are
+  one translation file away).
+
+## Hardware
+
+| Receiver | How |
+|---|---|
+| RTL-SDR (incl. RTL-SDR Blog V3/V4) | built in on Linux, Windows and macOS |
+| HackRF, Airspy, SDRplay, LimeSDR, USRP, … | through [SoapySDR](https://github.com/pothosware/SoapySDR) with the matching module installed |
+
+Developed and tested with an **RTL-SDR Blog V4** on Linux. Nothing in the
+program is tied to it: the capture bandwidth is a setting (0.25-61.44 MHz),
+not a fixed 2.4 MHz, so a receiver with a wider band covers more channels per
+step. The practical limit is your CPU - every extra MHz is more data to
+process in real time.
+
+Any antenna works; one cut or tuned for the band you scan works much better.
+
+## Installation
+
+### Ubuntu / Debian - .deb package
+
+Download the `.deb` from [Releases](../../releases) and install it:
 
 ```
-python3 -m venv .venv && .venv/bin/pip install -r requirements.txt
-.venv/bin/python main.py            # opens http://127.0.0.1:8765
-.venv/bin/python main.py --server   # reachable from the whole network
+sudo apt install ./falconsdr_<version>_amd64.deb
 ```
 
-A headless receiver (e.g. a small Linux box with the dongle) is set up with
-`packaging/remote-server/install.sh` - see its README.
+Start **FalconSDR** from the application menu. Unplug and replug the dongle
+once after installing - the package adds a udev rule for USB access and stops
+the DVB-T TV driver from taking the dongle.
 
-## Getting good recordings
+This package is self-contained (RTL-SDR only, no Python needed). For SoapySDR
+devices or in-app transcription, run from source instead.
+
+### From source (Linux, Windows, macOS)
+
+Requires Python 3.10+.
+
+```
+git clone https://github.com/rafafunt/FalconSDR.git
+cd FalconSDR
+python3 -m venv .venv
+.venv/bin/pip install -r requirements.txt        # Windows: .venv\Scripts\pip ...
+.venv/bin/python main.py                          # Windows: .venv\Scripts\python main.py
+```
+
+The interface opens at `http://127.0.0.1:8765`.
+
+- **Linux:** for RTL-SDR access without root, install your distribution's
+  `rtl-sdr` package (udev rules) or copy `packaging/linux-deb/60-rtl-sdr.rules`
+  to `/etc/udev/rules.d/`. For SoapySDR devices install `python3-soapysdr` and
+  the device's `soapysdr-module-*`.
+- **Windows:** install the WinUSB driver for the dongle once with
+  [Zadig](https://zadig.akeo.ie/) (Options → List All Devices → "Bulk-In,
+  Interface (Interface 0)" → WinUSB).
+- **MP3 recordings** need `ffmpeg` on the PATH; without it recordings stay WAV.
+
+### Headless receiver
+
+On a Linux machine with the SDR attached:
+
+```
+sudo packaging/remote-server/install.sh
+sudo systemctl enable --now falconsdr-receiver
+```
+
+Then open `http://<receiver-ip>:8765` from any device. See
+[packaging/remote-server/README.md](packaging/remote-server/README.md).
+
+## First steps
+
+1. **Listen** page: pick your SDR, then add a band (or a preset) and press
+   Start.
+2. Raise or lower the **trigger level** until real transmissions open and
+   noise doesn't.
+3. Switch on **recording** when you're happy with what it stops on.
+4. Name the frequencies you hear in the **Channels** page (or straight from a
+   recording) - names show up everywhere, including search.
+
+## Tips for good recordings
 
 - **Trigger level** decides what counts as a transmission. Lower = weaker
   stations get recorded, but more noise too.
 - **Some frequencies are just a constant carrier or interference** (birdies
-  from your own computer, a nearby transmitter's harmonics, a dead carrier).
-  They trip the trigger all the time and keep you from lowering it. Add them
-  to the **blacklist** (Listen → *Skip + blacklist*, or Channels → Blacklist).
-  After that you can usually lower the trigger level by several dB and pick
-  up the weak stations you were missing.
-- **Gain** defaults to *Auto (software)*: the tuner's own hardware AGC tends
-  to overload on a strong nearby station.
+  from your own computer or USB hub, a nearby transmitter's harmonics, a dead
+  carrier). They trip the trigger all the time and keep you from lowering it.
+  Add them to the **blacklist** (Listen → *Skip + blacklist*, or Channels →
+  Blacklist). After that you can usually lower the trigger level by several
+  dB and pick up the weak stations you were missing.
+- **Gain** defaults to *Auto (software)*. The tuner's own hardware AGC tends
+  to overload on a strong nearby station, which shows up as false detections
+  on neighbouring channels.
 - **Hold after a transmission** (5 s by default) keeps a recording open
   through the pause between a call and its answer.
-- If the Activity feed says *the computer can't keep up with the SDR*, data
-  is being lost (short gaps in audio and recordings). A virtual machine with
-  USB passed through is a common cause - run it on the host instead.
+- A narrower **step** in a band means more channels to check per sweep; use
+  the channel spacing the band really uses.
+- If the Activity feed says *this computer can't keep up with the SDR*, data
+  is being lost (short gaps in audio and recordings): lower the capture
+  bandwidth, or move off a virtual machine - USB passed through to a VM is a
+  common cause.
 
-## Icon
+## Command line
 
-The one source is [`falconsdr/web/static/icon.svg`](falconsdr/web/static/icon.svg).
-`packaging/icons/make-icons.sh` renders `falconsdr.png` and the Windows
-`falconsdr.ico` from it.
+```
+main.py                 local mode: scan on this computer, UI on 127.0.0.1:8765
+main.py --server        reachable from the whole network
+main.py --start         start scanning right away
+main.py --local         scan locally even if this computer is set up as a client of a server
+main.py --port 9000     another port
+main.py --no-browser    don't open the browser
+```
+
+## Where things are stored
+
+| What | Where |
+|---|---|
+| Settings, channels, blacklist | `~/.config/FalconSDR/` |
+| Recordings (default, changeable) | `~/FalconSDR/recordings/`, one folder per day |
+| Quality scores, transcripts, favorites | `~/.local/share/atc_browser/` |
+
+(`~` is your home folder, also on Windows.)
+
+## Troubleshooting
+
+- **"Failed to connect… retrying"** - the SDR is missing, in use by another
+  program, lacks USB permissions (Linux: udev rule, replug) or has the wrong
+  driver (Windows: Zadig).
+- **Nothing gets recorded** - recording is off, the trigger level is too high,
+  or the band's modulation is wrong (aviation is AM, most other VHF/UHF voice
+  is NFM).
+- **Constant recordings of noise** - blacklist the offending frequencies (see
+  above) or raise the trigger level.
+- **Distorted audio on strong stations** - switch gain to *Auto (software)* or
+  lower the manual gain.
+
+## Legal
+
+Listening to or recording radio traffic is restricted in many countries (for
+example aviation, police and other non-public services). You are responsible
+for following the law where you use this program.
 
 ## License
 
-GPL-3.0-or-later (see `LICENSE`) - required by `pyrtlsdr` and the bundled
-`librtlsdr`.
+GPL-3.0-or-later (see [LICENSE](LICENSE)) - required by `pyrtlsdr` and the
+bundled `librtlsdr`.
