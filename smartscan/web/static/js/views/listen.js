@@ -1,6 +1,6 @@
 // "Listen": the live scanner - what's on air now, controls, spectrum, quick
 // settings, the scanned bands and the activity feed.
-import { airbandChannel, api, confirmDialog, errorToast, fmtMHz, formDialog, h, icon, mount, select, seg, slider, t, toast, toggle } from '../core.js';
+import { api, carrierHz, confirmDialog, errorToast, fmtChannel, fmtMHz, formDialog, h, icon, mount, select, seg, slider, t, toast, toggle } from '../core.js';
 import { liveAudio } from '../live-audio.js';
 import { S, cfg, confirmRecording, on, patchConfig, setFastPolling } from '../state.js';
 
@@ -120,14 +120,14 @@ export function listenView(root) {
     const [primary, ...rest] = live.frequencies || [];
     const active = live.state === 'SIGNAL_DETECTED' || live.state === 'LINGER';
     if (primary) {
-      mount(freqEl, fmtMHz(primary[0], 4), h('small', 'MHz'));
-      const ch = airbandChannel(primary[0]);
-      nameEl.textContent = [primary[1], ch && t('8.33 channel {c}', { c: ch })].filter(Boolean).join(' · ');
+      mount(freqEl, fmtChannel(primary[0]), h('small', 'MHz'));
+      freqEl.title = `${fmtMHz(primary[0], 4)} MHz`;  // the carrier, for the curious
+      nameEl.textContent = primary[1] || '';
     } else {
       mount(freqEl, '—');
       nameEl.textContent = live.running ? '' : t('Press Start to begin scanning');
     }
-    mount(others, active ? rest.map(([f, n]) => h('span.chip', h('b.mono', fmtMHz(f, 3)), n ? ` ${n}` : '')) : []);
+    mount(others, active ? rest.map(([f, n]) => h('span.chip', h('b.mono', fmtChannel(f)), n ? ` ${n}` : '')) : []);
     const pct = (v) => Math.max(0, Math.min(100, (v + 100)));
     meterFill.style.width = `${pct(live.level)}%`;
     const trig = live.spectrum ? live.spectrum.trigger : cfg().trigger_level_dbfs;
@@ -279,8 +279,8 @@ export function listenView(root) {
       { key: 'mod', label: t('Modulation'), type: 'select', value: 'AM', options: MODULATIONS.map((m) => [m, m]) },
     ], t('Add'));
     if (!v || !(v.freq > 0)) return;
-    const hz = Math.round(v.freq * 1e6);
-    cfg().bands.push(newBand({ label: v.label || `${v.freq.toFixed(3)} MHz`, start_hz: hz, stop_hz: hz, step_hz: 25000, modulation: v.mod }));
+    const hz = carrierHz(v.freq);
+    cfg().bands.push(newBand({ label: v.label || `${fmtChannel(hz)} MHz`, start_hz: hz, stop_hz: hz, step_hz: 25000, modulation: v.mod }));
     patchConfig({ bands: cfg().bands });
     renderBands();
   }

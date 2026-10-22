@@ -23,6 +23,7 @@ from typing import Callable, Iterable, Optional
 
 from smartscan.config import AppConfig, atomic_write_text
 from smartscan.military_presets import get_all_presets
+from smartscan.models import airband_channel
 from smartscan.playback import stats
 from smartscan.playback.audio_analysis import analyze_wav, compute_waveform_peaks
 from smartscan.playback.config import APP_DATA_DIR, UTC_TZ
@@ -212,7 +213,7 @@ class Library:
         blob = self._blobs.get(rel)
         if blob is None:
             blob = " ".join((
-                f"{rec.freq_khz / 1000:.3f}", names.get(rec.freq_khz, ""),
+                f"{rec.freq_khz / 1000:.3f}", airband_channel(rec.freq_khz * 1000), names.get(rec.freq_khz, ""),
                 rec.dt_local.strftime("%Y-%m-%d %H:%M:%S"), rec.dt_utc.strftime("%Y-%m-%d %H:%M"),
                 rec.path.name, rec.transcript_text,
             )).lower()

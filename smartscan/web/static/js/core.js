@@ -253,15 +253,32 @@ export const prefs = {
 export function fmtMHz(hz, digits = 4) { return (hz / 1e6).toFixed(digits); }
 export function fmtKhz(khz) { return (khz / 1000).toFixed(3); }
 
-// Airband (118-137 MHz) 8.33 kHz channel name - what AIP/charts publish - for
-// a carrier frequency: carrier 126.8000 is channel "126.805", 126.8083 is
-// "126.810", 126.8167 is "126.815". '' outside the airband or off the raster.
+// Airband (118-137 MHz) voice is 8.33 kHz-channelled in the EU: pilots dial a
+// channel *name* - carrier 126.8000 is "126.805", 126.8083 "126.810", 126.8167
+// "126.815". The 121.500 guard stays a 25 kHz channel. Mirrors models.airband_channel().
+const GUARD_HZ = 121_500_000;
 export function airbandChannel(hz) {
-  if (hz < 118e6 || hz > 137e6) return '';
+  if (hz < 118e6 || hz > 137e6 || Math.abs(hz - GUARD_HZ) < 500) return '';
   const block = Math.floor(hz / 25000) * 25000;
   const k = Math.round((hz - block) / (25000 / 3));
-  if (k > 2 || Math.abs(hz - block - k * 25000 / 3) > 400) return '';
+  if (k > 2 || Math.abs(hz - block - k * 25000 / 3) > 500) return '';
   return ((block + [5000, 10000, 15000][k]) / 1e6).toFixed(3);
+}
+
+// A single channel as people know it: the 8.33 channel name in the airband, MHz elsewhere.
+export function fmtChannel(hz, digits = 4) {
+  return airbandChannel(hz) || fmtMHz(hz, hz >= 118e6 && hz <= 137e6 ? 3 : digits);
+}
+
+// What someone types (a published 8.33 channel name like 126.805, or a carrier)
+// -> the exact carrier in Hz, snapped to the 8.33 raster in the airband.
+export function carrierHz(mhz) {
+  const hz = Math.round(mhz * 1e6);
+  if (hz < 118e6 || hz > 137e6 || Math.abs(hz - GUARD_HZ) < 500) return hz;
+  const block = Math.floor(hz / 25000) * 25000, off = hz - block;
+  if ([5000, 10000, 15000].includes(off)) return Math.round(block + (off / 5000 - 1) * 25000 / 3);
+  const snapped = Math.round(block + Math.round(off / (25000 / 3)) * 25000 / 3);
+  return Math.abs(snapped - hz) <= 500 ? snapped : hz;
 }
 
 export function fmtDuration(sec) {

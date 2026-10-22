@@ -130,6 +130,16 @@ class GridTest(unittest.TestCase):
             self.assertTrue(set(window.freqs) <= grid)
 
 
+class AirbandChannelTest(unittest.TestCase):
+    def test_carrier_to_published_channel_name(self) -> None:
+        from smartscan.models import airband_channel
+        self.assertEqual(airband_channel(126_800_000), "126.805")
+        self.assertEqual(airband_channel(126_808_333), "126.810")
+        self.assertEqual(airband_channel(126_817_000), "126.815")  # whole-kHz filename carrier (round(126816.667))
+        self.assertEqual(airband_channel(121_500_000), "")         # guard stays 25 kHz
+        self.assertEqual(airband_channel(148_750_000), "")         # not airband
+
+
 class SquelchTest(unittest.TestCase):
     def test_band_squelch_overrides_global_and_never_exceeds_trigger(self) -> None:
         from types import SimpleNamespace

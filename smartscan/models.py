@@ -104,3 +104,20 @@ class BlacklistEntry:
 
     def contains(self, freq_hz: int) -> bool:
         return abs(freq_hz - self.freq_hz) <= self.margin_hz
+
+
+_GUARD_HZ = 121_500_000
+
+
+def airband_channel(hz: float) -> str:
+    """EU airband voice is 8.33 kHz-channelled: pilots dial a channel *name*
+    (carrier 126.8000 = "126.805", 126.8083 = "126.810", 126.8167 =
+    "126.815"); the 121.500 guard stays 25 kHz. "" outside the airband or
+    off the raster. Mirrors airbandChannel() in web/static/js/core.js."""
+    if not 118e6 <= hz <= 137e6 or abs(hz - _GUARD_HZ) < 500:
+        return ""
+    block = (int(hz) // 25000) * 25000
+    k = round((hz - block) / (25000 / 3))
+    if k > 2 or abs(hz - block - k * 25000 / 3) > 500:
+        return ""
+    return f"{(block + (5000, 10000, 15000)[k]) / 1e6:.3f}"

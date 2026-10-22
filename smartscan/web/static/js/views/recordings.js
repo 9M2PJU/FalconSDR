@@ -2,7 +2,7 @@
 // search transcripts, play with a seekable waveform, edit transcripts, and
 // favorite/transcribe/delete one or many.
 import {
-  LANGUAGE_NAMES, airbandChannel, api, confirmDialog, debounce, errorToast, fmtBytes, fmtDate, fmtDateShort, fmtDuration, fmtKhz, fmtTime,
+  LANGUAGE_NAMES, api, carrierHz, fmtChannel, confirmDialog, debounce, errorToast, fmtBytes, fmtDate, fmtDateShort, fmtDuration, fmtKhz, fmtTime,
   formDialog, h, icon, modal, mount, prefs, qs, qualityBadge, select, seg, t, toast, toggle,
 } from '../core.js';
 import { S, cfg, on, patchConfig, saveChannels } from '../state.js';
@@ -18,7 +18,7 @@ function rangeSince(range) {
 }
 
 function freqLabel(item) {
-  return item.manual ? t('Manual recording') : `${fmtKhz(item.freq_khz)} MHz`;
+  return item.manual ? t('Manual recording') : `${fmtChannel(item.freq_khz * 1000)} MHz`;
 }
 
 export function transcriptStatus(tr, queued) {
@@ -129,7 +129,7 @@ export function recordingsView(root) {
   function renderFacets() {
     if (!facets) return;
     let rows = facets[F.mode].map((f) => {
-      if (F.mode === 'frequencies') return { ...f, label: f.freq_khz === 0 ? h('span', t('Manual recording')) : h('b', fmtKhz(f.freq_khz)), sub: f.name || '', text: `${fmtKhz(f.freq_khz)} ${f.name}`, sortv: f.freq_khz };
+      if (F.mode === 'frequencies') return { ...f, label: f.freq_khz === 0 ? h('span', t('Manual recording')) : h('b', fmtChannel(f.freq_khz * 1000)), sub: f.name || '', text: `${fmtChannel(f.freq_khz * 1000)} ${fmtKhz(f.freq_khz)} ${f.name}`, sortv: f.freq_khz };
       if (F.mode === 'bands') return { ...f, label: h('span', t(f.label)), sub: '', text: t(f.label), sortv: f.start_hz };
       return { ...f, label: h('span', f.language ? (LANGUAGE_NAMES[f.language] || f.language.toUpperCase()) : t('(no transcript)')), sub: '', text: f.language, sortv: f.language };
     });
@@ -325,8 +325,7 @@ export function recordingsView(root) {
     mount(player,
       h('div.row.wrap',
         h('div.grow',
-          h('div', h('b.mono', { style: { fontSize: '16px' } }, freqLabel(it)), it.name ? h('span.muted', ` · ${it.name}`) : null,
-            airbandChannel(it.freq_khz * 1000) ? h('span.muted', ` · ${t('8.33 channel {c}', { c: airbandChannel(it.freq_khz * 1000) })}`) : null),
+          h('div', h('b.mono', { style: { fontSize: '16px' } }, freqLabel(it)), it.name ? h('span.muted', ` · ${it.name}`) : null),
           h('div.small.muted', `${fmtDate(it.time)} ${fmtTime(it.time)}${prefs.utc ? ' UTC' : ''}`, ' · ', fmtDuration(it.duration),
             it.snr !== null ? ` · SNR ${it.snr} dB` : '')),
         qualityBadge(it.quality),
@@ -381,12 +380,12 @@ export function recordingsView(root) {
 
   async function saveFrequency(it) {
     const channels = S.settings.channels;
-    const hz = it.freq_khz * 1000;
+    const hz = carrierHz(it.freq_khz / 1000);  // filenames keep whole kHz; back onto the exact raster
     const existing = channels.find((c) => c.freq_hz === hz);
     const folders = [...new Set([...cfg().channel_folders, ...channels.map((c) => c.folder).filter(Boolean)])];
     const dl = h('datalist#folders', folders.map((f) => h('option', { value: f })));
     document.body.append(dl);
-    const v = await formDialog(t('Save {f} MHz', { f: fmtKhz(it.freq_khz) }), [
+    const v = await formDialog(t('Save {f} MHz', { f: fmtChannel(hz) }), [
       { key: 'name', label: t('Name'), value: existing ? existing.name : '', placeholder: t('e.g. Downtown Tower') },
       { key: 'folder', label: t('Folder'), value: existing ? existing.folder : '', list: 'folders' },
     ]);
@@ -449,7 +448,7 @@ export function recordingsView(root) {
     recordingNow.classList.toggle('hidden', !freqs.length);
     if (freqs.length) {
       mount(recordingNow, h('span.chip.bad.live', h('span.dot'), t('Recording now')),
-        freqs.map(([f, n]) => h('span.chip', h('b.mono', fmtKhz(Math.round(f / 1000))), n ? ` ${n}` : '')),
+        freqs.map(([f, n]) => h('span.chip', h('b.mono', fmtChannel(f)), n ? ` ${n}` : '')),
         h('span.muted', t('appears in the list when the transmission ends')));
     }
   };

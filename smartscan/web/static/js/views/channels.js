@@ -1,6 +1,6 @@
 // "Channels": the Memory List (named frequencies in folders, each with its
 // own modulation, priority weight and on/off) and the blacklist.
-import { confirmDialog, fmtMHz, formDialog, h, icon, mount, seg, t, toast } from '../core.js';
+import { carrierHz, confirmDialog, fmtChannel, fmtMHz, formDialog, h, icon, mount, seg, t, toast } from '../core.js';
 import { S, cfg, loadSettings, on, patchConfig, saveBlacklist, saveChannels } from '../state.js';
 
 const MODULATIONS = ['AM', 'NFM', 'WFM', 'SSB'];
@@ -28,16 +28,16 @@ export function channelsView(root) {
     const isNew = !ch;
     const fl = folders();
     const v = await formDialog(isNew ? t('Add channel') : t('Edit channel'), [
-      { key: 'freq', label: t('Frequency (MHz)'), type: 'number', value: ch ? (ch.freq_hz / 1e6).toFixed(4) : '' },
+      { key: 'freq', label: t('Frequency (MHz)'), type: 'number', value: ch ? fmtChannel(ch.freq_hz) : '', hint: t('Airband: type the channel as published, e.g. 126.805') },
       { key: 'name', label: t('Name'), value: ch ? ch.name : '', placeholder: t('e.g. Downtown Tower') },
       { key: 'mod', label: t('Modulation'), type: 'select', value: ch ? ch.modulation : 'AM', options: MODULATIONS.map((m) => [m, m]) },
       { key: 'folder', label: t('Folder'), type: 'select', value: ch ? ch.folder : '', options: [['', t('(no folder)')], ...fl.map((f) => [f, f])] },
       { key: 'weight', label: t('Priority weight'), type: 'number', value: ch ? ch.weight : 0, hint: t('0 = normal. Higher = checked more often.') },
     ], isNew ? t('Add') : t('Save'));
     if (!v || !(v.freq > 0)) return;
-    const hz = Math.round(v.freq * 1e6);
+    const hz = carrierHz(v.freq);
     const channels = S.settings.channels;
-    if (channels.some((c) => c.freq_hz === hz && c !== ch)) { toast(t('{f} MHz is already in the list', { f: fmtMHz(hz, 4) }), 'bad'); return; }
+    if (channels.some((c) => c.freq_hz === hz && c !== ch)) { toast(t('{f} MHz is already in the list', { f: fmtChannel(hz) }), 'bad'); return; }
     const data = { freq_hz: hz, name: v.name.trim(), modulation: v.mod, folder: v.folder, weight: v.weight || 0 };
     if (isNew) channels.push({ ...data, enabled: true }); else Object.assign(ch, data);
     await saveChannels(channels);
@@ -88,7 +88,7 @@ export function channelsView(root) {
     const save = () => saveChannels(S.settings.channels);
     return h('tr',
       h('td', h('label.switch', h('input', { type: 'checkbox', checked: ch.enabled, title: t('Scan this channel'), onchange: (e) => { ch.enabled = e.target.checked; save(); } }))),
-      h('td.mono', fmtMHz(ch.freq_hz, 4)),
+      h('td.mono', { title: `${fmtMHz(ch.freq_hz, 4)} MHz` }, fmtChannel(ch.freq_hz)),
       h('td', ch.name || h('span.faint', t('(unnamed)'))),
       h('td', h('span.chip', ch.modulation)),
       h('td', h('input', { type: 'number', min: 0, max: 20, step: 0.5, value: ch.weight, style: { width: '74px' }, title: t('Priority weight'), onchange: (e) => { ch.weight = +e.target.value || 0; save(); } })),
@@ -96,7 +96,7 @@ export function channelsView(root) {
         h('button.icon.ghost', { title: t('Edit'), onclick: () => editChannel(ch) }, icon('edit')),
         h('button.icon.ghost', {
           title: t('Delete'), onclick: async () => {
-            if (!(await confirmDialog(t('Delete channel'), t('Delete {f} MHz {name}?', { f: fmtMHz(ch.freq_hz, 4), name: ch.name }), t('Delete'), true))) return;
+            if (!(await confirmDialog(t('Delete channel'), t('Delete {f} MHz {name}?', { f: fmtChannel(ch.freq_hz), name: ch.name }), t('Delete'), true))) return;
             await saveChannels(S.settings.channels.filter((c) => c !== ch));
             render();
           },
@@ -105,7 +105,7 @@ export function channelsView(root) {
 
   function memory() {
     const q = query.trim().toLowerCase();
-    const match = (c) => !q || `${fmtMHz(c.freq_hz, 4)} ${c.name} ${c.modulation} ${c.folder}`.toLowerCase().includes(q);
+    const match = (c) => !q || `${fmtChannel(c.freq_hz)} ${fmtMHz(c.freq_hz, 4)} ${c.name} ${c.modulation} ${c.folder}`.toLowerCase().includes(q);
     const channels = S.settings.channels.filter(match).sort((a, b) => a.freq_hz - b.freq_hz);
     const groups = [['', channels.filter((c) => !c.folder)], ...folders().map((f) => [f, channels.filter((c) => c.folder === f)])];
     const search = h('input', { type: 'search', placeholder: t('Search frequency, name, folder…'), value: query, oninput: (e) => { query = e.target.value; const pos = e.target.selectionStart; render(); const el = body.querySelector('input[type=search]'); el.focus(); el.setSelectionRange(pos, pos); } });
@@ -152,13 +152,13 @@ export function channelsView(root) {
       { key: 'label', label: t('Description'), value: '' },
     ], t('Add'));
     if (!v || !(v.freq > 0)) return;
-    await saveBlacklist([...S.settings.blacklist, { freq_hz: Math.round(v.freq * 1e6), margin_hz: Math.round((v.margin || 0) * 1000), label: v.label.trim(), date_added: new Date().toISOString().slice(0, 10) }]);
+    await saveBlacklist([...S.settings.blacklist, { freq_hz: carrierHz(v.freq), margin_hz: Math.round((v.margin || 0) * 1000), label: v.label.trim(), date_added: new Date().toISOString().slice(0, 10) }]);
     render();
   }
 
   function blacklist() {
     const q = bq.trim().toLowerCase();
-    const list = S.settings.blacklist.filter((b) => !q || `${fmtMHz(b.freq_hz, 4)} ${b.label} ${b.date_added}`.toLowerCase().includes(q)).sort((a, b) => a.freq_hz - b.freq_hz);
+    const list = S.settings.blacklist.filter((b) => !q || `${fmtChannel(b.freq_hz)} ${fmtMHz(b.freq_hz, 4)} ${b.label} ${b.date_added}`.toLowerCase().includes(q)).sort((a, b) => a.freq_hz - b.freq_hz);
     const search = h('input', { type: 'search', placeholder: t('Search blacklist…'), value: bq, oninput: (e) => { bq = e.target.value; render(); const el = body.querySelector('input[type=search]'); el.focus(); } });
     return h('section.card',
       h('div.row.wrap', h('div.grow', search), h('button.primary', { onclick: addBlacklist }, icon('plus'), t('Add'))),
@@ -167,7 +167,7 @@ export function channelsView(root) {
         ? h('div.table-wrap', h('table',
           h('thead', h('tr', h('th', t('MHz')), h('th', t('Margin')), h('th', t('Description')), h('th', t('Added')), h('th', ''))),
           h('tbody', list.map((b) => h('tr',
-            h('td.mono', fmtMHz(b.freq_hz, 4)),
+            h('td.mono', fmtChannel(b.freq_hz)),
             h('td.mono', `±${(b.margin_hz / 1000).toFixed(1)} kHz`),
             h('td', b.label === 'Auto-lockout (SKIP)' ? t('Skipped from the Listen page') : b.label),
             h('td.mono.small', b.date_added),

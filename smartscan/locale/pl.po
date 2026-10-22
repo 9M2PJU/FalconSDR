@@ -2295,3 +2295,6 @@ msgstr "pojawi się na liście po zakończeniu transmisji"
 
 msgid "8.33 channel {c}"
 msgstr "nazwa w siatce 8,33: {c}"
+
+msgid "Airband: type the channel as published, e.g. 126.805"
+msgstr "Pasmo lotnicze: wpisz kanał tak jak w AIP, np. 126.805"

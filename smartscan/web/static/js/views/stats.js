@@ -1,5 +1,5 @@
 // "Statistics": what was heard, when and how well.
-import { api, errorToast, fmtAgo, fmtDate, fmtDuration, fmtKhz, h, mount, prefs, qs, qualityBadge, t, toggle } from '../core.js';
+import { api, errorToast, fmtAgo, fmtChannel, fmtDate, fmtDuration, h, mount, prefs, qs, qualityBadge, t, toggle } from '../core.js';
 
 export function statsView(root) {
   const body = h('div.col', { style: { gap: '16px' } }, h('div.empty', t('Loading…')));
@@ -32,7 +32,7 @@ export function statsView(root) {
         h('div.kpi', h('span', t('Total time')), h('b', fmtDuration(sum.duration))),
         h('div.kpi', h('span', t('Frequencies')), h('b', sum.frequencies.toLocaleString())),
         h('div.kpi', h('span', t('Average quality')), h('b', Math.round(sum.quality))),
-        h('div.kpi', h('span', t('Busiest')), h('b', sum.busiest ? fmtKhz(sum.busiest) : '–'), h('small', 'MHz')),
+        h('div.kpi', h('span', t('Busiest')), h('b', sum.busiest ? fmtChannel(sum.busiest * 1000) : '–'), h('small', 'MHz')),
         h('div.kpi', h('span', t('Date range')), h('b', { style: { fontSize: '14px' } }, `${fmtDate(sum.from)} – ${fmtDate(sum.to)}`))),
       h('div.grid.two',
         bars(s.per_hour.map(([, c]) => c), s.per_hour.map(([hr]) => String(hr)), t('By hour of day')),
@@ -46,7 +46,7 @@ export function statsView(root) {
             style: { cursor: 'pointer' },
             onclick: () => { sessionStorage.setItem('openFreq', `freq:${f.freq_khz}`); location.hash = '#/recordings'; },
           },
-          h('td.mono', f.freq_khz ? fmtKhz(f.freq_khz) : t('Manual recording')),
+          h('td.mono', f.freq_khz ? fmtChannel(f.freq_khz * 1000) : t('Manual recording')),
           h('td', f.name || h('span.faint', '–')),
           h('td.num', f.count.toLocaleString()),
           h('td', qualityBadge(f.quality)),
