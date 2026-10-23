@@ -121,7 +121,7 @@ the scanner actually stops on. Self-contained bundle in /opt/$PKG.
 /usr/share/applications/falconsdr.desktop
 /usr/share/icons/hicolor/scalable/apps/falconsdr.svg
 /usr/share/doc/$PKG/
-%{_udevrulesdir}/60-rtl-sdr.rules
+/usr/lib/udev/rules.d/60-rtl-sdr.rules
 /etc/modprobe.d/blacklist-rtl-dvb.conf
 
 %post
