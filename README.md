@@ -83,6 +83,19 @@ Any antenna works; one cut or tuned for the band you scan works much better.
 
 ## Installation
 
+### One-line installer (Linux)
+
+Detects your distribution and installs the matching package:
+
+```
+curl -fsSL https://raw.githubusercontent.com/rafafunt/FalconSDR/master/packaging/install.sh | bash
+```
+
+Debian/Ubuntu get the `.deb`, Fedora/RHEL/openSUSE the `.rpm`, Arch the
+AUR package, anything else the AppImage. `packaging/install.sh
+--from-source` installs from a git checkout instead (the SoapySDR-capable
+path for HackRF/LimeSDR/Airspy/... - not in the packaged builds).
+
 ### Ubuntu / Debian - .deb package
 
 Download the `.deb` from [Releases](../../releases) and install it:
@@ -97,6 +110,41 @@ the DVB-T TV driver from taking the dongle.
 
 This package is self-contained (RTL-SDR only, no Python needed). For SoapySDR
 devices, run from source instead.
+
+### Fedora / RHEL / openSUSE - .rpm package
+
+Download the `.rpm` from [Releases](../../releases) and install it:
+
+```
+sudo dnf install ./falconsdr-<version>-1.<arch>.rpm
+```
+
+Same self-contained bundle and the same udev/DVB-T handling as the `.deb`;
+replug the dongle once after installing.
+
+### Arch Linux - AUR
+
+```
+yay -S falconsdr
+```
+
+(repackages the official release build; maintained by
+[@9M2PJU](https://github.com/9M2PJU)).
+
+### Any distribution - AppImage
+
+Download `FalconSDR-<version>-<arch>.AppImage` from
+[Releases](../../releases), make it executable and run it - no install, no
+root:
+
+```
+chmod +x FalconSDR-*.AppImage
+./FalconSDR-*.AppImage
+```
+
+One manual step on a machine with no RTL-SDR software installed yet: copy
+`packaging/linux-deb/60-rtl-sdr.rules` to `/etc/udev/rules.d/`, reload udev
+and replug the dongle (the `.deb`/`.rpm` do this for you).
 
 ### Windows - installer or portable ZIP
 
