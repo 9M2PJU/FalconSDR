@@ -15,7 +15,6 @@ headless receiver you listen to from any phone or PC on your network.
 
 ![Listen page: frequency display, live spectrum and waterfall, receiver settings](docs/screenshot-listen.png)
 
-![Statistics: activity by hour and day, busiest frequencies](docs/screenshot-statistics.png)
 
 ## Features
 
