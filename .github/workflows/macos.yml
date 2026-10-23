@@ -1,0 +1,63 @@
+# Experimental macOS build: GitHub's macOS runners build FalconSDR.app from a
+# release tag, run its self-test and attach the zipped app to that release.
+# Unsigned (no Apple Developer account) and untested on a real Mac with an
+# SDR - hence "experimental". Run it from the Actions tab: "Run workflow".
+name: macOS build (experimental)
+
+on:
+  workflow_dispatch:
+    inputs:
+      tag:
+        description: Release tag to build and attach the app to
+        required: true
+        default: v0.9.0
+
+permissions:
+  contents: write
+
+jobs:
+  build:
+    strategy:
+      fail-fast: false
+      matrix:
+        include:
+          - runner: macos-14        # Apple Silicon
+            arch: arm64
+          - runner: macos-15-intel  # Intel
+            arch: x86_64
+    runs-on: ${{ matrix.runner }}
+    steps:
+      - uses: actions/checkout@v4
+        with:
+          ref: ${{ inputs.tag }}
+      - uses: actions/setup-python@v5
+        with:
+          python-version: "3.12"
+      - name: Build FalconSDR.app
+        # Same bundling rules as packaging/linux-deb/build.sh (AGENTS.md gotcha 35/43).
+        run: |
+          python -m venv venv
+          venv/bin/pip install -q -r requirements.txt pyinstaller pillow
+          echo "VERSION=$(sed -n 's/^__version__ = "\(.*\)"/\1/p' falconsdr/__init__.py)" >> "$GITHUB_ENV"
+          venv/bin/pyinstaller --name FalconSDR --windowed --onedir --noconfirm \
+            --icon packaging/icons/falconsdr.png --osx-bundle-identifier app.falconsdr \
+            --add-data falconsdr/locale/pl.po:falconsdr/locale \
+            --add-data falconsdr/presets/band_presets.json:falconsdr/presets \
+            --add-data falconsdr/web/static:falconsdr/web/static \
+            --collect-data tzdata --collect-data pyrtlsdrlib \
+            --collect-data imageio_ffmpeg --collect-all pip \
+            main.py
+      - name: Self-test of the built app
+        run: |
+          set +e
+          dist/FalconSDR.app/Contents/MacOS/FalconSDR --self-test
+          rc=$?
+          cat ~/.config/FalconSDR/falconsdr.log 2>/dev/null
+          exit $rc
+      - name: Attach to the release
+        env:
+          GH_TOKEN: ${{ github.token }}
+        run: |
+          zip_name="FalconSDR-$VERSION-macos-${{ matrix.arch }}-experimental.zip"
+          ditto -c -k --keepParent dist/FalconSDR.app "$zip_name"
+          gh release upload "${{ inputs.tag }}" "$zip_name" --clobber
