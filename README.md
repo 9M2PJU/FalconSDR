@@ -77,8 +77,8 @@ headless receiver you listen to from any phone or PC on your network.
 | HackRF, Airspy, SDRplay, LimeSDR, USRP, … | through [SoapySDR](https://github.com/pothosware/SoapySDR) with the matching module installed |
 
 Developed and tested with an **RTL-SDR Blog V4** on Linux and Windows 11.
-Other receivers and macOS should work but haven't been tested yet - reports
-are welcome.
+Other receivers and macOS (experimental builds) should work but haven't been
+tested yet - reports are welcome.
 
 Any antenna works; one cut or tuned for the band you scan works much better.
 
@@ -120,6 +120,26 @@ steps are in the app (Listen → SDR device).
 
 FalconSDR runs in the background with its interface in the browser; quit it
 in Settings → Advanced. "Start with the system" is there too (off by default).
+
+### macOS - experimental
+
+Download `FalconSDR-<version>-macos-arm64-experimental.zip` (Apple Silicon:
+M1 and newer) or `…-macos-x86_64-…` (Intel Macs) from
+[Releases](../../releases), unzip it and move **FalconSDR** to Applications.
+These builds are made automatically and pass the same self-test as the other
+packages, but haven't been tried on a real Mac with an SDR yet - feedback in
+[Discussions](../../discussions) is very welcome.
+
+The app isn't signed by Apple. The first time, right-click it → **Open**
+(or System Settings → Privacy & Security → **Open Anyway**). If macOS says
+the app "is damaged", that's the same missing signature; clear the download
+flag in Terminal:
+
+```
+xattr -dr com.apple.quarantine /Applications/FalconSDR.app
+```
+
+An RTL-SDR needs no extra driver on macOS.
 
 ### From source (Linux, Windows, macOS)
 
