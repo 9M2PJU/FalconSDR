@@ -118,6 +118,13 @@ install_rpm() {
 }
 
 install_aur() {
+  # The AUR package repackages the official x86_64 .deb (PKGBUILD:
+  # arch=('x86_64')) - anything else (e.g. Arch ARM on a Raspberry Pi)
+  # has no binary to repackage.
+  if [ "$(uname -m)" != "x86_64" ]; then
+    say "CPU architecture '$(uname -m)' is not covered by the AUR package (x86_64 only)."
+    from_source_hint; exit 1
+  fi
   if command -v yay >/dev/null 2>&1; then yay -S --noconfirm falconsdr
   elif command -v paru >/dev/null 2>&1; then paru -S --noconfirm falconsdr
   else
