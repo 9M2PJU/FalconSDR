@@ -108,7 +108,15 @@ Summary:        Wideband SDR ATC/radio scanner (self-contained build)
 License:        GPL-3.0-or-later
 URL:            https://github.com/rafafunt/FalconSDR
 BuildArch:      $ARCH
-Requires:       systemd-udev
+# /opt/falconsdr ships its own bundled .so files (Python, numpy, ...):
+# rpm's automatic dependency scan would pick those up as system
+# requirements (e.g. libuuid-...so.1.3.0(UUID_1.0)) that no distro
+# provides, making the package uninstallable. The bundle needs nothing
+# from the system beyond glibc + udev, so both directions are off.
+AutoReqProv:    no
+# File-based requirement: Fedora ships udevadm in systemd-udev, openSUSE
+# in udev - a package-name Require would only fit one of them.
+Requires:       /usr/bin/udevadm
 Recommends:     ffmpeg
 
 %description

@@ -14,8 +14,16 @@ BuildRequires:  systemd-rpm-macros
 # Runtime: self-contained /opt bundle, RTL-SDR only. ffmpeg is optional
 # (MP3 output falls back to the bundled imageio-ffmpeg binary, system one wins).
 Recommends:     ffmpeg
-Requires:       systemd-udev
-Requires(post): systemd-udev
+# /opt/falconsdr ships its own bundled .so files (Python, numpy, ...):
+# rpm's automatic dependency scan would pick those up as system
+# requirements (e.g. libuuid-...so.1.3.0(UUID_1.0)) that no distro
+# provides, making the package uninstallable. The bundle needs nothing
+# from the system beyond glibc + udev, so both directions are off.
+AutoReqProv:    no
+# File-based requirement: Fedora ships udevadm in systemd-udev, openSUSE
+# in udev - a package-name Require would only fit one of them.
+Requires:       /usr/bin/udevadm
+Requires(post): /usr/bin/udevadm
 
 %description
 Scans a radio band via RTL-SDR and records audio only for transmissions

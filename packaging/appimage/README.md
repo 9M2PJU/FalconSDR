@@ -36,11 +36,23 @@ UI in the browser (http://127.0.0.1:8765) like every other build.
 
 ## Building it
 
-Needs `appimagetool` on PATH plus python3/pip:
+Needs `appimagetool` on PATH plus python3/pip and appimagetool's own
+dependencies `file` and `binutils`:
 
 ```
 packaging/appimage/build.sh
 ```
+
+For a file other people will run, build it in Docker:
+
+```
+packaging/appimage/build-in-docker.sh
+```
+
+That runs `build.sh` inside Debian 11 (glibc 2.31), so the AppImage
+starts on Debian 11+, Ubuntu 20.04+, Fedora 41, Arch and newer - the
+same glibc-floor trick as `packaging/linux-deb/build-in-docker.sh`.
+`./build.sh` alone is fine for your own machine.
 
 Builds in a **throwaway venv** (`packaging/appimage/build-venv/`,
 gitignored) - never the project's own `.venv`. Output:

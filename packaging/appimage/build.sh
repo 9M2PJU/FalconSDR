@@ -14,8 +14,8 @@
 # the project's own .venv) so nothing from an existing dev environment
 # leaks into the bundle by accident.
 #
-# Needs: python3, pip, and `appimagetool` on PATH
-# (https://github.com/AppImage/appimagetool/releases).
+# Needs: python3, pip, `appimagetool` on PATH, plus `file` and
+# `binutils` (appimagetool's own dependencies for inspecting binaries).
 #
 # What this build does NOT include, on purpose (same tradeoff as the .deb):
 #   - SoapySDR support - RTL-SDR via the bundled pyrtlsdrlib native backend
@@ -42,6 +42,14 @@ echo "arch:      $ARCH"
 
 command -v appimagetool >/dev/null 2>&1 || {
   echo "appimagetool not found on PATH (https://github.com/AppImage/appimagetool/releases)" >&2
+  exit 1
+}
+command -v file >/dev/null 2>&1 || {
+  echo "need 'file' (appimagetool dependency: apt install file / dnf install file)" >&2
+  exit 1
+}
+command -v objcopy >/dev/null 2>&1 || {
+  echo "need 'binutils' (appimagetool dependency: apt install binutils / dnf install binutils)" >&2
   exit 1
 }
 

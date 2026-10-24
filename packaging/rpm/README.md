@@ -38,8 +38,11 @@ For a package other people will install, build it in Docker:
 packaging/rpm/build-in-docker.sh
 ```
 
-That runs `build.sh` inside Fedora 41, so the bundle's glibc floor is
-documented. `./build.sh` alone is fine for your own machine.
+That runs `build.sh` inside Fedora 41, so the bundle needs glibc 2.38+.
+That covers current Fedora and openSUSE Tumbleweed; RHEL/Rocky 9
+(glibc 2.34) are too old for this build - install from source there
+instead (see the main README). `./build.sh` alone is fine for your own
+machine.
 
 Builds in a **throwaway venv** (`packaging/rpm/build-venv/`, gitignored) -
 never the project's own `.venv`. Output:

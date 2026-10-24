@@ -91,10 +91,13 @@ Detects your distribution and installs the matching package:
 curl -fsSL https://raw.githubusercontent.com/rafafunt/FalconSDR/master/packaging/install.sh | bash
 ```
 
-Debian/Ubuntu get the `.deb`, Fedora/RHEL/openSUSE the `.rpm`, Arch the
-AUR package, anything else the AppImage. `packaging/install.sh
+Debian/Ubuntu get the `.deb`, Fedora/openSUSE the `.rpm`, Arch the
+AUR package, anything else (glibc-based, x86_64/aarch64) the AppImage.
+`packaging/install.sh
 --from-source` installs from a git checkout instead (the SoapySDR-capable
-path for HackRF/LimeSDR/Airspy/... - not in the packaged builds).
+path for HackRF/LimeSDR/Airspy/... - not in the packaged builds; also
+the fallback for other CPU architectures, musl-based distros such as
+Alpine, and releases whose asset for your format isn't published yet).
 
 ### Ubuntu / Debian - .deb package
 
@@ -111,7 +114,7 @@ the DVB-T TV driver from taking the dongle.
 This package is self-contained (RTL-SDR only, no Python needed). For SoapySDR
 devices, run from source instead.
 
-### Fedora / RHEL / openSUSE - .rpm package
+### Fedora / openSUSE - .rpm package
 
 Download the `.rpm` from [Releases](../../releases) and install it:
 
@@ -120,7 +123,9 @@ sudo dnf install ./falconsdr-<version>-1.<arch>.rpm
 ```
 
 Same self-contained bundle and the same udev/DVB-T handling as the `.deb`;
-replug the dongle once after installing.
+replug the dongle once after installing. Needs glibc 2.38+ (current
+Fedora / openSUSE Tumbleweed); RHEL/Rocky 9 are too old for this build -
+run from source there instead.
 
 ### Arch Linux - AUR
 

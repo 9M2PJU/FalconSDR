@@ -5,11 +5,15 @@
 #
 # Picks the right artifact for the machine it runs on:
 #   - Debian/Ubuntu  -> official .deb from GitHub Releases
-#   - Fedora/RHEL/openSUSE -> official .rpm from GitHub Releases
+#   - Fedora/openSUSE -> official .rpm from GitHub Releases
 #   - Arch/CachyOS   -> AUR package `falconsdr` (yay/paru/pacman+makepkg fallback)
-#   - anything else  -> the AppImage from GitHub Releases (no root needed)
+#   - anything else (glibc-based, x86_64/aarch64) -> the AppImage from
+#     GitHub Releases (no root needed)
 #   - `--from-source` -> pip install from a git checkout instead (SoapySDR
-#     hardware: HackRF/LimeSDR/Airspy/... - not in the packaged builds)
+#     hardware: HackRF/LimeSDR/Airspy/... - not in the packaged builds;
+#     also the fallback for unsupported CPU architectures, musl-based
+#     distros such as Alpine (the AppImage needs glibc and won't run
+#     there), and releases that don't publish the matching asset yet)
 #
 # After installing, unplug and replug the RTL-SDR dongle once (udev rule),
 # then run `falconsdr` - the UI opens at http://127.0.0.1:8765.
@@ -23,6 +27,50 @@ for a in "$@"; do [ "$a" = "--from-source" ] && FROM_SOURCE=1; done
 say() { printf '%s\n' "$*"; }
 die() { printf 'error: %s\n' "$*" >&2; exit 1; }
 need() { command -v "$1" >/dev/null 2>&1 || die "need '$1' (install it first)"; }
+
+from_source_hint() {
+  cat >&2 <<EOF
+No prebuilt package fits this machine - install from source instead:
+  curl -fsSL https://raw.githubusercontent.com/$REPO/master/packaging/install.sh | bash -s -- --from-source
+(That path also supports SoapySDR hardware: HackRF/LimeSDR/Airspy/...)
+EOF
+}
+
+# Only x86_64 and aarch64 have prebuilt assets. Anything else (e.g. a
+# 32-bit ARM Raspberry Pi OS) must go --from-source rather than
+# downloading a wrong-architecture .deb/.rpm.
+check_arch() {
+  case "$(uname -m)" in
+    x86_64|aarch64) ;;
+    *) say "CPU architecture '$(uname -m)' has no prebuilt package."; from_source_hint; exit 1;;
+  esac
+}
+
+# The AppImage (like the .deb/.rpm bundles) is built against glibc and
+# won't run on musl-based distros such as Alpine.
+is_musl() {
+  [ -f /etc/alpine-release ] && return 0
+  ldd --version 2>&1 | grep -qi musl && return 0
+  return 1
+}
+
+# Curl wrapper that turns a missing release asset (404: the release
+# doesn't publish that file yet) into a pointer at --from-source
+# instead of a bare "curl: (22) 404".
+fetch_asset() {
+  url="$1"; out="$2"
+  if ! curl -fsSL -o "$out" "$url"; then
+    cat >&2 <<EOF
+error: download failed:
+  $url
+That release asset may not exist (yet) - not every release publishes
+every artifact (.deb/.rpm/AppImage). Check what's actually attached at
+https://github.com/$REPO/releases, or install from source instead:
+  curl -fsSL https://raw.githubusercontent.com/$REPO/master/packaging/install.sh | bash -s -- --from-source
+EOF
+    exit 1
+  fi
+}
 
 release_tag() {
   # Resolves "latest" to e.g. v0.9.0 via the GitHub API; a pinned
@@ -40,10 +88,16 @@ have_pacman() { command -v pacman >/dev/null 2>&1; }
 
 install_deb() {
   tag="$1"
+  check_arch
+  case "$(uname -m)" in
+    x86_64) deb_arch=amd64;;
+    aarch64) deb_arch=arm64;;
+  esac
   tmp="$(mktemp -d)"; trap 'rm -rf "$tmp"' EXIT INT TERM
   say "Downloading FalconSDR $tag (.deb)..."
-  curl -fsSL -o "$tmp/falconsdr.deb" \
-    "https://github.com/$REPO/releases/download/$tag/falconsdr_${tag#v}_amd64.deb"
+  fetch_asset \
+    "https://github.com/$REPO/releases/download/$tag/falconsdr_${tag#v}_${deb_arch}.deb" \
+    "$tmp/falconsdr.deb"
   say "Installing (sudo apt install)..."
   sudo apt-get update -qq
   sudo apt install -y "$tmp/falconsdr.deb"
@@ -51,11 +105,13 @@ install_deb() {
 
 install_rpm() {
   tag="$1"; ver="${tag#v}"
-  tmp="$(mktemp -d)"; trap 'rm -rf "$tmp"' EXIT INT TERM
+  check_arch
   arch="$(uname -m)"
+  tmp="$(mktemp -d)"; trap 'rm -rf "$tmp"' EXIT INT TERM
   say "Downloading FalconSDR $tag (.rpm)..."
-  curl -fsSL -o "$tmp/falconsdr.rpm" \
-    "https://github.com/$REPO/releases/download/$tag/falconsdr-${ver}-1.${arch}.rpm"
+  fetch_asset \
+    "https://github.com/$REPO/releases/download/$tag/falconsdr-${ver}-1.${arch}.rpm" \
+    "$tmp/falconsdr.rpm"
   if have_dnf; then sudo dnf install -y "$tmp/falconsdr.rpm"
   elif have_zypper; then sudo zypper --no-confirm install "$tmp/falconsdr.rpm"
   else sudo rpm -i "$tmp/falconsdr.rpm"; fi
@@ -75,12 +131,14 @@ install_aur() {
 
 install_appimage() {
   tag="$1"
+  check_arch
   arch="$(uname -m)"
   dest="${FALCONSDR_APPIMAGE:-$HOME/Applications/FalconSDR-${tag}-${arch}.AppImage}"
   mkdir -p "$(dirname "$dest")"
   say "Downloading FalconSDR $tag (AppImage)..."
-  curl -fsSL -o "$dest" \
-    "https://github.com/$REPO/releases/download/$tag/FalconSDR-${tag#v}-${arch}.AppImage"
+  fetch_asset \
+    "https://github.com/$REPO/releases/download/$tag/FalconSDR-${tag#v}-${arch}.AppImage" \
+    "$dest"
   chmod +x "$dest"
   say "AppImage saved to $dest"
   if [ "$(id -u)" = "0" ]; then :
@@ -115,6 +173,13 @@ EOF
 
 main() {
   if [ "$FROM_SOURCE" = "1" ]; then install_from_source; return; fi
+  # No prebuilt bundle runs here: musl-based distros (Alpine, ...) can't
+  # execute the glibc-linked AppImage, and there is no musl asset.
+  if is_musl; then
+    say "musl-based distribution detected - the AppImage needs glibc and won't run here."
+    from_source_hint; exit 1
+  fi
+  check_arch
   if have_apt; then install_deb "$(release_tag)"
   elif have_dnf || have_zypper; then install_rpm "$(release_tag)"
   elif have_pacman; then install_aur
